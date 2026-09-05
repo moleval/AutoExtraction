@@ -9,18 +9,25 @@
 ;; Загрузка общих библиотек, если они ещё не загружены.
 ;; ------------------------------------------------------------
 
-(defun fasonka-load-common ( / root files f)
-  (setq root (vl-filename-directory (or (findfile "fasonka.lsp") "")))
-  (if root
+(defun fasonka-load-common ( / fasonka-file tasks-root project-root files f)
+  ;; fasonka.lsp находится в TASKS, а common — соседний каталог
+  ;; на уровне корня проекта.
+  (setq fasonka-file (findfile "fasonka.lsp"))
+
+  (if fasonka-file
     (progn
+      (setq tasks-root (vl-filename-directory fasonka-file))
+      (setq project-root (vl-filename-directory tasks-root))
+
       (setq files
         (list
-          (strcat root "\\common\\task-utils.lsp")
-          (strcat root "\\common\\layer-utils.lsp")
-          (strcat root "\\common\\excel-utils.lsp")
-          (strcat root "\\common\\table-utils.lsp")
+          (strcat project-root "\\common\\task-utils.lsp")
+          (strcat project-root "\\common\\layer-utils.lsp")
+          (strcat project-root "\\common\\excel-utils.lsp")
+          (strcat project-root "\\common\\table-utils.lsp")
         )
       )
+
       (foreach f files
         (if (findfile f)
           (load f)
@@ -426,7 +433,8 @@
             (if (or (null group-name)
                     (/= (strcase group-name)
                         (strcase name)))
-              (setq group-name name)
+              (setq group-name name
+                    row 0)
             )
 
             (setq row (1+ row)
@@ -550,7 +558,8 @@
             (if (or (null group-name)
                     (/= (strcase group-name)
                         (strcase name)))
-              (setq group-name name)
+              (setq group-name name
+                    row 0)
             )
 
             (setq row (1+ row)

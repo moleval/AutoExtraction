@@ -155,7 +155,8 @@
           )
         )
         (setq group-name name
-              group-first row)
+              group-first row
+              idx 0)
       )
     )
 

@@ -21,38 +21,33 @@
 ;; Загрузка модулей из каталога dispatcher.lsp
 ;; ------------------------------------------------------------
 
-(defun dispatcher-load-module (file / root path)
-  (setq root (vl-filename-directory (or (findfile "dispatcher.lsp") "")))
-  (if root
-    (progn
-      (setq path (strcat root "\\" file))
-      (if (findfile path)
-        (load path)
-        nil
-      )
-    )
+(defun dispatcher-load-module (path)
+  (if (and path (findfile path))
+    (load path)
     nil
   )
 )
 
-(defun dispatcher-load-all ( / root files f)
-  (setq root
-    (vl-filename-directory
-      (or (findfile "dispatcher.lsp") "")
-    )
-  )
+(defun dispatcher-load-all ( / dispatcher-file tasks-root project-root files f)
+  ;; dispatcher.lsp находится в TASKS, а common — соседний каталог
+  ;; на уровне корня проекта.
+  (setq dispatcher-file (findfile "dispatcher.lsp"))
 
-  (if root
+  (if dispatcher-file
     (progn
+      (setq tasks-root (vl-filename-directory dispatcher-file))
+      (setq project-root (vl-filename-directory tasks-root))
+
       (setq files
         (list
-          "common\\task-utils.lsp"
-          "common\\layer-utils.lsp"
-          "common\\excel-utils.lsp"
-          "common\\table-utils.lsp"
-          "fasonka.lsp"
+          (strcat project-root "\\common\\task-utils.lsp")
+          (strcat project-root "\\common\\layer-utils.lsp")
+          (strcat project-root "\\common\\excel-utils.lsp")
+          (strcat project-root "\\common\\table-utils.lsp")
+          (strcat tasks-root "\\fasonka.lsp")
         )
       )
+
       (foreach f files
         (dispatcher-load-module f)
       )
