@@ -1,0 +1,15 @@
+# AutoCAD temporary / lock / backup files
+*.dwl
+*.dwl2
+*.bak
+*.sv$
+*.ac$
+*.tmp
+*.log
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# VS Code local workspace files
+*.code-workspace
