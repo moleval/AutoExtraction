@@ -1,5 +1,5 @@
 ;;; ============================================================
-;;; dispatcher.lsp  (самодостаточная версия, без fboundp)
+;;; dispatcher.lsp  (версия с тремя отдельными фильтрами)
 ;;; Команды: TASKDISPATCHER, TASKS
 ;;; ============================================================
 (vl-load-com)
@@ -10,10 +10,12 @@
 (setq *DISPATCHER-VISIBLE-LAYERS* nil)
 (setq *DISPATCHER-SELECTED-LAYERS* nil)
 (setq *DISPATCHER-SELECTED-INDICES* nil)
-(setq *DISPATCHER-GROUP-FILTER* nil)
+(setq *DISPATCHER-FILTER-FACADES* nil)   ; Фасады
+(setq *DISPATCHER-FILTER-VITRAZH* nil)   ; Витражи
+(setq *DISPATCHER-FILTER-FONAR* nil)     ; Фонарь 3D
 (setq *DISPATCHER-TASK-ID* 'FASONKA)
 (setq *DISPATCHER-REPORT-MODE* "DETAIL")
-(setq *DISPATCHER-EXPORT-EXCEL* T)
+(setq *DISPATCHER-EXPORT-EXCEL* nil)
 (setq *DISPATCHER-EXPORT-TXT* nil)
 (setq *DISPATCHER-CREATE-TABLE* T)
 (setq *DISPATCHER-ACTION* 'CANCEL)
@@ -127,15 +129,40 @@
   )
 )
 
-(defun dispatcher-rebuild-layer-list ( / restore i selected item vis)
+;; Новая функция: получение слоёв из выбранных фильтров по ключевым словам
+(defun dispatcher-filter-layers-by-keywords (keywords / filters result f fname)
+  (setq filters (vl-catch-all-apply 'tu-group-filter-names-and-layers '()))
+  (if (vl-catch-all-error-p filters) (setq filters nil))
+  (setq result '())
+  (if (listp filters)
+    (foreach f filters
+      (setq fname (car f))
+      (if (and (= (type fname) 'STR)
+               (vl-some '(lambda (k)
+                           (and (= (type k) 'STR)
+                                (vl-string-search (strcase k) (strcase fname))))
+                        keywords))
+        (setq result (append result (cadr f)))
+      )
+    )
+  )
+  (dsp-unique-ci result)
+)
+
+(defun dispatcher-rebuild-layer-list ( / restore vis keywords selected i item)
   (setq restore (dispatcher-selected-names))
   (setq *DISPATCHER-SELECTED-INDICES* '())
 
-  (if *DISPATCHER-GROUP-FILTER*
+  ;; Собираем ключевые слова на основе включённых чекбоксов
+  (setq keywords '())
+  (if *DISPATCHER-FILTER-FACADES* (setq keywords (cons "фасад" keywords)))
+  (if *DISPATCHER-FILTER-VITRAZH* (setq keywords (cons "витраж" keywords)))
+  (if *DISPATCHER-FILTER-FONAR*   (setq keywords (cons "фонар" keywords)))
+
+  (if keywords ; если хотя бы один фильтр включён
     (progn
-      ;; без fboundp: пробуем вызвать и ловим ошибку
-      (setq vis (vl-catch-all-apply 'tu-filtered-layer-names '()))
-      (if (or (vl-catch-all-error-p vis) (null vis) (/= (type vis) 'LIST))
+      (setq vis (dispatcher-filter-layers-by-keywords keywords))
+      (if (or (null vis) (not (listp vis)))
         (setq vis *DISPATCHER-ALL-LAYERS*)
       )
       (setq *DISPATCHER-VISIBLE-LAYERS* vis)
@@ -143,15 +170,21 @@
     (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
   )
 
+  ;; Очистка от нестрок и сортировка по алфавиту (без учёта регистра)
   (setq *DISPATCHER-VISIBLE-LAYERS*
-    (vl-remove-if-not '(lambda (x) (= (type x) 'STR))
-                      (if (listp *DISPATCHER-VISIBLE-LAYERS*) *DISPATCHER-VISIBLE-LAYERS* '()))
+    (vl-sort
+      (vl-remove-if-not '(lambda (x) (= (type x) 'STR))
+                        (if (listp *DISPATCHER-VISIBLE-LAYERS*) *DISPATCHER-VISIBLE-LAYERS* '()))
+      '(lambda (a b) (< (strcase a) (strcase b)))
+    )
   )
 
+  ;; Обновляем list_box
   (start_list "lst_layers")
   (mapcar 'add_list *DISPATCHER-VISIBLE-LAYERS*)
   (end_list)
 
+  ;; Восстановление выбора
   (setq i 0)
   (foreach item *DISPATCHER-VISIBLE-LAYERS*
     (if (vl-some '(lambda (x) (and (= (type x) 'STR) (= (type item) 'STR)
@@ -187,7 +220,7 @@
   T
 )
 
-;; ---------- Диспетчер (без fboundp) ----------
+;; ---------- Диспетчер ----------
 (defun run-task (task-id layers report-mode export-excel export-txt create-table save-base / r)
   (cond
     ((eq task-id 'FASONKA)
@@ -229,11 +262,20 @@
 (defun dispatcher-close  () (setq *DISPATCHER-ACTION* 'CANCEL) (done_dialog 0))
 (defun dispatcher-nest1d () (setq *DISPATCHER-ACTION* 'NEST1D) (done_dialog 1))
 (defun dispatcher-nest2d () (setq *DISPATCHER-ACTION* 'NEST2D) (done_dialog 1))
-(defun dispatcher-group-filter ()
-  (setq *DISPATCHER-SELECTED-LAYERS* (dispatcher-selected-names))
-  (setq *DISPATCHER-GROUP-FILTER* (= (get_tile "chk_group_filter") "1"))
+
+(defun dispatcher-filter-facades ()
+  (setq *DISPATCHER-FILTER-FACADES* (= (get_tile "chk_filter_facades") "1"))
   (dispatcher-rebuild-layer-list)
 )
+(defun dispatcher-filter-vitrazh ()
+  (setq *DISPATCHER-FILTER-VITRAZH* (= (get_tile "chk_filter_vitrazh") "1"))
+  (dispatcher-rebuild-layer-list)
+)
+(defun dispatcher-filter-fonar ()
+  (setq *DISPATCHER-FILTER-FONAR* (= (get_tile "chk_filter_fonar") "1"))
+  (dispatcher-rebuild-layer-list)
+)
+
 (defun dispatcher-layer-selection ()
   (setq *DISPATCHER-SELECTED-LAYERS* (dispatcher-selected-names))
 )
@@ -254,7 +296,9 @@
       (setq *DISPATCHER-ALL-LAYERS* (dsp-layer-names))
       (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
       (setq *DISPATCHER-SELECTED-LAYERS* nil)
-      (setq *DISPATCHER-GROUP-FILTER* nil)
+      (setq *DISPATCHER-FILTER-FACADES* nil)
+      (setq *DISPATCHER-FILTER-VITRAZH* nil)
+      (setq *DISPATCHER-FILTER-FONAR* nil)
       (setq *DISPATCHER-TASK-ID* 'FASONKA)
       (setq *DISPATCHER-REPORT-MODE* "DETAIL")
       (setq *DISPATCHER-EXPORT-EXCEL* T)
@@ -270,10 +314,12 @@
             (progn
               (set_tile "rb_detail" "1")
               (set_tile "rb_summary" "0")
-              (set_tile "chk_xls" "1")
+              (set_tile "chk_xls" "0")
               (set_tile "chk_txt" "0")
               (set_tile "chk_acad" "1")
-              (set_tile "chk_group_filter" "0")
+              (set_tile "chk_filter_facades" "0")
+              (set_tile "chk_filter_vitrazh" "0")
+              (set_tile "chk_filter_fonar" "0")
               (set_tile "rb_task_fasonka" "1")
               (mode_tile "rb_task_subsystem" 1)
               (mode_tile "rb_task_cladding" 1)
@@ -289,7 +335,9 @@
               (action_tile "btn_close"  "(dispatcher-close)")
               (action_tile "btn_nest1d" "(dispatcher-nest1d)")
               (action_tile "btn_nest2d" "(dispatcher-nest2d)")
-              (action_tile "chk_group_filter" "(dispatcher-group-filter)")
+              (action_tile "chk_filter_facades" "(dispatcher-filter-facades)")
+              (action_tile "chk_filter_vitrazh" "(dispatcher-filter-vitrazh)")
+              (action_tile "chk_filter_fonar"   "(dispatcher-filter-fonar)")
               (action_tile "lst_layers" "(dispatcher-layer-selection)")
               (action_tile "rb_detail"  "(setq *DISPATCHER-REPORT-MODE* \"DETAIL\")")
               (action_tile "rb_summary" "(setq *DISPATCHER-REPORT-MODE* \"SUMMARY\")")

@@ -10,7 +10,12 @@ task_dispatcher : dialog {
 
   : spacer { height = 0.3; }
 
-  : toggle { key = "chk_group_filter"; label = "Групповой фильтр Фасад/Витражи/Фонари"; }
+: row {
+  alignment = left;
+  : toggle { key = "chk_filter_facades"; label = "Фасады"; }
+  : toggle { key = "chk_filter_vitrazh";  label = "Витражи"; }
+  : toggle { key = "chk_filter_fonar";    label = "Фонарь 3D"; }
+}
 
   : spacer { height = 0.2; }
 

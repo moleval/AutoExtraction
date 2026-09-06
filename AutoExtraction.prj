@@ -1,0 +1,24 @@
+;;; VLisp project file [V2.0] AutoExtraction saved to:[d:\AutoExtraction] at:[06.09.2026]
+(VLISP-PROJECT-LIST 
+  :NAME
+  AutoExtraction
+  :OWN-LIST
+  ("d:/AutoExtraction/TASKS/dispatcher" 
+    "d:/AutoExtraction/TASKS/fasonka"
+    "d:/AutoExtraction/TASKS/nest1ds"
+    "d:/AutoExtraction/TASKS/tst"
+    "d:/AutoExtraction/common/excel-utils"
+    "d:/AutoExtraction/common/layer-utils"
+    "d:/AutoExtraction/common/table-utils"
+    "d:/AutoExtraction/common/task-utils"
+  )
+  :FAS-DIRECTORY
+  nil
+  :TMP-DIRECTORY
+  nil
+  :PROJECT-KEYS
+  (:BUILD (:standard))
+  :CONTEXT-ID
+  :AUTOLISP
+)
+;;; EOF

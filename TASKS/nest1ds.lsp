@@ -1,29 +1,59 @@
 ;;; ============================================================
 ;;; NEST1DS.LSP — раскрой хлыстов по выбранным элементам
 ;;; Команда: NEST1DS
+;;; Поддержка: LWPOLYLINE, POLYLINE, LINE, ARC, ELLIPSE, SPLINE, MLINE
+;;; Алгоритм: First-Fit Decreasing (FFD)
 ;;; ============================================================
 (vl-load-com)
 
 ;; ---------- развернуть (длина, кол-во) в список длин, по убыванию ----------
-(defun n1-expand (pieces / out rec len cnt)
-  (setq out '())
-  (foreach rec pieces
-    (setq len (car rec))
-    (setq cnt (cadr rec))
-    (if (and (numberp cnt) (> (fix cnt) 0))
-      (progn
-        (setq cnt (fix cnt))
-        (repeat cnt
-          (setq out (cons len out))
-        )
-      )
+;; ВАЖНО: не сортируем итоговый список с дубликатами.
+;; Сначала сортируем ГРУППЫ по длине, затем разворачиваем каждую группу.
+(defun n1-expand (pieces / sorted-groups out rec len cnt i)
+  ;; 1. Сортируем группы по убыванию длины
+  (setq sorted-groups
+    (vl-sort
+      pieces
+      '(lambda (a b)
+         (> (car a) (car b))
+       )
     )
   )
-  (setq out (vl-sort out '(lambda (a b) (> a b))))
-  (princ (strcat "\n[n1-expand] развёрнуто: " (itoa (length out))))
+
+  ;; 2. Разворачиваем каждую группу в нужное количество отрезков
+  (setq out '())
+
+  (foreach rec sorted-groups
+    (setq len (car rec))
+    (setq cnt (fix (cadr rec)))
+
+    (princ
+      (strcat
+        "\n[n1-expand] группа: "
+        (rtos len 2 0)
+        " x "
+        (itoa cnt)
+      )
+    )
+
+    (setq i 0)
+    (while (< i cnt)
+      (setq out (append out (list len)))
+      (setq i (1+ i))
+    )
+  )
+
+  (princ
+    (strcat
+      "\n[n1-expand] ИТОГО развёрнуто: "
+      (itoa (length out))
+    )
+  )
+
   out
 )
 
+;; ---------- замена n-го элемента списка ----------
 (defun n1-replace-nth (lst idx new / i out)
   (setq i 0 out '())
   (foreach x lst
@@ -36,6 +66,7 @@
   out
 )
 
+;; ---------- FFD: список хлыстов (остаток отр1 отр2 ...) ----------
 (defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar)
   (setq bars '())
   (foreach p sorted-pieces
@@ -60,6 +91,7 @@
   bars
 )
 
+;; ---------- длина мультилинии (MLINE) ----------
 (defun n1-mline-length (ent / obj numEl copyObj arr safe sub elen total)
   (setq numEl (cdr (assoc 72 (entget ent))))
   (if (or (null numEl) (< numEl 1)) (setq numEl 1))
@@ -67,14 +99,19 @@
   (setq copyObj (vla-Copy obj))
   (setq arr (vl-catch-all-apply 'vla-Explode (list copyObj)))
   (if (vl-catch-all-error-p arr)
-    (progn (vl-catch-all-apply 'vla-Delete (list copyObj)) nil)
+    (progn
+      (vl-catch-all-apply 'vla-Delete (list copyObj))
+      nil
+    )
     (progn
       (setq safe (vlax-safearray->list (vlax-variant-value arr)))
       (setq total 0.0)
       (foreach sub safe
-        (setq elen (vl-catch-all-apply 'vlax-curve-getDistAtParam
-                    (list (vlax-vla-object->ename sub)
-                          (vlax-curve-getEndParam (vlax-vla-object->ename sub)))))
+        (setq elen
+          (vl-catch-all-apply
+            'vlax-curve-getDistAtParam
+            (list (vlax-vla-object->ename sub)
+                  (vlax-curve-getEndParam (vlax-vla-object->ename sub)))))
         (if (numberp elen) (setq total (+ total elen)))
         (vl-catch-all-apply 'vla-Delete (list sub))
       )
@@ -83,6 +120,7 @@
   )
 )
 
+;; ---------- добавить ключ в группы ----------
 (defun n1-add-group (groups key / found)
   (setq found (assoc key groups))
   (if found
@@ -91,6 +129,7 @@
   )
 )
 
+;; ---------- извлечение длин с группировкой и диагностикой ----------
 (defun n1-extract-pieces (ss tol / i ent typ len key pieces total measured skipped)
   (setq pieces '())
   (setq i 0)
@@ -120,12 +159,14 @@
   (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x))) (reverse pieces))
 )
 
+;; ---------- список длин в строку ----------
 (defun n1-list-to-str (lst / s x)
   (setq s "")
   (foreach x lst (setq s (strcat s (if (= s "") "" " ") (rtos x 2 0))))
   s
 )
 
+;; ---------- графические примитивы ----------
 (defun n1-draw-line (p1 p2)
   (entmake (list '(0 . "LINE")
                  (cons 10 (list (car p1) (cadr p1) 0.0))
@@ -145,6 +186,7 @@
                  (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
 
+;; ---------- визуализация раскроя ----------
 (defun n1-draw-layout (bars stock kerf insPt / barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util curx p halfw str)
   (setq barHeight (/ stock 30.0))
   (setq gap (* barHeight 0.7))
@@ -186,6 +228,7 @@
   (list (list x0 miny) (list (+ x0 stock) maxy))
 )
 
+;; ---------- отчёт в командную строку ----------
 (defun n1-report (bars stock kerf / i bar pieces waste used util)
   (princ (strcat "\nВсего хлыстов: " (itoa (length bars))))
   (setq i 0)
@@ -201,6 +244,7 @@
   (princ)
 )
 
+;; ---------- экспорт в CSV ----------
 (defun n1-write-csv (bars stock kerf / fname f i bar pieces waste used util)
   (setq fname (strcat (getvar "DWGPREFIX") "nest1ds_result.csv"))
   (setq f (open fname "w"))
@@ -223,6 +267,7 @@
   )
 )
 
+;; ---------- главная команда ----------
 (defun c:NEST1DS ( / ss tol stock kerf insPt pieces sorted bars bbox dbg-cnt p1 p2)
   (princ "\n=== РАСКРОЙ ХЛЫСТОВ ПО ВЫБРАННЫМ ЭЛЕМЕНТАМ ===")
   (princ "\nВыберите полилинии/линии - будущие отрезки:")
