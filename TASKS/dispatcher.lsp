@@ -1,14 +1,15 @@
 ;;; ============================================================
-;;; dispatcher.lsp
-;;; ÐžÐºÐ½Ð¾ Ð·Ð°Ð¿ÑƒÑÐºÐ° Ð·Ð°Ð´Ð°Ñ‡ + ÐµÐ´Ð¸Ð½Ñ‹Ð¹ Ð´Ð¸ÑÐ¿ÐµÑ‚Ñ‡ÐµÑ€ run-task
+;;; dispatcher.lsp  (ñàìîäîñòàòî÷íàÿ âåðñèÿ, áåç fboundp)
+;;; Êîìàíäû: TASKDISPATCHER, TASKS
 ;;; ============================================================
-
 (vl-load-com)
 
+;; ---------- Ãëîáàëüíîå ñîñòîÿíèå ----------
 (setq *DISPATCHER-DCL-ID* nil)
 (setq *DISPATCHER-ALL-LAYERS* nil)
 (setq *DISPATCHER-VISIBLE-LAYERS* nil)
 (setq *DISPATCHER-SELECTED-LAYERS* nil)
+(setq *DISPATCHER-SELECTED-INDICES* nil)
 (setq *DISPATCHER-GROUP-FILTER* nil)
 (setq *DISPATCHER-TASK-ID* 'FASONKA)
 (setq *DISPATCHER-REPORT-MODE* "DETAIL")
@@ -17,164 +18,134 @@
 (setq *DISPATCHER-CREATE-TABLE* T)
 (setq *DISPATCHER-ACTION* 'CANCEL)
 
-;; ------------------------------------------------------------
-;; Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð¼Ð¾Ð´ÑƒÐ»ÐµÐ¹ Ð¸Ð· ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³Ð° dispatcher.lsp
-;; ------------------------------------------------------------
-
-(defun dispatcher-load-module (path)
-  (if (and path (findfile path))
-    (load path)
-    nil
-  )
-)
-
-(defun dispatcher-load-all ( / dispatcher-file tasks-root project-root files f)
-  ;; dispatcher.lsp Ð½Ð°Ñ…Ð¾Ð´Ð¸Ñ‚ÑÑ Ð² TASKS, Ð° common â€” ÑÐ¾ÑÐµÐ´Ð½Ð¸Ð¹ ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³
-  ;; Ð½Ð° ÑƒÑ€Ð¾Ð²Ð½Ðµ ÐºÐ¾Ñ€Ð½Ñ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð°.
-  (setq dispatcher-file (findfile "dispatcher.lsp"))
-
-  (if dispatcher-file
-    (progn
-      (setq tasks-root (vl-filename-directory dispatcher-file))
-      (setq project-root (vl-filename-directory tasks-root))
-
-      (setq files
-        (list
-          (strcat project-root "\\common\\task-utils.lsp")
-          (strcat project-root "\\common\\layer-utils.lsp")
-          (strcat project-root "\\common\\excel-utils.lsp")
-          (strcat project-root "\\common\\table-utils.lsp")
-          (strcat tasks-root "\\fasonka.lsp")
-        )
-      )
-
-      (foreach f files
-        (dispatcher-load-module f)
-      )
-    )
-  )
-)
-
-;; ------------------------------------------------------------
-;; ÐŸÑ€ÐµÐ¾Ð±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¸Ð½Ð´ÐµÐºÑÐ¾Ð² DCL list_box Ð² ÑÐ¿Ð¸ÑÐ¾Ðº Ð¸Ð½Ð´ÐµÐºÑÐ¾Ð²
-;; ------------------------------------------------------------
-
-(defun dispatcher-parse-indices (s / x)
-  (if (and s (/= s ""))
-    (progn
-      (setq x (read (strcat "(" s ")")))
-      (if (= (type x) 'LIST)
-        x
-        nil
-      )
-    )
-    nil
-  )
-)
-
-(defun dispatcher-selected-names ( / s indices out i)
-  (setq s (get_tile "lst_layers"))
-  (setq indices (dispatcher-parse-indices s))
+;; ---------- Áåçîïàñíîå ïîëó÷åíèå ñïèñêà ñëî¸â ----------
+(defun dsp-unique-ci (lst / out x key)
   (setq out '())
-
-  (foreach i indices
-    (if (and (>= i 0)
-             (< i (length *DISPATCHER-VISIBLE-LAYERS*)))
-      (setq out
-        (cons
-          (nth i *DISPATCHER-VISIBLE-LAYERS*)
-          out
-        )
-      )
-    )
-  )
-
-  (tu-sort-strings-ci
-    (tu-list-unique-ci out)
-  )
-)
-
-;; ------------------------------------------------------------
-;; Ð—Ð°Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ðµ list_box
-;; ------------------------------------------------------------
-
-(defun dispatcher-fill-layer-list
-       (layers restore-names / i item selected)
-  (setq *DISPATCHER-VISIBLE-LAYERS* layers)
-
-  (start_list "lst_layers")
-  (mapcar 'add_list layers)
-  (end_list)
-
-  ;; Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð°Ð²Ð»Ð¸Ð²Ð°ÐµÐ¼ Ð²Ñ‹Ð±Ð¾Ñ€ Ð¿Ð¾ Ð¸Ð¼ÐµÐ½Ð°Ð¼.
-  (setq i 0)
-  (foreach item layers
-    (setq selected nil)
-
-    (foreach name restore-names
-      (if (= (strcase name) (strcase item))
-        (setq selected T)
-      )
-    )
-
-    (if selected
-      (setq
-        ;; DCL set_tile Ð´Ð»Ñ list_box Ñ multiple_select Ð¿Ñ€Ð¸Ð½Ð¸Ð¼Ð°ÐµÑ‚
-        ;; ÑÑ‚Ñ€Ð¾ÐºÑƒ Ð¸Ð½Ð´ÐµÐºÑÐ¾Ð². Ð¡Ð¾Ð±ÐµÑ€Ñ‘Ð¼ ÐµÑ‘ Ð½Ð¸Ð¶Ðµ.
-        *DISPATCHER-SELECTED-INDICES*
-        (cons i *DISPATCHER-SELECTED-INDICES*)
-      )
-    )
-
-    (setq i (1+ i))
-  )
-
-  (if (boundp '*DISPATCHER-SELECTED-INDICES*)
-    (progn
-      (setq selected "")
-      (foreach i (reverse *DISPATCHER-SELECTED-INDICES*)
-        (setq selected
-          (if (= selected "")
-            (itoa i)
-            (strcat selected " " (itoa i))
+  (if (listp lst)
+    (foreach x lst
+      (if (= (type x) 'STR)
+        (progn
+          (setq key (strcase x))
+          (if (not (vl-some '(lambda (y) (= (strcase y) key)) out))
+            (setq out (append out (list x)))
           )
         )
       )
-      (set_tile "lst_layers" selected)
+    )
+  )
+  out
+)
+
+(defun dsp-layer-names ( / acad doc layers out name)
+  (setq out '())
+  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
+  (if (and (not (vl-catch-all-error-p acad)) acad)
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
+      (if (and (not (vl-catch-all-error-p doc)) doc)
+        (progn
+          (setq layers (vl-catch-all-apply 'vla-get-Layers (list doc)))
+          (if (and (not (vl-catch-all-error-p layers)) layers)
+            (vlax-for lay layers
+              (setq name (vl-catch-all-apply 'vla-get-Name (list lay)))
+              (if (and (not (vl-catch-all-error-p name))
+                       (= (type name) 'STR)
+                       (> (strlen name) 0))
+                (setq out (cons name out))
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  (setq out (vl-remove-if-not '(lambda (x) (= (type x) 'STR)) out))
+  (setq out (vl-sort out '(lambda (a b) (< (strcase a) (strcase b)))))
+  (dsp-unique-ci out)
+)
+
+;; ---------- Çàãðóçêà ìîäóëåé ----------
+(defun dispatcher-project-root ( / dsp)
+  (setq dsp (findfile "dispatcher.lsp"))
+  (if dsp (vl-filename-directory (vl-filename-directory dsp)) nil)
+)
+(defun dispatcher-tasks-dir ( / dsp)
+  (setq dsp (findfile "dispatcher.lsp"))
+  (if dsp (vl-filename-directory dsp) nil)
+)
+(defun dispatcher-load-all ( / root common f path)
+  (setq root (dispatcher-project-root))
+  (if root
+    (progn
+      (setq common (strcat root "\\common\\"))
+      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp")
+        (setq path (strcat common f))
+        (if (findfile path) (load path)
+          (princ (strcat "\n[DISPATCHER] Íå íàéäåí: " path)))
+      )
+      (setq path (strcat root "\\TASKS\\fasonka.lsp"))
+      (if (findfile path) (load path)
+        (princ (strcat "\n[DISPATCHER] Íå íàéäåí: " path)))
+    )
+    (progn
+      (princ "\n[DISPATCHER] Êîðåíü íå íàéäåí, çàãðóçêà ïî èìåíè...")
+      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "fasonka.lsp")
+        (setq path (findfile f))
+        (if path (load path) (princ (strcat "\n[DISPATCHER] Íå íàéäåí: " f)))
+      )
+    )
+  )
+  T
+)
+
+;; ---------- Ñïèñîê ñëî¸â â äèàëîãå ----------
+(defun dispatcher-parse-indices (s / x)
+  (if (and (= (type s) 'STR) (/= s ""))
+    (progn
+      (setq x (read (strcat "(" s ")")))
+      (if (= (type x) 'LIST) x nil)
+    )
+    nil
+  )
+)
+
+(defun dispatcher-selected-names ( / s indices out i n)
+  (setq s (get_tile "lst_layers"))
+  (if (or (null s) (/= (type s) 'STR) (= s ""))
+    nil
+    (progn
+      (setq indices (dispatcher-parse-indices s))
+      (setq out '())
+      (setq n (length *DISPATCHER-VISIBLE-LAYERS*))
+      (foreach i indices
+        (if (and (numberp i) (>= i 0) (< i n))
+          (setq out (cons (nth i *DISPATCHER-VISIBLE-LAYERS*) out))
+        )
+      )
+      (dsp-unique-ci out)
     )
   )
 )
 
-;; ------------------------------------------------------------
-;; Ð‘Ð¾Ð»ÐµÐµ Ð½Ð°Ð´Ñ‘Ð¶Ð½Ð°Ñ Ð²ÐµÑ€ÑÐ¸Ñ Ð·Ð°Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÑÐ¿Ð¸ÑÐºÐ°.
-;; ------------------------------------------------------------
-
-(defun dispatcher-rebuild-layer-list ( / restore i selected indices)
-  (setq restore
-    (dispatcher-selected-names)
-  )
-
+(defun dispatcher-rebuild-layer-list ( / restore i selected item vis)
+  (setq restore (dispatcher-selected-names))
   (setq *DISPATCHER-SELECTED-INDICES* '())
 
   (if *DISPATCHER-GROUP-FILTER*
-    (setq *DISPATCHER-VISIBLE-LAYERS*
-      (tu-filtered-layer-names)
+    (progn
+      ;; áåç fboundp: ïðîáóåì âûçâàòü è ëîâèì îøèáêó
+      (setq vis (vl-catch-all-apply 'tu-filtered-layer-names '()))
+      (if (or (vl-catch-all-error-p vis) (null vis) (/= (type vis) 'LIST))
+        (setq vis *DISPATCHER-ALL-LAYERS*)
+      )
+      (setq *DISPATCHER-VISIBLE-LAYERS* vis)
     )
-    (setq *DISPATCHER-VISIBLE-LAYERS*
-      *DISPATCHER-ALL-LAYERS*
-    )
+    (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
   )
 
-  (if (and *DISPATCHER-GROUP-FILTER*
-           (null *DISPATCHER-VISIBLE-LAYERS*))
-    (progn
-      (setq *DISPATCHER-VISIBLE-LAYERS*
-        *DISPATCHER-ALL-LAYERS*
-      )
-      (alert
-        "Ð¡Ð»Ð¾Ð¸ Ð¿Ð¾ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¼Ñƒ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ñƒ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹.\nÐŸÐ¾ÐºÐ°Ð·Ð°Ð½Ñ‹ Ð²ÑÐµ ÑÐ»Ð¾Ð¸."
-      )
-    )
+  (setq *DISPATCHER-VISIBLE-LAYERS*
+    (vl-remove-if-not '(lambda (x) (= (type x) 'STR))
+                      (if (listp *DISPATCHER-VISIBLE-LAYERS*) *DISPATCHER-VISIBLE-LAYERS* '()))
   )
 
   (start_list "lst_layers")
@@ -183,239 +154,105 @@
 
   (setq i 0)
   (foreach item *DISPATCHER-VISIBLE-LAYERS*
-    (if
-      (vl-some
-        '(lambda (x)
-           (= (strcase x) (strcase item))
-         )
-        restore
-      )
-      (setq *DISPATCHER-SELECTED-INDICES*
-        (cons i *DISPATCHER-SELECTED-INDICES*)
-      )
+    (if (vl-some '(lambda (x) (and (= (type x) 'STR) (= (type item) 'STR)
+                                   (= (strcase x) (strcase item)))) restore)
+      (setq *DISPATCHER-SELECTED-INDICES* (cons i *DISPATCHER-SELECTED-INDICES*))
     )
     (setq i (1+ i))
   )
 
   (setq selected "")
   (foreach i (reverse *DISPATCHER-SELECTED-INDICES*)
-    (setq selected
-      (if (= selected "")
-        (itoa i)
-        (strcat selected " " (itoa i))
-      )
-    )
+    (setq selected (if (= selected "") (itoa i) (strcat selected " " (itoa i))))
   )
   (set_tile "lst_layers" selected)
 )
 
-;; ------------------------------------------------------------
-;; Ð§Ñ‚ÐµÐ½Ð¸Ðµ Ð²ÑÐµÑ… Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ð¾Ð² Ð¾ÐºÐ½Ð°
-;; ------------------------------------------------------------
-
+;; ---------- ×òåíèå ïàðàìåòðîâ ----------
 (defun dispatcher-read-params ( / selected)
   (setq selected (dispatcher-selected-names))
-
-  (setq *DISPATCHER-SELECTED-LAYERS*
-    (if selected selected nil)
-  )
-
-  (setq *DISPATCHER-REPORT-MODE*
-    (if (= (get_tile "rb_summary") "1")
-      "SUMMARY"
-      "DETAIL"
-    )
-  )
-
-  (setq *DISPATCHER-EXPORT-EXCEL*
-    (= (get_tile "chk_xls") "1")
-  )
-
-  (setq *DISPATCHER-EXPORT-TXT*
-    (= (get_tile "chk_txt") "1")
-  )
-
-  (setq *DISPATCHER-CREATE-TABLE*
-    (= (get_tile "chk_acad") "1")
-  )
-
+  (setq *DISPATCHER-SELECTED-LAYERS* (if selected selected nil))
+  (setq *DISPATCHER-REPORT-MODE* (if (= (get_tile "rb_summary") "1") "SUMMARY" "DETAIL"))
+  (setq *DISPATCHER-EXPORT-EXCEL* (= (get_tile "chk_xls") "1"))
+  (setq *DISPATCHER-EXPORT-TXT* (= (get_tile "chk_txt") "1"))
+  (setq *DISPATCHER-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
   (cond
-    ((= (get_tile "rb_task_fasonka") "1")
-     (setq *DISPATCHER-TASK-ID* 'FASONKA))
-
-    ((= (get_tile "rb_task_subsystem") "1")
-     (setq *DISPATCHER-TASK-ID* 'SUBSYSTEM))
-
-    ((= (get_tile "rb_task_cladding") "1")
-     (setq *DISPATCHER-TASK-ID* 'CLADDING))
-
-    ((= (get_tile "rb_task_vitrazh") "1")
-     (setq *DISPATCHER-TASK-ID* 'VITRAZH))
-
-    ((= (get_tile "rb_task_steklopakety") "1")
-     (setq *DISPATCHER-TASK-ID* 'STEKLOPAKETY))
-
-    (t
-     (setq *DISPATCHER-TASK-ID* 'FASONKA)
-    )
+    ((= (get_tile "rb_task_fasonka") "1")      (setq *DISPATCHER-TASK-ID* 'FASONKA))
+    ((= (get_tile "rb_task_subsystem") "1")    (setq *DISPATCHER-TASK-ID* 'SUBSYSTEM))
+    ((= (get_tile "rb_task_cladding") "1")     (setq *DISPATCHER-TASK-ID* 'CLADDING))
+    ((= (get_tile "rb_task_vitrazh") "1")      (setq *DISPATCHER-TASK-ID* 'VITRAZH))
+    ((= (get_tile "rb_task_zapolnenie") "1")   (setq *DISPATCHER-TASK-ID* 'ZAPOLNENIE))
+    (t (setq *DISPATCHER-TASK-ID* 'FASONKA))
   )
-
   T
 )
 
-;; ------------------------------------------------------------
-;; Ð•Ð´Ð¸Ð½Ñ‹Ð¹ Ð´Ð¸ÑÐ¿ÐµÑ‚Ñ‡ÐµÑ€
-;; ------------------------------------------------------------
-
-(defun run-task
-       (task-id layers report-mode export-excel export-txt create-table save-base)
-
+;; ---------- Äèñïåò÷åð (áåç fboundp) ----------
+(defun run-task (task-id layers report-mode export-excel export-txt create-table save-base / r)
   (cond
     ((eq task-id 'FASONKA)
-     (if (fboundp 'fasonka-main)
-       (fasonka-main
-         layers
-         report-mode
-         export-excel
-         export-txt
-         create-table
-         save-base
-       )
-       (princ "\nÐœÐ¾Ð´ÑƒÐ»ÑŒ Ð¤Ð°ÑÐ¾Ð½ÐºÐ° Ð½Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½.")
-     )
-    )
-
+     (setq r (vl-catch-all-apply 'fasonka-main
+               (list layers report-mode export-excel export-txt create-table save-base)))
+     (if (vl-catch-all-error-p r)
+       (princ "\nÌîäóëü Ôàñîíêà íå çàãðóæåí èëè îøèáêà âûïîëíåíèÿ.")))
     ((eq task-id 'SUBSYSTEM)
-     (if (fboundp 'subsystem-main)
-       (subsystem-main
-         layers report-mode export-excel export-txt create-table save-base
-       )
-       (princ "\nÐœÐ¾Ð´ÑƒÐ»ÑŒ ÐŸÐ¾Ð´ÑÐ¸ÑÑ‚ÐµÐ¼Ð° Ð½Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½.")
-     )
-    )
-
+     (setq r (vl-catch-all-apply 'subsystem-main
+               (list layers report-mode export-excel export-txt create-table save-base)))
+     (if (vl-catch-all-error-p r) (princ "\nÌîäóëü Ïîäñèñòåìà íå çàãðóæåí.")))
     ((eq task-id 'CLADDING)
-     (if (fboundp 'cladding-main)
-       (cladding-main
-         layers report-mode export-excel export-txt create-table save-base
-       )
-       (princ "\nÐœÐ¾Ð´ÑƒÐ»ÑŒ ÐžÐ±Ð»Ð¸Ñ†Ð¾Ð²ÐºÐ° Ð½Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½.")
-     )
-    )
-
+     (setq r (vl-catch-all-apply 'cladding-main
+               (list layers report-mode export-excel export-txt create-table save-base)))
+     (if (vl-catch-all-error-p r) (princ "\nÌîäóëü Îáëèöîâêà íå çàãðóæåí.")))
     ((eq task-id 'VITRAZH)
-     (if (fboundp 'vitrazh-main)
-       (vitrazh-main
-         layers report-mode export-excel export-txt create-table save-base
-       )
-       (princ "\nÐœÐ¾Ð´ÑƒÐ»ÑŒ Ð’Ð¸Ñ‚Ñ€Ð°Ð¶ Ð½Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½.")
-     )
-    )
-
-    ((eq task-id 'STEKLOPAKETY)
-     (if (fboundp 'steklopakety-main)
-       (steklopakety-main
-         layers report-mode export-excel export-txt create-table save-base
-       )
-       (princ "\nÐœÐ¾Ð´ÑƒÐ»ÑŒ Ð¡Ñ‚ÐµÐºÐ»Ð¾Ð¿Ð°ÐºÐµÑ‚Ñ‹ Ð½Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½.")
-     )
-    )
-
-    (t
-     (princ "\nÐÐµÐ¸Ð·Ð²ÐµÑÑ‚Ð½Ð°Ñ Ð·Ð°Ð´Ð°Ñ‡Ð°.")
-    )
+     (setq r (vl-catch-all-apply 'vitrazh-main
+               (list layers report-mode export-excel export-txt create-table save-base)))
+     (if (vl-catch-all-error-p r) (princ "\nÌîäóëü Âèòðàæ íå çàãðóæåí.")))
+    ((eq task-id 'ZAPOLNENIE)
+     (setq r (vl-catch-all-apply 'zapolnenie-main
+               (list layers report-mode export-excel export-txt create-table save-base)))
+     (if (vl-catch-all-error-p r) (princ "\nÌîäóëü Çàïîëíåíèå íå çàãðóæåí.")))
+    (t (princ "\nÍåèçâåñòíàÿ çàäà÷à."))
   )
 )
 
-;; ------------------------------------------------------------
-;; ÐžÐ±Ñ€Ð°Ð±Ð¾Ñ‚Ñ‡Ð¸ÐºÐ¸ ÐºÐ½Ð¾Ð¿Ð¾Ðº
-;; ------------------------------------------------------------
-
+;; ---------- Îáðàáîò÷èêè ----------
 (defun dispatcher-help ()
-  (alert
-    (strcat
-      "ÐžÐºÐ½Ð¾ Ð·Ð°Ð¿ÑƒÑÐºÐ° Ð·Ð°Ð´Ð°Ñ‡.\n\n"
-      "ÐŸÐ¾Ð·Ð²Ð¾Ð»ÑÐµÑ‚ Ð²Ñ‹Ð±Ñ€Ð°Ñ‚ÑŒ Ð¾Ð´Ð½Ñƒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ, ÑÐ»Ð¾Ð¸, Ñ€ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð° "
-      "Ð¸ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ñ‹ Ð²Ñ‹Ð²Ð¾Ð´Ð°.\n\n"
-      "Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ â€” Ð·Ð°Ð¿ÑƒÑÐº Ñ Ð¸Ð¼ÐµÐ½ÐµÐ¼ Ñ„Ð°Ð¹Ð»Ð° Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ.\n"
-      "Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ ÐºÐ°Ðº... â€” Ð²Ñ‹Ð±Ð¾Ñ€ Ð¿ÑƒÑ‚Ð¸ Ð¸ Ð¸Ð¼ÐµÐ½Ð¸.\n\n"
-      "Ð•ÑÐ»Ð¸ ÑÐ»Ð¾Ð¸ Ð½Ðµ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ñ‹ â€” Ð¿Ð¾Ð¸ÑÐº Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ Ð¿Ð¾ Ð²ÑÐµÐ¼ ÑÐ»Ð¾ÑÐ¼."
-    )
-  )
+  (alert (strcat "Îêíî çàïóñêà çàäà÷.\n\n"
+                 "Âûáîð îäíîé çàäà÷è, ñëî¸â, ðåæèìà îò÷¸òà è ôîðìàòîâ âûâîäà.\n"
+                 "Êíîïêè Ðàñêðîé õëûñòà / Ðàñêðîé ëèñòà çàïóñêàþò ìîäóëè ðàñêðîÿ.\n\n"
+                 "Ñîõðàíèòü - èìÿ ôàéëà ïî óìîë÷àíèþ.\n"
+                 "Ñîõðàíèòü êàê... - âûáîð ïóòè è èìåíè.\n"
+                 "Åñëè ñëîè íå âûáðàíû - ïîèñê ïî âñåì ñëîÿì."))
 )
-
-(defun dispatcher-save ()
-  (dispatcher-read-params)
-  (setq *DISPATCHER-ACTION* 'SAVE)
-  (done_dialog 1)
-)
-
-(defun dispatcher-saveas ()
-  (dispatcher-read-params)
-  (setq *DISPATCHER-ACTION* 'SAVEAS)
-  (done_dialog 1)
-)
-
-(defun dispatcher-close ()
-  (setq *DISPATCHER-ACTION* 'CANCEL)
-  (done_dialog 0)
-)
-
+(defun dispatcher-save   () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVE)   (done_dialog 1))
+(defun dispatcher-saveas () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVEAS) (done_dialog 1))
+(defun dispatcher-close  () (setq *DISPATCHER-ACTION* 'CANCEL) (done_dialog 0))
+(defun dispatcher-nest1d () (setq *DISPATCHER-ACTION* 'NEST1D) (done_dialog 1))
+(defun dispatcher-nest2d () (setq *DISPATCHER-ACTION* 'NEST2D) (done_dialog 1))
 (defun dispatcher-group-filter ()
-  ;; Ð¡Ð½Ð°Ñ‡Ð°Ð»Ð° Ñ„Ð¸ÐºÑÐ¸Ñ€ÑƒÐµÐ¼ Ð²Ñ‹Ð±Ð¾Ñ€ Ð² Ñ‚ÐµÐºÑƒÑ‰ÐµÐ¼ Ð²Ð¸Ð´Ð¸Ð¼Ð¾Ð¼ ÑÐ¿Ð¸ÑÐºÐµ,
-  ;; Ð·Ð°Ñ‚ÐµÐ¼ Ð¼ÐµÐ½ÑÐµÐ¼ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€.
-  (setq *DISPATCHER-SELECTED-LAYERS*
-    (dispatcher-selected-names)
-  )
-
-  (setq *DISPATCHER-GROUP-FILTER*
-    (= (get_tile "chk_group_filter") "1")
-  )
-
+  (setq *DISPATCHER-SELECTED-LAYERS* (dispatcher-selected-names))
+  (setq *DISPATCHER-GROUP-FILTER* (= (get_tile "chk_group_filter") "1"))
   (dispatcher-rebuild-layer-list)
 )
-
 (defun dispatcher-layer-selection ()
-  ;; Ð¡Ð¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ Ð²Ñ‹Ð±Ð¾Ñ€ Ð¿Ð¾ Ð¸Ð¼ÐµÐ½Ð°Ð¼, Ð° Ð½Ðµ Ð¿Ð¾ Ð¸Ð½Ð´ÐµÐºÑÐ°Ð¼.
-  (setq *DISPATCHER-SELECTED-LAYERS*
-    (dispatcher-selected-names)
-  )
+  (setq *DISPATCHER-SELECTED-LAYERS* (dispatcher-selected-names))
 )
 
-;; ------------------------------------------------------------
-;; ÐžÑÐ½Ð¾Ð²Ð½Ð°Ñ ÐºÐ¾Ð¼Ð°Ð½Ð´Ð° Ð¾ÐºÐ½Ð°
-;; ------------------------------------------------------------
-
-(defun c:taskdispatcher
-       ( / dcl-file action save-base result)
-
+;; ---------- Îñíîâíàÿ êîìàíäà ----------
+(defun c:taskdispatcher ( / dcl-file save-base tdir r)
   (vl-load-com)
   (dispatcher-load-all)
 
-  (setq dcl-file
-    (findfile
-      (strcat
-        (vl-filename-directory
-          (or (findfile "dispatcher.lsp") "")
-        )
-        "\\dispatcher.dcl"
-      )
-    )
-  )
+  (setq dcl-file nil)
+  (setq tdir (dispatcher-tasks-dir))
+  (if tdir (setq dcl-file (findfile (strcat tdir "\\dispatcher.dcl"))))
+  (if (null dcl-file) (setq dcl-file (findfile "dispatcher.dcl")))
 
   (if (null dcl-file)
+    (progn (alert "Íå íàéäåí ôàéë dispatcher.dcl.") (princ))
     (progn
-      (alert "ÐÐµ Ð½Ð°Ð¹Ð´ÐµÐ½ Ñ„Ð°Ð¹Ð» dispatcher.dcl.")
-      (princ)
-    )
-    (progn
-      ;; ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ.
-      (setq *DISPATCHER-ALL-LAYERS*
-        (tu-layer-names)
-      )
-      (setq *DISPATCHER-VISIBLE-LAYERS*
-        *DISPATCHER-ALL-LAYERS*
-      )
+      (setq *DISPATCHER-ALL-LAYERS* (dsp-layer-names))
+      (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
       (setq *DISPATCHER-SELECTED-LAYERS* nil)
       (setq *DISPATCHER-GROUP-FILTER* nil)
       (setq *DISPATCHER-TASK-ID* 'FASONKA)
@@ -425,135 +262,73 @@
       (setq *DISPATCHER-CREATE-TABLE* T)
       (setq *DISPATCHER-ACTION* 'CANCEL)
 
-      (setq *DISPATCHER-DCL-ID*
-        (load_dialog dcl-file)
-      )
-
+      (setq *DISPATCHER-DCL-ID* (load_dialog dcl-file))
       (if (< *DISPATCHER-DCL-ID* 0)
-        (alert "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ dispatcher.dcl.")
+        (alert "Íå óäàëîñü çàãðóçèòü dispatcher.dcl.")
         (progn
           (if (new_dialog "task_dispatcher" *DISPATCHER-DCL-ID*)
             (progn
-              ;; ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ.
               (set_tile "rb_detail" "1")
               (set_tile "rb_summary" "0")
-
               (set_tile "chk_xls" "1")
               (set_tile "chk_txt" "0")
               (set_tile "chk_acad" "1")
               (set_tile "chk_group_filter" "0")
-
               (set_tile "rb_task_fasonka" "1")
-
-              ;; ÐŸÐ¾ÐºÐ° Ñ€ÐµÐ°Ð»Ð¸Ð·Ð¾Ð²Ð°Ð½Ð° Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¤Ð°ÑÐ¾Ð½ÐºÐ°.
               (mode_tile "rb_task_subsystem" 1)
               (mode_tile "rb_task_cladding" 1)
               (mode_tile "rb_task_vitrazh" 1)
-              (mode_tile "rb_task_steklopakety" 1)
-
-              ;; Ð¡Ð¿Ð¸ÑÐ¾Ðº Ð±Ð»Ð¾ÐºÐ¾Ð² â€” Ð·Ð°Ð³Ð»ÑƒÑˆÐºÐ°.
+              (mode_tile "rb_task_zapolnenie" 1)
               (mode_tile "lst_blocks" 1)
 
               (dispatcher-rebuild-layer-list)
 
-              ;; Actions.
-              (action_tile
-                "btn_help"
-                "(dispatcher-help)"
-              )
-
-              (action_tile
-                "btn_save"
-                "(dispatcher-save)"
-              )
-
-              (action_tile
-                "btn_saveas"
-                "(dispatcher-saveas)"
-              )
-
-              (action_tile
-                "btn_close"
-                "(dispatcher-close)"
-              )
-
-              (action_tile
-                "chk_group_filter"
-                "(dispatcher-group-filter)"
-              )
-
-              (action_tile
-                "lst_layers"
-                "(dispatcher-layer-selection)"
-              )
-
-              (action_tile
-                "rb_detail"
-                "(setq *DISPATCHER-REPORT-MODE* \"DETAIL\")"
-              )
-
-              (action_tile
-                "rb_summary"
-                "(setq *DISPATCHER-REPORT-MODE* \"SUMMARY\")"
-              )
+              (action_tile "btn_help"   "(dispatcher-help)")
+              (action_tile "btn_save"   "(dispatcher-save)")
+              (action_tile "btn_saveas" "(dispatcher-saveas)")
+              (action_tile "btn_close"  "(dispatcher-close)")
+              (action_tile "btn_nest1d" "(dispatcher-nest1d)")
+              (action_tile "btn_nest2d" "(dispatcher-nest2d)")
+              (action_tile "chk_group_filter" "(dispatcher-group-filter)")
+              (action_tile "lst_layers" "(dispatcher-layer-selection)")
+              (action_tile "rb_detail"  "(setq *DISPATCHER-REPORT-MODE* \"DETAIL\")")
+              (action_tile "rb_summary" "(setq *DISPATCHER-REPORT-MODE* \"SUMMARY\")")
 
               (start_dialog)
 
-              ;; DCL ÑƒÐ¶Ðµ Ð·Ð°ÐºÑ€Ñ‹Ñ‚. Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ñ‚ÐµÐ¿ÐµÑ€ÑŒ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ñ‹
-              ;; Ñ„Ð°Ð¹Ð»Ð¾Ð²Ñ‹Ð¹ Ð´Ð¸Ð°Ð»Ð¾Ð³ Ð¸ Ð·Ð°Ð¿ÑƒÑÐº Ð·Ð°Ð´Ð°Ñ‡Ð¸.
               (cond
                 ((eq *DISPATCHER-ACTION* 'SAVE)
-                 (run-task
-                   *DISPATCHER-TASK-ID*
-                   *DISPATCHER-SELECTED-LAYERS*
-                   *DISPATCHER-REPORT-MODE*
-                   *DISPATCHER-EXPORT-EXCEL*
-                   *DISPATCHER-EXPORT-TXT*
-                   *DISPATCHER-CREATE-TABLE*
-                   nil
-                 )
-                )
-
+                 (run-task *DISPATCHER-TASK-ID* *DISPATCHER-SELECTED-LAYERS*
+                           *DISPATCHER-REPORT-MODE* *DISPATCHER-EXPORT-EXCEL*
+                           *DISPATCHER-EXPORT-TXT* *DISPATCHER-CREATE-TABLE* nil))
                 ((eq *DISPATCHER-ACTION* 'SAVEAS)
-                 (setq save-base
-                   (tu-get-save-base
-                     *DISPATCHER-TASK-ID*
-                   )
-                 )
-                 (if save-base
-                   (run-task
-                     *DISPATCHER-TASK-ID*
-                     *DISPATCHER-SELECTED-LAYERS*
-                     *DISPATCHER-REPORT-MODE*
-                     *DISPATCHER-EXPORT-EXCEL*
-                     *DISPATCHER-EXPORT-TXT*
-                     *DISPATCHER-CREATE-TABLE*
-                     save-base
-                   )
-                   (princ "\nÐ¡Ð¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ðµ Ð¾Ñ‚Ð¼ÐµÐ½ÐµÐ½Ð¾.")
-                 )
-                )
-
-                (t nil)
-              )
+                 (setq save-base (vl-catch-all-apply 'tu-get-save-base (list *DISPATCHER-TASK-ID*)))
+                 (if (vl-catch-all-error-p save-base) (setq save-base nil))
+                 (run-task *DISPATCHER-TASK-ID* *DISPATCHER-SELECTED-LAYERS*
+                           *DISPATCHER-REPORT-MODE* *DISPATCHER-EXPORT-EXCEL*
+                           *DISPATCHER-EXPORT-TXT* *DISPATCHER-CREATE-TABLE* save-base))
+                ((eq *DISPATCHER-ACTION* 'NEST1D)
+                 (setq r (vl-catch-all-apply 'c:NEST1DS '()))
+                 (if (vl-catch-all-error-p r)
+                   (princ "\nNEST1DS íå çàãðóæåí. Çàãðóçèòå nest1ds.lsp.")))
+                ((eq *DISPATCHER-ACTION* 'NEST2D)
+                 (setq r (vl-catch-all-apply 'c:NEST2DS '()))
+                 (if (vl-catch-all-error-p r)
+                   (princ "\nÐàñêðîé ëèñòà: ìîäóëü â ðàçðàáîòêå (NEST2DS).")))
+                (t nil))
             )
-            (alert "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð´Ð¸Ð°Ð»Ð¾Ð³ task_dispatcher.")
+            (alert "Íå óäàëîñü ñîçäàòü äèàëîã task_dispatcher.")
           )
-
           (unload_dialog *DISPATCHER-DCL-ID*)
           (setq *DISPATCHER-DCL-ID* nil)
         )
       )
     )
   )
-
   (princ)
 )
 
-;; Ð£Ð´Ð¾Ð±Ð½Ñ‹Ð¹ ÐºÐ¾Ñ€Ð¾Ñ‚ÐºÐ¸Ð¹ Ð¿ÑÐµÐ²Ð´Ð¾Ð½Ð¸Ð¼.
-(defun c:tasks ()
-  (c:taskdispatcher)
-)
+(defun c:tasks () (c:taskdispatcher))
 
-(princ "\nDISPATCHER.LSP Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½. ÐšÐ¾Ð¼Ð°Ð½Ð´Ñ‹: TASKDISPATCHER, TASKS")
+(princ "\nDISPATCHER.LSP çàãðóæåí. Êîìàíäû: TASKDISPATCHER, TASKS")
 (princ)

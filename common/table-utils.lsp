@@ -1,6 +1,6 @@
 ;;; ============================================================
 ;;; common/table-utils.lsp
-;;; РЎРѕР·РґР°РЅРёРµ СЃС‚Р°С‚РёС‡РµСЃРєРёС… С‚Р°Р±Р»РёС† AutoCAD
+;;; Создание статических таблиц AutoCAD
 ;;; ============================================================
 
 (vl-load-com)
@@ -63,7 +63,7 @@
   (setq acad (vlax-get-acad-object))
   (setq doc (tu-safe-call 'vla-get-ActiveDocument (list acad)))
   (setq space (if doc (tu-safe-call 'vla-get-ModelSpace (list doc))))
-  (setq pt (getpoint "\nРЈРєР°Р¶РёС‚Рµ С‚РѕС‡РєСѓ РІСЃС‚Р°РІРєРё С‚Р°Р±Р»РёС†С‹: "))
+  (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
 
   (if (null pt)
     nil
@@ -113,13 +113,13 @@
               (tu-table-set-width table 4 30.0)
 
               (tu-table-merge table 0 0 0 4)
-              (tu-table-set-text table 0 0 "{\\LР¤Р°СЃРѕРЅРЅРѕРµ Р¶РµР»РµР·Рѕ}")
+              (tu-table-set-text table 0 0 "{\\LФасонное железо}")
 
-              (tu-table-set-text table 1 0 "в„–")
-              (tu-table-set-text table 1 1 "РўРёРї С„Р°СЃРѕРЅРєРё")
-              (tu-table-set-text table 1 2 "Р”Р»РёРЅР°, РјРј")
-              (tu-table-set-text table 1 3 "РљРѕР»-РІРѕ, С€С‚.")
-              (tu-table-set-text table 1 4 "РЎСѓРјРјР°, Рј.Рї.")
+              (tu-table-set-text table 1 0 "№")
+              (tu-table-set-text table 1 1 "Тип фасонки")
+              (tu-table-set-text table 1 2 "Длина, мм")
+              (tu-table-set-text table 1 3 "Кол-во, шт.")
+              (tu-table-set-text table 1 4 "Сумма, м.п.")
 
               (foreach c '(0 2 3 4)
                 (tu-table-align table 1 c 5)
@@ -216,11 +216,11 @@
               (tu-table-set-width table 2 30.0)
 
               (tu-table-merge table 0 0 0 2)
-              (tu-table-set-text table 0 0 "Р¤Р°СЃРѕРЅРЅРѕРµ Р¶РµР»РµР·Рѕ")
+              (tu-table-set-text table 0 0 "Фасонное железо")
 
-              (tu-table-set-text table 1 0 "РўРёРї С„Р°СЃРѕРЅРєРё")
-              (tu-table-set-text table 1 1 "РљРѕР»-РІРѕ, С€С‚.")
-              (tu-table-set-text table 1 2 "РЎСѓРјРјР°, Рј.Рї.")
+              (tu-table-set-text table 1 0 "Тип фасонки")
+              (tu-table-set-text table 1 1 "Кол-во, шт.")
+              (tu-table-set-text table 1 2 "Сумма, м.п.")
 
               (tu-table-align table 1 0 4)
               (tu-table-align table 1 1 5)
@@ -239,7 +239,7 @@
               )
 
               (tu-table-merge table row row 0 1)
-              (tu-table-set-text table row 0 "      РС‚РѕРіРѕ")
+              (tu-table-set-text table row 0 "      Итого")
               (tu-table-align table row 0 4)
 
               (setq group-total 0.0)

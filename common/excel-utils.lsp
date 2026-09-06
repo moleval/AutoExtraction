@@ -1,6 +1,6 @@
 ;;; ============================================================
 ;;; common/excel-utils.lsp
-;;; Р­РєСЃРїРѕСЂС‚ РјРѕРґРµР»РµР№ Р·Р°РґР°С‡ РІ Excel .xls
+;;; Экспорт моделей задач в Excel .xls
 ;;; ============================================================
 
 (vl-load-com)
@@ -117,12 +117,12 @@
 (defun tu-excel-export-detail (sheet model / row name len cnt mp
                                       group-name group-first group-last
                                       idx)
-  (tu-excel-set-cell sheet 1 1 "Р¤Р°СЃРѕРЅРЅРѕРµ Р¶РµР»РµР·Рѕ")
-  (tu-excel-set-cell sheet 2 1 "в„–")
-  (tu-excel-set-cell sheet 2 2 "РўРёРї С„Р°СЃРѕРЅРєРё")
-  (tu-excel-set-cell sheet 2 3 "Р”Р»РёРЅР°, РјРј")
-  (tu-excel-set-cell sheet 2 4 "РљРѕР»-РІРѕ, С€С‚.")
-  (tu-excel-set-cell sheet 2 5 "РЎСѓРјРјР°, Рј.Рї.")
+  (tu-excel-set-cell sheet 1 1 "Фасонное железо")
+  (tu-excel-set-cell sheet 2 1 "№")
+  (tu-excel-set-cell sheet 2 2 "Тип фасонки")
+  (tu-excel-set-cell sheet 2 3 "Длина, мм")
+  (tu-excel-set-cell sheet 2 4 "Кол-во, шт.")
+  (tu-excel-set-cell sheet 2 5 "Сумма, м.п.")
 
   (setq row 3
         idx 0
@@ -199,10 +199,10 @@
 )
 
 (defun tu-excel-export-summary (sheet model / row rec name cnt mp last)
-  (tu-excel-set-cell sheet 1 1 "Р¤Р°СЃРѕРЅРЅРѕРµ Р¶РµР»РµР·Рѕ")
-  (tu-excel-set-cell sheet 2 1 "РўРёРї С„Р°СЃРѕРЅРєРё")
-  (tu-excel-set-cell sheet 2 2 "РљРѕР»-РІРѕ, С€С‚.")
-  (tu-excel-set-cell sheet 2 3 "РЎСѓРјРјР°, Рј.Рї.")
+  (tu-excel-set-cell sheet 1 1 "Фасонное железо")
+  (tu-excel-set-cell sheet 2 1 "Тип фасонки")
+  (tu-excel-set-cell sheet 2 2 "Кол-во, шт.")
+  (tu-excel-set-cell sheet 2 3 "Сумма, м.п.")
 
   (setq row 3)
   (foreach rec model
@@ -218,7 +218,7 @@
   )
 
   (setq last (1- row))
-  (tu-excel-set-cell sheet row 1 "РС‚РѕРіРѕ")
+  (tu-excel-set-cell sheet row 1 "Итого")
   (if (> last 2)
     (progn
       (tu-excel-set-formula sheet row 2
@@ -247,7 +247,7 @@
       '(lambda ()
          (setq excel (vlax-create-object "Excel.Application"))
          (if (null excel)
-           (throw 'tu-excel-error "Excel.Application РЅРµРґРѕСЃС‚СѓРїРµРЅ")
+           (throw 'tu-excel-error "Excel.Application недоступен")
          )
          (vla-put-Visible excel :vlax-false)
          (vla-put-DisplayAlerts excel :vlax-false)
