@@ -24,16 +24,31 @@
                      save-xls save-xls-summary
                      ig canAdd g excelRow startRow endRow itemNum xlsfile
                      sum totalSum
-                     galfile fgal
                      summary-groups summary-indexed
                      total-blocks total-pos total-types total-sum
                      layer-filter lay
                      table-summary fill-table-summary
                      currentSummaryGroups
                      i
-                     base-name)
+                     base-name
+                     ;; Добавляем путь к txt-utils
+                     txt-utils-path)
 
   (vl-load-com)
+
+  ;; Загрузка txt-utils.lsp для GAL-экспорта
+  (setq txt-utils-path
+    (strcat
+      (vl-filename-directory
+        (vl-filename-directory (findfile "fasonka.lsp"))
+      )
+      "\\common\\txt-utils.lsp"
+    )
+  )
+  (if (findfile txt-utils-path)
+    (load txt-utils-path)
+    (princ "\nПредупреждение: txt-utils.lsp не найден по пути " txt-utils-path)
+  )
 
   ;; Обработчик ошибок
   (defun *error* (msg)
@@ -624,36 +639,7 @@
 
           ;; ==================== Экспорт в GAL (TXT) ====================
           (if export-txt
-            (progn
-              (setq galfile (strcat base-name ".gal"))
-              (setq fgal (open galfile "w"))
-              (if fgal
-                (progn
-                  (write-line "Длина=6000" fgal)
-                  (write-line "ML=0" fgal)
-                  (write-line "MR=0" fgal)
-                  (write-line "Pil=10" fgal)
-                  (if (= report-type "DETAIL")
-                    (foreach ig report-data
-                      (setq name (cadr ig) recs (caddr ig) itemNum 0)
-                      (foreach rec recs
-                        (setq itemNum (1+ itemNum)
-                              len (cadr rec)
-                              count (caddr rec))
-                        (write-line (strcat "Otr=" name " " (itoa itemNum) "/" (itoa count) "/" (rtos len 2 0) "/") fgal)
-                      )
-                    )
-                    ;; SUMMARY (не предусмотрено, но выводим агрегаты)
-                    (foreach rec report-data
-                      (write-line (strcat "Otr=" (car rec) "/" (itoa (cadr rec)) "/0/") fgal)
-                    )
-                  )
-                  (close fgal)
-                  (princ (strcat "\nGAL сохранён: " galfile))
-                )
-                (princ "\nНе удалось сохранить GAL.")
-              )
-            )
+            (tx-export-gal report-type report-data base-name)
           )
 
           ;; ==================== Создание таблиц AutoCAD ====================
