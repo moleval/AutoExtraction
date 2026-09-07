@@ -5,12 +5,14 @@
   :OWN-LIST
   ("d:/AutoExtraction/TASKS/dispatcher" 
     "d:/AutoExtraction/TASKS/fasonka"
-    "d:/AutoExtraction/TASKS/nest1ds"
+    "d:/AutoExtraction/TASKS/cutline"
+    "d:/AutoExtraction/TASKS/cutsheet"
     "d:/AutoExtraction/TASKS/tst"
     "d:/AutoExtraction/common/excel-utils"
     "d:/AutoExtraction/common/layer-utils"
     "d:/AutoExtraction/common/table-utils"
     "d:/AutoExtraction/common/task-utils"
+    "d:/AutoExtraction/common/txt-utils"
   )
   :FAS-DIRECTORY
   nil

@@ -65,8 +65,8 @@ task_dispatcher : dialog {
 
   : boxed_row {
     label = "Раскрой";
-    : button { key = "btn_nest1d"; label = "Раскрой хлыста"; }
-    : button { key = "btn_nest2d"; label = "Раскрой листа"; }
+    : button { key = "btn_cutline"; label = "Раскрой хлыста"; }
+    : button { key = "btn_cutsheet"; label = "Раскрой листа"; }
   }
 
   : spacer { height = 0.5; }
