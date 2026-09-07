@@ -10,8 +10,6 @@
 ;; ------------------------------------------------------------
 
 (defun fasonka-load-common ( / fasonka-file tasks-root project-root files f)
-  ;; fasonka.lsp находится в TASKS, а common — соседний каталог
-  ;; на уровне корня проекта.
   (setq fasonka-file (findfile "fasonka.lsp"))
 
   (if fasonka-file
@@ -79,7 +77,7 @@
      (float value)
     )
 
-    ((vlax-variant-p value)
+    ((= (type value) 'VARIANT)
      (setq x
        (vl-catch-all-apply
          'vlax-variant-value
@@ -215,12 +213,20 @@
 )
 
 ;; ------------------------------------------------------------
-;; Выбор INSERT
+;; Выбор INSERT (с поддержкой предварительного выделения)
 ;; ------------------------------------------------------------
 
-(defun fasonka-select-inserts (layers / ss i ent data layer out)
+(defun fasonka-select-inserts (layers / ss ss-first i ent data layer out)
   (setq out '())
-  (setq ss (ssget "_X" '((0 . "INSERT"))))
+
+  ;; Проверяем предварительный выбор
+  (setq ss-first (ssgetfirst))
+  (if (and ss-first (setq ss (car ss-first)))
+    ;; Если есть выбранные объекты, используем их
+    (setq ss ss)
+    ;; Иначе выбираем все INSERT
+    (setq ss (ssget "_X" '((0 . "INSERT"))))
+  )
 
   (if ss
     (progn
@@ -228,12 +234,15 @@
       (repeat (sslength ss)
         (setq ent (ssname ss i))
         (setq data (entget ent))
-        (setq layer (cdr (assoc 8 data)))
-
-        (if (fasonka-layer-selected-p layer layers)
-          (setq out (cons ent out))
+        ;; Обрабатываем только вхождения блоков
+        (if (= (cdr (assoc 0 data)) "INSERT")
+          (progn
+            (setq layer (cdr (assoc 8 data)))
+            (if (fasonka-layer-selected-p layer layers)
+              (setq out (cons ent out))
+            )
+          )
         )
-
         (setq i (1+ i))
       )
     )
@@ -244,9 +253,6 @@
 
 ;; ------------------------------------------------------------
 ;; DETAIL aggregation
-;;
-;; Результат:
-;; (("Имя" длина количество погонаж) ...)
 ;; ------------------------------------------------------------
 
 (defun fasonka-aggregate-detail (records / acc rec name len found old)
@@ -303,9 +309,6 @@
 
 ;; ------------------------------------------------------------
 ;; SUMMARY aggregation
-;;
-;; Результат:
-;; (("Имя" количество погонаж) ...)
 ;; ------------------------------------------------------------
 
 (defun fasonka-aggregate-summary (detail / acc rec name found old)
@@ -352,39 +355,6 @@
           (strcase (nth 0 b)))
      )
   )
-)
-
-;; ------------------------------------------------------------
-;; DETAIL group helpers
-;; ------------------------------------------------------------
-
-(defun fasonka-detail-group-names (model / out name)
-  (setq out '())
-  (foreach rec model
-    (setq name (nth 0 rec))
-    (if (not
-          (vl-some
-            '(lambda (x)
-               (= (strcase x) (strcase name))
-             )
-            out
-          )
-        )
-      (setq out (append out (list name)))
-    )
-  )
-  out
-)
-
-(defun fasonka-detail-group-records (model name / out)
-  (setq out '())
-  (foreach rec model
-    (if (= (strcase (nth 0 rec))
-           (strcase name))
-      (setq out (cons rec out))
-    )
-  )
-  (reverse out)
 )
 
 ;; ------------------------------------------------------------
@@ -653,14 +623,15 @@
 )
 
 (defun fasonka-ask-report-mode ( / ans)
-  (initget "Detail Summary D S")
   (setq ans
-    (getkword
-      "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "
+    (strcase
+      (getstring T
+        "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "
+      )
     )
   )
   (cond
-    ((or (null ans) (= ans "Detail") (= ans "D"))
+    ((or (= ans "") (= ans "D") (= ans "ПОДРОБНЫЙ"))
      "DETAIL")
     (t
      "SUMMARY")
@@ -693,7 +664,7 @@
   (setq export-excel
     (fasonka-ask-yes-no
       "Экспорт в Excel?"
-      T
+      nil
     )
   )
 
@@ -760,7 +731,6 @@
 
   (vl-load-com)
 
-  ;; Нормализация параметров.
   (if (or (null layers) (= layers '()))
     (setq layers nil)
     (setq layers
@@ -772,17 +742,11 @@
     (setq report-mode "DETAIL")
   )
 
-  ;; ----------------------------------------------------------
-  ;; 1. Выбор INSERT
-  ;; ----------------------------------------------------------
-
   (setq inserts (fasonka-select-inserts layers))
 
   (if (null inserts)
     (progn
-      (princ
-        "\nБлоки со свойством Длина не найдены."
-      )
+      (princ "\nБлоки со свойством Длина не найдены.")
       (list
         :task 'FASONKA
         :success nil
@@ -799,10 +763,6 @@
     )
 
     (progn
-      ;; ------------------------------------------------------
-      ;; 2. Сканирование и извлечение
-      ;; ------------------------------------------------------
-
       (setq records '()
             total-blocks 0
             error-count 0)
@@ -842,15 +802,9 @@
         )
       )
 
-      ;; ------------------------------------------------------
-      ;; 3. Если валидных блоков нет
-      ;; ------------------------------------------------------
-
       (if (null records)
         (progn
-          (princ
-            "\nБлоки со свойством Длина не найдены."
-          )
+          (princ "\nБлоки со свойством Длина не найдены.")
           (list
             :task 'FASONKA
             :success nil
@@ -867,10 +821,6 @@
         )
 
         (progn
-          ;; --------------------------------------------------
-          ;; 4. Модель данных
-          ;; --------------------------------------------------
-
           (setq detail
             (fasonka-aggregate-detail records)
           )
@@ -889,10 +839,6 @@
             )
           )
 
-          ;; --------------------------------------------------
-          ;; 5. Экспорт
-          ;; --------------------------------------------------
-
           (setq excel-file nil
                 csv-file nil
                 txt-file nil)
@@ -904,7 +850,6 @@
             (setq save-root save-base)
           )
 
-          ;; Excel / CSV
           (if export-excel
             (progn
               (if (tu-ensure-directory-exists-p
@@ -934,20 +879,15 @@
                           (strcat save-root ".csv")
                         )
                       )
-                      (princ
-                        "\nЭкспорт в Excel недоступен. Создан CSV-файл."
-                      )
+                      (princ "\nЭкспорт в Excel недоступен. Создан CSV-файл.")
                     )
                   )
                 )
-                (princ
-                  "\nПапка для сохранения не существует. Excel/CSV не создан."
-                )
+                (princ "\nПапка для сохранения не существует. Excel/CSV не создан.")
               )
             )
           )
 
-          ;; TXT
           (if export-txt
             (if (tu-ensure-directory-exists-p
                   (vl-filename-directory save-root))
@@ -961,15 +901,9 @@
                   (strcat save-root ".txt")
                 )
               )
-              (princ
-                "\nПапка для сохранения не существует. TXT не создан."
-              )
+              (princ "\nПапка для сохранения не существует. TXT не создан.")
             )
           )
-
-          ;; --------------------------------------------------
-          ;; 6. Таблица AutoCAD
-          ;; --------------------------------------------------
 
           (setq table-created nil)
 
@@ -984,10 +918,6 @@
               )
             )
           )
-
-          ;; --------------------------------------------------
-          ;; 7. Командная строка
-          ;; --------------------------------------------------
 
           (if (= report-mode "DETAIL")
             (princ
@@ -1023,10 +953,6 @@
               )
             )
           )
-
-          ;; --------------------------------------------------
-          ;; 8. Возврат результата
-          ;; --------------------------------------------------
 
           (list
             :task 'FASONKA
