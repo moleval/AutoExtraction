@@ -10,7 +10,7 @@
 
 ## 2. AutoCAD
 
-Для AutoCAD 2023 желательно использовать Unicode-режим AutoLISP:
+Для AutoCAD 2023 можно использовать Unicode-режим AutoLISP:
 
 ```text
 LISPSYS = 1
@@ -23,7 +23,7 @@ LISPSYS = 1
 Для загрузки проекта добавьте как минимум:
 
 ```text
-D:\AutoExtraction\TASKS
+D:\AutoExtraction\Extraction
 D:\AutoExtraction\common
 ```
 
@@ -48,7 +48,7 @@ APPLOAD
 Загрузите:
 
 ```text
-D:\AutoExtraction\TASKS\dispatcher.lsp
+D:\AutoExtraction\Extraction\extraction.lsp
 ```
 
 Диспетчер автоматически подгрузит общие библиотеки и `fasonka.lsp`.
@@ -58,7 +58,7 @@ D:\AutoExtraction\TASKS\dispatcher.lsp
 В командной строке AutoCAD:
 
 ```text
-TASKS
+Extraction
 ```
 
 Откроется окно выбора задачи.

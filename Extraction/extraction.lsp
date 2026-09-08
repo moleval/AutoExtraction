@@ -1,6 +1,5 @@
-```lisp
 ;;; ============================================================
-;;; dispatcher.lsp  (версия с тремя отдельными фильтрами)
+;;; extraction.lsp  (версия с тремя отдельными фильтрами)
 ;;; Команды: EXTRACTION, ЭКСТРАКЦИЯ
 ;;; ============================================================
 (vl-load-com)
@@ -69,11 +68,11 @@
 
 ;; ---------- Загрузка модулей ----------
 (defun dispatcher-project-root ( / dsp)
-  (setq dsp (findfile "dispatcher.lsp"))
+  (setq dsp (findfile "extraction.lsp"))
   (if dsp (vl-filename-directory (vl-filename-directory dsp)) nil)
 )
-(defun dispatcher-tasks-dir ( / dsp)
-  (setq dsp (findfile "dispatcher.lsp"))
+(defun dispatcher-extraction-dir ( / dsp)
+  (setq dsp (findfile "extraction.lsp"))
   (if dsp (vl-filename-directory dsp) nil)
 )
 (defun dispatcher-load-all ( / root common f path)
@@ -81,20 +80,26 @@
   (if root
     (progn
       (setq common (strcat root "\\common\\"))
-      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp")
+      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "txt-utils.lsp")
         (setq path (strcat common f))
         (if (findfile path) (load path)
-          (princ (strcat "\n[DISPATCHER] Не найден: " path)))
+          (princ (strcat "\n[EXTRACTION] Не найден: " path)))
       )
-      (setq path (strcat root "\\TASKS\\fasonka.lsp"))
+      (setq path (strcat root "\\Extraction\\fasonka.lsp"))
       (if (findfile path) (load path)
-        (princ (strcat "\n[DISPATCHER] Не найден: " path)))
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+      (setq path (strcat root "\\Extraction\\cutline.lsp"))
+      (if (findfile path) (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+      (setq path (strcat root "\\Extraction\\cutsheet.lsp"))
+      (if (findfile path) (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
     )
     (progn
-      (princ "\n[DISPATCHER] Корень не найден, загрузка по имени...")
-      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "fasonka.lsp")
+      (princ "\n[EXTRACTION] Корень не найден, загрузка по имени...")
+      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "txt-utils.lsp" "fasonka.lsp" "cutline.lsp" "cutsheet.lsp")
         (setq path (findfile f))
-        (if path (load path) (princ (strcat "\n[DISPATCHER] Не найден: " f)))
+        (if path (load path) (princ (strcat "\n[EXTRACTION] Не найден: " f)))
       )
     )
   )
@@ -130,7 +135,7 @@
   )
 )
 
-;; Новая функция: получение слоёв из выбранных фильтров по ключевым словам
+;; Получение слоёв из выбранных фильтров по ключевым словам
 (defun dispatcher-filter-layers-by-keywords (keywords / filters result f fname)
   (setq filters (vl-catch-all-apply 'tu-group-filter-names-and-layers '()))
   (if (vl-catch-all-error-p filters) (setq filters nil))
@@ -154,13 +159,12 @@
   (setq restore (dispatcher-selected-names))
   (setq *DISPATCHER-SELECTED-INDICES* '())
 
-  ;; Собираем ключевые слова на основе включённых чекбоксов
   (setq keywords '())
   (if *DISPATCHER-FILTER-FACADES* (setq keywords (cons "фасад" keywords)))
   (if *DISPATCHER-FILTER-VITRAZH* (setq keywords (cons "витраж" keywords)))
   (if *DISPATCHER-FILTER-FONAR*   (setq keywords (cons "фонар" keywords)))
 
-  (if keywords ; если хотя бы один фильтр включён
+  (if keywords
     (progn
       (setq vis (dispatcher-filter-layers-by-keywords keywords))
       (if (or (null vis) (not (listp vis)))
@@ -171,7 +175,6 @@
     (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
   )
 
-  ;; Очистка от нестрок и сортировка по алфавиту (без учёта регистра)
   (setq *DISPATCHER-VISIBLE-LAYERS*
     (vl-sort
       (vl-remove-if-not '(lambda (x) (= (type x) 'STR))
@@ -180,12 +183,10 @@
     )
   )
 
-  ;; Обновляем list_box
   (start_list "lst_layers")
   (mapcar 'add_list *DISPATCHER-VISIBLE-LAYERS*)
   (end_list)
 
-  ;; Восстановление выбора
   (setq i 0)
   (foreach item *DISPATCHER-VISIBLE-LAYERS*
     (if (vl-some '(lambda (x) (and (= (type x) 'STR) (= (type item) 'STR)
@@ -282,17 +283,17 @@
 )
 
 ;; ---------- Основная команда ----------
-(defun c:extraction ( / dcl-file save-base tdir r)
+(defun c:extraction ( / dcl-file save-base extraction-dir r)
   (vl-load-com)
   (dispatcher-load-all)
 
   (setq dcl-file nil)
-  (setq tdir (dispatcher-tasks-dir))
-  (if tdir (setq dcl-file (findfile (strcat tdir "\\dispatcher.dcl"))))
-  (if (null dcl-file) (setq dcl-file (findfile "dispatcher.dcl")))
+  (setq extraction-dir (dispatcher-extraction-dir))
+  (if extraction-dir (setq dcl-file (findfile (strcat extraction-dir "\\extraction.dcl"))))
+  (if (null dcl-file) (setq dcl-file (findfile "extraction.dcl")))
 
   (if (null dcl-file)
-    (progn (alert "Не найден файл dispatcher.dcl.") (princ))
+    (progn (alert "Не найден файл extraction.dcl.") (princ))
     (progn
       (setq *DISPATCHER-ALL-LAYERS* (dsp-layer-names))
       (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
@@ -309,9 +310,9 @@
 
       (setq *DISPATCHER-DCL-ID* (load_dialog dcl-file))
       (if (< *DISPATCHER-DCL-ID* 0)
-        (alert "Не удалось загрузить dispatcher.dcl.")
+        (alert "Не удалось загрузить extraction.dcl.")
         (progn
-          (if (new_dialog "task_dispatcher" *DISPATCHER-DCL-ID*)
+          (if (new_dialog "extraction_dialog" *DISPATCHER-DCL-ID*)
             (progn
               (set_tile "rb_detail" "1")
               (set_tile "rb_summary" "0")
@@ -334,8 +335,8 @@
               (action_tile "btn_save"   "(dispatcher-save)")
               (action_tile "btn_saveas" "(dispatcher-saveas)")
               (action_tile "btn_close"  "(dispatcher-close)")
-              (action_tile "btn_nest1d" "(dispatcher-cutline)")
-              (action_tile "btn_nest2d" "(dispatcher-cutsheet)")
+              (action_tile "btn_cutline" "(dispatcher-cutline)")
+              (action_tile "btn_cutsheet" "(dispatcher-cutsheet)")
               (action_tile "chk_filter_facades" "(dispatcher-filter-facades)")
               (action_tile "chk_filter_vitrazh" "(dispatcher-filter-vitrazh)")
               (action_tile "chk_filter_fonar"   "(dispatcher-filter-fonar)")
@@ -366,7 +367,7 @@
                    (princ "\nРаскрой листа: модуль в разработке (CUTSHEET).")))
                 (t nil))
             )
-            (alert "Не удалось создать диалог task_dispatcher.")
+            (alert "Не удалось создать диалог extraction_dialog.")
           )
           (unload_dialog *DISPATCHER-DCL-ID*)
           (setq *DISPATCHER-DCL-ID* nil)
@@ -380,6 +381,5 @@
 ;; Русская команда
 (defun c:Экстракция () (c:extraction))
 
-(princ "\nDISPATCHER.LSP загружен. Команды: EXTRACTION, ЭКСТРАКЦИЯ")
+(princ "\nEXTRACTION.LSP загружен. Команды: EXTRACTION, ЭКСТРАКЦИЯ")
 (princ)
-```

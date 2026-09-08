@@ -3,18 +3,29 @@
 ;;; Команда RELOAD для перезагрузки всех модулей AutoExtraction
 ;;; ============================================================
 
-(defun c:RELOAD ( / root common tasks f)
-  ;; Определяем корень проекта: на два уровня выше от fasonka.lsp
+(defun c:RELOAD ( / root common extraction-dir f safe-load)
+  ;; Функция безопасной загрузки файла
+  (defun safe-load (path / res)
+    (setq res (vl-catch-all-apply 'load (list path)))
+    (if (vl-catch-all-error-p res)
+      (princ (strcat "\nОшибка загрузки: " path " -> " (vl-catch-all-error-message res)))
+      (princ (strcat "\nЗагружен: " path))
+    )
+  )
+
   (setq root
-    (vl-filename-directory
-      (vl-filename-directory (findfile "fasonka.lsp"))
+    (if (findfile "fasonka.lsp")
+      (vl-filename-directory
+        (vl-filename-directory (findfile "fasonka.lsp"))
+      )
+      nil
     )
   )
 
   (if root
     (progn
       (setq common (strcat root "\\common\\"))
-      (setq tasks (strcat root "\\TASKS\\"))
+      (setq extraction-dir (strcat root "\\Extraction\\"))
 
       ;; Загружаем общие библиотеки
       (foreach f
@@ -26,10 +37,7 @@
           "txt-utils.lsp"
         )
         (if (findfile (strcat common f))
-          (progn
-            (load (strcat common f))
-            (princ (strcat "\nЗагружен: " common f))
-          )
+          (safe-load (strcat common f))
           (princ (strcat "\nНЕ НАЙДЕН: " common f))
         )
       )
@@ -38,22 +46,19 @@
       (foreach f
         '(
           "fasonka.lsp"
-          "dispatcher.lsp"
+          "extraction.lsp"
           "cutline.lsp"
           "cutsheet.lsp"
         )
-        (if (findfile (strcat tasks f))
-          (progn
-            (load (strcat tasks f))
-            (princ (strcat "\nЗагружен: " tasks f))
-          )
-          (princ (strcat "\nНЕ НАЙДЕН: " tasks f))
+        (if (findfile (strcat extraction-dir f))
+          (safe-load (strcat extraction-dir f))
+          (princ (strcat "\nНЕ НАЙДЕН: " extraction-dir f))
         )
       )
 
       (princ "\nВсе модули AutoExtraction перезагружены.")
     )
-    (princ "\nОшибка: не удалось определить корень проекта (fasonka.lsp не найден).")
+    (princ "\nОшибка: fasonka.lsp не найден в путях поддержки AutoCAD.")
   )
 
   (princ)

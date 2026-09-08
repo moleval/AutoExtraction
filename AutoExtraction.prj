@@ -3,10 +3,10 @@
   :NAME
   AutoExtraction
   :OWN-LIST
-  ("d:/AutoExtraction/TASKS/dispatcher" 
-    "d:/AutoExtraction/TASKS/fasonka"
-    "d:/AutoExtraction/TASKS/cutline"
-    "d:/AutoExtraction/TASKS/cutsheet"
+  ("d:/AutoExtraction/Extraction/extraction"
+    "d:/AutoExtraction/Extraction/fasonka"
+    "d:/AutoExtraction/Extraction/cutline"
+    "d:/AutoExtraction/Extraction/cutsheet"
     "d:/AutoExtraction/common/excel-utils"
     "d:/AutoExtraction/common/layer-utils"
     "d:/AutoExtraction/common/table-utils"

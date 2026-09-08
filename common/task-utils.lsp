@@ -1,44 +1,41 @@
 ;;; ============================================================
 ;;; common/task-utils.lsp
-;;; Общие утилиты для системы задач
+;;; Универсальные функции для задач AutoExtraction
 ;;; ============================================================
 
 (vl-load-com)
 
-(defun tu-safe-call (fn args / r)
-  (setq r (vl-catch-all-apply fn args))
-  (if (vl-catch-all-error-p r)
+;; Безопасный вызов функции с перехватом ошибок
+(defun tu-safe-call (func args / result)
+  (setq result (vl-catch-all-apply func args))
+  (if (vl-catch-all-error-p result)
     nil
-    r
+    result
   )
 )
 
-(defun tu-safe-call-result (fn args / r)
-  (setq r (vl-catch-all-apply fn args))
-  (if (vl-catch-all-error-p r)
-    (list nil (vl-catch-all-error-message r))
-    (list r nil)
-  )
+;; Возвращает T, если вызов завершился успешно
+(defun tu-safe-call-result (func args / result)
+  (setq result (vl-catch-all-apply func args))
+  (not (vl-catch-all-error-p result))
 )
 
-(defun tu-string-empty-p (s)
-  (or (null s) (= (vl-string-trim " \t\r\n" s) ""))
+;; Проверка пустой строки
+(defun tu-string-empty-p (str)
+  (or (null str) (= str "") (not (= (type str) 'STR)))
 )
 
+;; Уникализация списка строк без учёта регистра
 (defun tu-list-unique-ci (lst / out x key)
   (setq out '())
-  (foreach x lst
-    (if (and (= 'STR (type x))
-             (> (strlen x) 0))
-      (progn
-        (setq key (strcase x))
-        (if (not
-              (vl-some
-                '(lambda (y) (= (strcase y) key))
-                out
-              )
-            )
-          (setq out (append out (list x)))
+  (if (listp lst)
+    (foreach x lst
+      (if (= (type x) 'STR)
+        (progn
+          (setq key (strcase x))
+          (if (not (vl-some '(lambda (y) (= (strcase y) key)) out))
+            (setq out (append out (list x)))
+          )
         )
       )
     )
@@ -46,123 +43,82 @@
   out
 )
 
+;; Сортировка строк без учёта регистра
 (defun tu-sort-strings-ci (lst)
-  (vl-sort lst
-    '(lambda (a b)
-       (< (strcase a) (strcase b))
-     )
-  )
+  (vl-sort lst '(lambda (a b) (< (strcase a) (strcase b))))
 )
 
-(defun tu-list-to-comma-string (lst / s)
+;; Преобразование списка строк в строку с разделителем запятая
+(defun tu-list-to-comma-string (lst)
   (if lst
-    (progn
-      (setq s "")
-      (foreach x lst
-        (setq s
-          (if (= s "")
-            x
-            (strcat s "," x)
-          )
-        )
+    (apply 'strcat
+      (cons (car lst)
+        (mapcar '(lambda (x) (strcat "," x)) (cdr lst))
       )
-      s
     )
     ""
   )
 )
 
-(defun tu-strip-extension (path / p name)
-  (if path
-    (progn
-      (setq p (vl-filename-directory path))
-      (setq name (vl-filename-base path))
-      (if p
-        (strcat p "\\" name)
-        name
-      )
+;; Удаление расширения из пути
+(defun tu-strip-extension (path)
+  (if (setq pos (vl-string-position 46 (vl-string-left-trim "\\/" path) 0 T nil))
+    (substr path 1 pos)
+    path
+  )
+)
+
+;; Формирование базового имени файла по умолчанию
+(defun tu-default-save-base (task-id)
+  (strcat
+    (getvar "dwgprefix")
+    (vl-filename-base (getvar "dwgname"))
+    (cond
+      ((eq task-id 'FASONKA) " Фасонка")
+      (t "")
     )
   )
 )
 
-(defun tu-default-save-base (task-id / prefix dwg base)
-  (setq prefix (getvar "DWGPREFIX"))
-  (setq dwg    (getvar "DWGNAME"))
-  (setq base   (vl-filename-base dwg))
-  (if (or (null base) (= base ""))
-    (setq base "Untitled")
-  )
-  (if (or (null prefix) (= prefix ""))
-    (setq prefix (getvar "TEMPPREFIX"))
-  )
-  (strcat prefix base "_" (strcase (vl-symbol-name task-id)))
+;; Запрос базового имени для сохранения
+(defun tu-get-save-base (task-id / default)
+  (setq default (tu-default-save-base task-id))
+  (getfiled "Сохранить как" default "xls" 1)
 )
 
-(defun tu-get-save-base (task-id / default result)
-  (setq default (strcat (tu-default-save-base task-id) ".xls"))
-  (setq result
-    (getfiled
-      "Сохранить отчёт"
-      default
-      "xls"
-      1
-    )
-  )
-  (if result
-    (tu-strip-extension result)
+;; Безопасный вывод числа с фиксированной точностью
+(defun tu-safe-rtos (num prec)
+  (if (numberp num)
+    (rtos num 2 prec)
+    "0"
   )
 )
 
-(defun tu-parse-comma-list (s / pos token out rest)
-  (setq out '())
-  (setq rest (if s (vl-string-trim " \t\r\n" s) ""))
-
-  (while (> (strlen rest) 0)
-    (setq pos (vl-string-search "," rest))
-
-    (if pos
-      (progn
-        (setq token (substr rest 1 pos))
-        (setq rest  (substr rest (+ pos 2)))
-      )
-      (progn
-        (setq token rest)
-        (setq rest "")
-      )
-    )
-
-    (setq token (vl-string-trim " \t\r\n" token))
-
-    (if (/= token "")
-      (setq out (append out (list token)))
-    )
-  )
-
-  (tu-list-unique-ci out)
+;; Проверка возможности записи файла
+(defun tu-file-writable-p (path)
+  (not (null (open path "a")))
 )
 
-(defun tu-safe-rtos (value mode prec)
-  (if (numberp value)
-    (rtos value mode prec)
-    ""
-  )
-)
-
-(defun tu-file-writable-p (path / f)
-  (setq f (open path "a"))
-  (if f
-    (progn
-      (close f)
-      T
-    )
+;; Проверка существования каталога
+(defun tu-ensure-directory-exists-p (dir)
+  (if (findfile dir)
+    T
     nil
   )
 )
 
-(defun tu-ensure-directory-exists-p (path)
-  (and path
-       (/= path "")
-       (vl-file-directory-p path))
+;; Разбор строки со списком, разделённым запятыми
+(defun tu-parse-comma-list (str / pos result)
+  (setq result '())
+  (while (setq pos (vl-string-search "," str))
+    (setq result (append result (list (vl-string-trim " " (substr str 1 pos)))))
+    (setq str (substr str (+ pos 2)))
+  )
+  (if (> (strlen (vl-string-trim " " str)) 0)
+    (setq result (append result (list (vl-string-trim " " str))))
+  )
+  result
 )
 
+(princ "\nTASK-UTILS.LSP загружен.")
 (princ)

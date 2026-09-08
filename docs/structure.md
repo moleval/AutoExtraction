@@ -9,11 +9,12 @@ AutoExtraction/
 │   ├── txt-utils.lsp            # Экспорт в TXT (.gal для передачи в раскрой)
 │   └── table-utils.lsp          # Создание таблиц AutoCAD (ActiveX)
 │
-├── TASKS/
-│   ├── dispatcher.lsp           # Диспетчер: загрузка модулей, окно выбора, вызов run-task
-│   ├── dispatcher.dcl           # Описание диалогового окна
+├── Extraction/
+│   ├── extraction.lsp           # Диспетчер: загрузка модулей, окно выбора, вызов run-task
+│   ├── extraction.dcl           # Описание диалогового окна
 │   ├── fasonka.lsp              # Задача «Фасонка»
-│   └── nest1ds.lsp              # Утилита линейного раскроя
+│   ├── cutline.lsp              # Утилита линейного раскроя (раскрой хлыста)
+│   └── cutsheet.lsp             # Утилита листового раскроя (в разработке)
 │
 ├── docs/
 │   ├── promt.md                 # Промт/техническое задание
@@ -24,4 +25,5 @@ AutoExtraction/
 │
 ├── .gitignore
 ├── README.md
+├── reload.lsp
 └── exportcode.py                # Скрипт экспорта кода в единый текстовый файл

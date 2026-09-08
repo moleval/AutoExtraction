@@ -10,7 +10,7 @@
 ;; ------------------------------------------------------------
 (defun tbl-fill-detail (table groups / row g gIdx gName gRecs totalSum itemNum len count sum)
   (vla-SetColumnWidth table 0 17.5)
-  (vla-SetColumnWidth table 1 150.0)   ; ширина 150
+  (vla-SetColumnWidth table 1 150.0)
   (vla-SetColumnWidth table 2 25.0)
   (vla-SetColumnWidth table 3 25.0)
   (vla-SetColumnWidth table 4 30.0)
@@ -104,7 +104,7 @@
     (setq totalCount (+ totalCount (cadr g))
           totalSum   (+ totalSum (caddr g)))
   )
-  (vla-MergeCells table row row 0 1)  ; объединяем № и Тип
+  (vla-MergeCells table row row 0 1)
   (vla-SetText table row 0 "      Итого")
   (vla-SetCellAlignment table row 0 4)
   (vla-SetText table row 2 (itoa totalCount))
@@ -142,7 +142,6 @@
           (vla-startundomark doc)
 
           (if (= report-type "DETAIL")
-            ;; DETAIL: несколько таблиц с разбиением
             (progn
               (setq indexed-groups report-data)
               (setq tableIndex 0 createdTables '() currentGroups '() currentDataRows 0)
@@ -199,9 +198,9 @@
                 )
               )
             )
-            ;; SUMMARY: одна таблица на все данные
+            ;; SUMMARY
             (progn
-              (setq neededRows (+ 3 (length report-data))) ; заголовок + шапка + строки + итого
+              (setq neededRows (+ 3 (length report-data)))
               (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
               (if (vl-catch-all-error-p tableObj)
                 (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))

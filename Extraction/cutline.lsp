@@ -1,16 +1,16 @@
 ;;; ============================================================
-;;; CUTLINE.LSP — раскрой хлыстов по выбранным элементам
+;;; CUTLINE.LSP — модуль линейного раскроя мерного материала
 ;;; Команда: CUTLINE
-;;; Поддержка: LWPOLYLINE, POLYLINE, LINE, ARC, ELLIPSE, SPLINE, MLINE
+;;; Объекты: LWPOLYLINE, POLYLINE, LINE, ARC, ELLIPSE, SPLINE, MLINE
 ;;; Алгоритм: First-Fit Decreasing (FFD)
 ;;; ============================================================
 (vl-load-com)
 
-;; ================= НАСТРОЙКИ =================
+;; ================= Настройки =================
 (setq *NEST-TRANSPARENCY* 70)
 (setq *NEST-PALETTE* '(1 2 3 4 5 6 30 210 140 90))
-(setq *NEST-STYLE-NAME* "Основной стиль (раскрой)")   ; имя стиля курсива
-(setq *NEST-ITALIC-ANGLE* 0.26)                       ; наклон курсива, радианы (~15°)
+(setq *NEST-STYLE-NAME* "Раскрой Italic")        ; имя текстового стиля
+(setq *NEST-ITALIC-ANGLE* 0.26)                   ; наклон шрифта, радианы (~15°)
 (setq *NEST-TEXT-STYLE* nil)
 (setq *NEST-COLOR-OUTLINE* 7)
 (setq *NEST-COLOR-LABEL*   7)
@@ -21,17 +21,17 @@
 (setq *NEST-COLOR-KPD*     1)
 ;; =============================================
 
-;; ---------- прозрачность для DXF 440 ----------
+;; ---------- Прозрачность для DXF 440 ----------
 (defun n1-trans-value (percent)
   (fix (* 255.0 (/ (- 100.0 (float percent)) 100.0)))
 )
 
-;; ---------- курсивный стиль на основе Arial ----------
+;; ---------- Создание курсивного стиля на базе Arial ----------
 (defun n1-ensure-italic-style ( / result)
   (if (tblsearch "STYLE" *NEST-STYLE-NAME*)
     (progn
       (setq *NEST-TEXT-STYLE* *NEST-STYLE-NAME*)
-      (princ (strcat "\nСтиль курсива уже существует: " *NEST-STYLE-NAME*))
+      (princ (strcat "\nСтиль текста уже существует: " *NEST-STYLE-NAME*))
     )
     (progn
       (setq result
@@ -53,18 +53,18 @@
       (if (and result (tblsearch "STYLE" *NEST-STYLE-NAME*))
         (progn
           (setq *NEST-TEXT-STYLE* *NEST-STYLE-NAME*)
-          (princ (strcat "\nСоздан стиль курсива: " *NEST-STYLE-NAME*))
+          (princ (strcat "\nСоздан новый стиль: " *NEST-STYLE-NAME*))
         )
         (progn
           (setq *NEST-TEXT-STYLE* nil)
-          (princ "\nНе удалось создать стиль курсива — используется текущий.")
+          (princ "\nНе удалось создать стиль текста с наклонным шрифтом.")
         )
       )
     )
   )
 )
 
-;; ---------- уникальное имя блока (база, при занятости — с номером) ----------
+;; ---------- Генерация уникального имени блока (если такой существует, добавить номер) ----------
 (defun n1-unique-block-name (base / name n)
   (setq n 0)
   (setq name (strcat base " " (itoa n)))
@@ -75,7 +75,7 @@
   name
 )
 
-;; ---------- вставка блока ----------
+;; ---------- Вставка блока ----------
 (defun n1-block-insert (name insPt)
   (entmake
     (list
@@ -92,7 +92,7 @@
   )
 )
 
-;; ---------- цвет для группы длины ----------
+;; ---------- Карта цветов для разных длин ----------
 (defun n1-build-color-map (pieces / palette i map rec)
   (setq palette *NEST-PALETTE*)
   (setq i 0 map '())
@@ -108,7 +108,7 @@
   (if pair (cdr pair) 7)
 )
 
-;; ---------- текст с цветом и стилем ----------
+;; ---------- Текст в рисунке и таблице ----------
 (defun n1-draw-text (pt h str color / style)
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE*
@@ -126,7 +126,7 @@
   )
 )
 
-;; ---------- линия ----------
+;; ---------- Линия ----------
 (defun n1-draw-line (p1 p2 color)
   (entmake
     (list
@@ -138,7 +138,7 @@
   )
 )
 
-;; ---------- прямоугольник ----------
+;; ---------- Прямоугольник ----------
 (defun n1-draw-rect (p1 p2 color / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
   (entmake
@@ -157,7 +157,7 @@
   )
 )
 
-;; ---------- заливка ----------
+;; ---------- Штриховка ----------
 (defun n1-draw-hatch (p1 p2 color trans / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
   (entmake
@@ -190,7 +190,7 @@
   )
 )
 
-;; ---------- развернуть группы ----------
+;; ---------- Разворачивание групп в список ----------
 (defun n1-expand (pieces / sorted-groups out rec len cnt i)
   (setq sorted-groups
     (vl-sort pieces '(lambda (a b) (> (car a) (car b))))
@@ -244,7 +244,7 @@
   bars
 )
 
-;; ---------- длина мультилинии ----------
+;; ---------- Длина мультилинии ----------
 (defun n1-mline-length (ent / obj numEl copyObj arr safe sub elen total)
   (setq numEl (cdr (assoc 72 (entget ent))))
   (if (or (null numEl) (< numEl 1)) (setq numEl 1))
@@ -310,7 +310,7 @@
   s
 )
 
-;; ---------- визуализация хлыстов (в точке вставки) ----------
+;; ---------- Вывод раскладки (по хлыстам) ----------
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util
     curx p halfw str col sp)
@@ -353,9 +353,9 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    (setq sp (cond ((< i 10)   "   ")   ; Хлыст 1…9    ? 3 пробела
-                   ((< i 100)  "  ")    ; Хлыст 10…99  ? 2 пробела
-                   (t           " ")))   ; Хлыст 100+   ? 1 пробел
+    (setq sp (cond ((< i 10)   "   ")   ; номер 1–9    – 3 пробела
+                   ((< i 100)  "  ")    ; номер 10–99  – 2 пробела
+                   (t           " ")))   ; номер 100+   – 1 пробел
     (n1-draw-text (list (- x0 (* barHeight 2.2) 100.0) (+ y0 (* barHeight 0.35))) txtH
                   (strcat "Хлыст " (itoa i) sp "[" (rtos util 2 1) "%]") *NEST-COLOR-LABEL*)
 
@@ -370,7 +370,7 @@
 
     (if (> waste 0.0)
       (progn
-        (setq str (strcat "отход " (rtos waste 2 0)))
+        (setq str (strcat "Отход " (rtos waste 2 0)))
         (setq halfw (* (strlen str) txtH 0.4))
         (n1-draw-text (list (+ (- (+ x0 stock) waste) (* waste 0.5) (- halfw))
                             (+ y0 (* barHeight 0.35))) txtH str *NEST-COLOR-WASTE*)
@@ -382,7 +382,7 @@
   (list (list (- x0 (* barHeight 3.0) 100.0) miny) (list (+ x0 stock) maxy))
 )
 
-;; ---------- таблица итогов ----------
+;; ---------- Сводная таблица ----------
 (defun n1-draw-summary (bars pieces stock insPt color-map /
     barHeight th rowH pad col1W col2W col3W tableW tableH
     left top x1 x2 x3 y bottom
@@ -417,23 +417,23 @@
   (setq x3 (+ left pad col1W col2W))
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
   (setq y (- top pad 100.0))
-  (n1-draw-text (list x1 y) (* th 1.3) "ИТОГИ РАСКРОЯ" *NEST-COLOR-TITLE*)
+  (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
   (setq y (- y rowH) y (- y (* rowH 0.5)))
-  (n1-draw-text (list x1 y) th "ХЛЫСТЫ" *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x1 y) th "Длина" *NEST-COLOR-HEADER*)
   (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x1 y) th "Хлыст, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
-  (n1-draw-text (list x3 y) th "Погонаж, м.п." *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th (rtos stock 2 0) *NEST-COLOR-VALUE*)
   (n1-draw-text (list x2 y) th (itoa num-bars) *NEST-COLOR-VALUE*)
   (n1-draw-text (list x3 y) th (rtos stock-total-m 2 2) *NEST-COLOR-VALUE*)
   (setq y (- y rowH) y (- y (* rowH 0.5)))
-  (n1-draw-text (list x1 y) th "ИЗДЕЛИЯ" *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x1 y) th "Изделия" *NEST-COLOR-HEADER*)
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
-  (n1-draw-text (list x3 y) th "Погонаж, м.п." *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
   (setq y (- y rowH))
   (foreach rec pieces
     (n1-draw-text (list x1 y) th (rtos (car rec) 2 0) (n1-get-color color-map (car rec)))
@@ -444,7 +444,7 @@
   (setq y (- y (* rowH 0.5)))
   (n1-draw-text (list x1 y) th (strcat "Всего изделий: " (itoa total-cnt) " шт") *NEST-COLOR-VALUE*)
   (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th (strcat "Погонаж изделий: " (rtos total-product-m 2 2) " м.п.") *NEST-COLOR-VALUE*)
+  (n1-draw-text (list x1 y) th (strcat "Суммарная длина: " (rtos total-product-m 2 2) " м.п.") *NEST-COLOR-VALUE*)
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) (* th 1.2) (strcat "КПД использования: " (rtos kpd 2 1) " %") *NEST-COLOR-KPD*)
   (list (list left bottom) (list (+ left tableW) top))
@@ -460,7 +460,7 @@
 )
 
 (defun n1-report (bars stock kerf / i bar pieces waste used util)
-  (princ (strcat "\nВсего хлыстов: " (itoa (length bars))))
+  (princ (strcat "\nКоличество хлыстов: " (itoa (length bars))))
   (setq i 0)
   (foreach bar bars
     (setq i (1+ i))
@@ -469,7 +469,7 @@
     (setq used (- stock waste))
     (setq util (* 100.0 (/ used stock)))
     (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces)
-                   " | исп. " (rtos used 2 1) " | отход " (rtos waste 2 1) " | " (rtos util 2 1) "%"))
+                   " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1) " | " (rtos util 2 1) "%"))
   )
   (princ)
 )
@@ -479,7 +479,7 @@
   (setq f (open fname "w"))
   (if f
     (progn
-      (write-line "Хлыст;Отрезки;Использовано;Отход;Использование_%" f)
+      (write-line "Хлыст;Детали;Использовано;Отход;Использование_%" f)
       (setq i 0)
       (foreach bar bars
         (setq i (1+ i))
@@ -496,18 +496,18 @@
   )
 )
 
-;; ---------- главная команда ----------
+;; ---------- Главная команда ----------
 (defun c:cutline ( / ss tol stock kerf insPt pieces sorted bars
                     bbox1 bbox2 bbox dbg-cnt p1 p2 color-map
                     barHeight sumInsPt num-bars stock-total-mm
                     total-cnt total-product-mm kpd rec blockName baseName
                     lastEnt ssNew ent oldEcho)
-  (princ "\n=== РАСКРОЙ ХЛЫСТОВ ПО ВЫБРАННЫМ ЭЛЕМЕНТАМ ===")
-  (princ "\nВыберите полилинии/линии - будущие отрезки:")
+  (princ "\n=== Линейный раскрой мерного материала ===")
+  (princ "\nВыберите полилинии/линии - исходные детали:")
   (setq ss (ssget '((0 . "LWPOLYLINE,POLYLINE,LINE,ARC,ELLIPSE,SPLINE,MLINE"))))
   (if (null ss) (progn (princ "\nНичего не выбрано.") (princ) (exit)))
   (princ (strcat "\nВыбрано объектов: " (itoa (sslength ss))))
-  (setq tol (getreal "\nТочность группировки длин (мм) <1>: "))
+  (setq tol (getreal "\nДопуск округления длины (мм) <1>: "))
   (if (or (null tol) (<= tol 0.0)) (setq tol 1.0))
   (setq stock (getreal "\nДлина хлыста (мм) <6000>: "))
   (if (null stock) (setq stock 6000.0))
@@ -515,22 +515,22 @@
   (if (null kerf) (setq kerf 0.0))
 
   (setq pieces (n1-extract-pieces ss tol))
-  (if (null pieces) (progn (princ "\nНе удалось получить длины.") (princ) (exit)))
+  (if (null pieces) (progn (princ "\nНе удалось извлечь длины.") (princ) (exit)))
 
   (setq dbg-cnt 0)
   (foreach rec pieces (setq dbg-cnt (+ dbg-cnt (cadr rec))))
-  (princ (strcat "\nГрупп длин: " (itoa (length pieces)) ", всего отрезков: " (itoa dbg-cnt)))
+  (princ (strcat "\nВсего деталей: " (itoa (length pieces)) ", общее количество: " (itoa dbg-cnt)))
 
   (foreach rec pieces
     (if (> (car rec) stock)
-      (princ (strcat "\nВНИМАНИЕ: отрезок " (rtos (car rec) 2 2) " длиннее хлыста!"))
+      (princ (strcat "\nВнимание: деталь " (rtos (car rec) 2 2) " больше хлыста!"))
     )
   )
 
   (setq sorted (n1-expand pieces))
-  (princ (strcat "\nРазвёрнуто отрезков: " (itoa (length sorted))))
+  (princ (strcat "\nРазвернуто элементов: " (itoa (length sorted))))
   (setq bars (n1-ffd sorted stock kerf))
-  (princ (strcat "\nХлыстов после раскроя: " (itoa (length bars))))
+  (princ (strcat "\nПолучено хлыстов: " (itoa (length bars))))
   (n1-report bars stock kerf)
 
   (setq num-bars (length bars))
@@ -543,38 +543,38 @@
   (setq kpd (if (> stock-total-mm 0)
               (* 100.0 (/ total-product-mm stock-total-mm))
               0.0))
-  (princ (strcat "\nВсего изделий: " (itoa total-cnt) " шт, погонаж "
+  (princ (strcat "\nВсего изделий: " (itoa total-cnt) " шт, суммарная длина "
                  (rtos (/ total-product-mm 1000.0) 2 2) " м.п."))
-  (princ (strcat "\nХлыстов: " (itoa num-bars) " шт, общий погонаж "
+  (princ (strcat "\nХлыстов: " (itoa num-bars) " шт, общая длина "
                  (rtos (/ stock-total-mm 1000.0) 2 2) " м.п."))
   (princ (strcat "\nКПД использования: " (rtos kpd 2 1) " %"))
 
   (setq color-map (n1-build-color-map pieces))
 
-  ;; CSV — сохраняем независимо от визуализации
+  ;; CSV и раскладка, если не отказались
   (n1-write-csv bars stock kerf)
 
-  (setq insPt (getpoint "\nУкажите точку вставки визуализации: "))
+  (setq insPt (getpoint "\nУкажите точку вставки раскладки: "))
   (if insPt
     (progn
-      ;; курсивный стиль
+      ;; Курсивный стиль
       (n1-ensure-italic-style)
 
-      ;; имя блока: Раскрой_<имя_файла>
+      ;; Имя блока: Раскрой_<имя_файла>
       (setq baseName (vl-filename-base (getvar "DWGNAME")))
       (setq blockName (n1-unique-block-name (strcat "Раскрой " baseName)))
 
-      ;; маркер до отрисовки
+      ;; Запоминаем последний объект до вставки
       (setq lastEnt (entlast))
 
-      ;; рисуем всё в точке вставки
+      ;; Рисуем раскладку и сводку
       (setq bbox1 (n1-draw-layout bars stock kerf insPt color-map))
       (setq barHeight (/ stock 30.0))
       (setq sumInsPt (list (+ (car (cadr bbox1)) (* barHeight 2.0))
                            (cadr (cadr bbox1))))
       (setq bbox2 (n1-draw-summary bars pieces stock sumInsPt color-map))
 
-      ;; собираем все созданные объекты
+      ;; Собираем созданные объекты в набор
       (setq ssNew (ssadd))
       (if lastEnt
         (setq ent (entnext lastEnt))
@@ -585,7 +585,7 @@
         (setq ent (entnext ent))
       )
 
-      ;; создаём блок командой -BLOCK и сразу вставляем его
+      ;; Пытаемся создать блок из набора
       (if (> (sslength ssNew) 0)
         (progn
           (setq oldEcho (getvar "CMDECHO"))
@@ -594,9 +594,9 @@
           (setvar "CMDECHO" oldEcho)
           (if (tblsearch "BLOCK" blockName)
             (progn
-              ;; -BLOCK создаёт определение; явно вставляем вхождение в точку
+              ;; -BLOCK удаляет исходные объекты; если нужно оставить, вставляем копию
               (n1-block-insert blockName insPt)
-              (princ (strcat "\nСоздан и вставлен блок: " blockName))
+              (princ (strcat "\nСоздан блок с раскладкой: " blockName))
             )
             (princ "\nНе удалось создать блок.")
           )
@@ -604,13 +604,13 @@
         (princ "\nНет объектов для создания блока.")
       )
 
-      ;; зум к результату
+      ;; Область на экране
       (setq bbox (n1-combine-bbox bbox1 bbox2))
       (setq p1 (vlax-3d-point (list (car (car bbox)) (cadr (car bbox)) 0.0)))
       (setq p2 (vlax-3d-point (list (car (cadr bbox)) (cadr (cadr bbox)) 0.0)))
       (vl-catch-all-apply 'vla-ZoomWindow (list (vlax-get-acad-object) p1 p2))
     )
-    (princ "\nВизуализация пропущена.")
+    (princ "\nРаскладка пропущена.")
   )
 
   (princ)

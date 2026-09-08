@@ -1,13 +1,12 @@
 ;;; ============================================================
-;;;  TXT-UTILS.LSP
-;;;  Ёкспорт отчЄта ‘асонки в GAL (TXT)
+;;; common/txt-utils.lsp
+;;; Ёкспорт в GAL (текстовый файл дл€ раскро€)
 ;;; ============================================================
+(vl-load-com)
 
-(defun tx-export-gal (report-type report-data base-name
-                      / galfile fgal ig name recs itemNum len count rec)
+(defun tx-export-gal (report-type report-data base-name / galfile fgal name recs itemNum rec len count)
   (setq galfile (strcat base-name ".gal"))
   (setq fgal (open galfile "w"))
-
   (if fgal
     (progn
       (write-line "ƒлина=6000" fgal)
@@ -20,37 +19,21 @@
           (setq name (cadr ig)
                 recs (caddr ig)
                 itemNum 0)
-
           (foreach rec recs
             (setq itemNum (1+ itemNum)
-                  len      (cadr rec)
-                  count    (caddr rec))
-
+                  len (cadr rec)
+                  count (caddr rec))
             (write-line
-              (strcat
-                "Otr="
-                name
-                " "
-                (itoa itemNum)
-                "/"
-                (itoa count)
-                "/"
-                (rtos len 2 0)
-                "/")
-              fgal)
+              (strcat "Otr=" name " " (itoa itemNum) "/" (itoa count) "/" (rtos len 2 0) "/")
+              fgal
+            )
           )
         )
-
-        ;; SUMMARY (не предусмотрено, но выводим агрегаты)
         (foreach rec report-data
           (write-line
-            (strcat
-              "Otr="
-              (car rec)
-              "/"
-              (itoa (cadr rec))
-              "/0/")
-            fgal)
+            (strcat "Otr=" (car rec) "/" (itoa (cadr rec)) "/0/")
+            fgal
+          )
         )
       )
 
@@ -58,7 +41,6 @@
       (princ (strcat "\nGAL сохранЄн: " galfile))
       T
     )
-
     (progn
       (princ "\nЌе удалось сохранить GAL.")
       nil
@@ -66,4 +48,5 @@
   )
 )
 
+(princ "\nTXT-UTILS.LSP загружен.")
 (princ)

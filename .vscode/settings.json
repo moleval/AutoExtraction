@@ -1,8 +1,10 @@
 {
-    "files.encoding": "windows1251",
-    "files.autoGuessEncoding": true,
-    "editor.matchBrackets": "always",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 2,
-    "editor.wordWrap": "off"
+  "files.encoding": "windows1251",
+  "files.autoGuessEncoding": false,
+  "[lisp]": {
+    "files.encoding": "windows1251"
+  },
+  "[dcl]": {
+    "files.encoding": "windows1251"
+  }
 }

@@ -1,4 +1,4 @@
-task_dispatcher : dialog {
+extraction_dialog : dialog {
   label = "Выбор слоёв и задачи";
   initial_focus = "lst_layers";
 
@@ -10,12 +10,12 @@ task_dispatcher : dialog {
 
   : spacer { height = 0.3; }
 
-: row {
-  alignment = left;
-  : toggle { key = "chk_filter_facades"; label = "Фасады"; }
-  : toggle { key = "chk_filter_vitrazh";  label = "Витражи"; }
-  : toggle { key = "chk_filter_fonar";    label = "Фонарь 3D"; }
-}
+  : row {
+    alignment = left;
+    : toggle { key = "chk_filter_facades"; label = "Фасады"; }
+    : toggle { key = "chk_filter_vitrazh";  label = "Витражи"; }
+    : toggle { key = "chk_filter_fonar";    label = "Фонарь 3D"; }
+  }
 
   : spacer { height = 0.2; }
 
