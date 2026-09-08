@@ -3,20 +3,12 @@
 ;;; Команда RELOAD для перезагрузки всех модулей AutoExtraction
 ;;; ============================================================
 
-(defun c:RELOAD ( / root common extraction-dir f safe-load)
-  ;; Функция безопасной загрузки файла
-  (defun safe-load (path / res)
-    (setq res (vl-catch-all-apply 'load (list path)))
-    (if (vl-catch-all-error-p res)
-      (princ (strcat "\nОшибка загрузки: " path " -> " (vl-catch-all-error-message res)))
-      (princ (strcat "\nЗагружен: " path))
-    )
-  )
-
+(defun c:RELOAD ( / root extraction-dir common-dir f)
+  ;; Определяем корень проекта через extraction.lsp
   (setq root
-    (if (findfile "fasonka.lsp")
+    (if (findfile "extraction.lsp")
       (vl-filename-directory
-        (vl-filename-directory (findfile "fasonka.lsp"))
+        (vl-filename-directory (findfile "extraction.lsp"))
       )
       nil
     )
@@ -24,7 +16,7 @@
 
   (if root
     (progn
-      (setq common (strcat root "\\common\\"))
+      (setq common-dir (strcat root "\\common\\"))
       (setq extraction-dir (strcat root "\\Extraction\\"))
 
       ;; Загружаем общие библиотеки
@@ -36,13 +28,16 @@
           "table-utils.lsp"
           "txt-utils.lsp"
         )
-        (if (findfile (strcat common f))
-          (safe-load (strcat common f))
-          (princ (strcat "\nНЕ НАЙДЕН: " common f))
+        (if (findfile (strcat common-dir f))
+          (progn
+            (load (strcat common-dir f))
+            (princ (strcat "\nЗагружен: " common-dir f))
+          )
+          (princ (strcat "\nНЕ НАЙДЕН: " common-dir f))
         )
       )
 
-      ;; Загружаем модули задач
+      ;; Загружаем модули задач (из Extraction)
       (foreach f
         '(
           "fasonka.lsp"
@@ -51,14 +46,17 @@
           "cutsheet.lsp"
         )
         (if (findfile (strcat extraction-dir f))
-          (safe-load (strcat extraction-dir f))
+          (progn
+            (load (strcat extraction-dir f))
+            (princ (strcat "\nЗагружен: " extraction-dir f))
+          )
           (princ (strcat "\nНЕ НАЙДЕН: " extraction-dir f))
         )
       )
 
       (princ "\nВсе модули AutoExtraction перезагружены.")
     )
-    (princ "\nОшибка: fasonka.lsp не найден в путях поддержки AutoCAD.")
+    (princ "\nОшибка: extraction.lsp не найден в путях поддержки AutoCAD.")
   )
 
   (princ)

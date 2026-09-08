@@ -5,23 +5,23 @@
 (vl-load-com)
 
 ;; ---------- Глобальное состояние ----------
-(setq *DISPATCHER-DCL-ID* nil)
-(setq *DISPATCHER-ALL-LAYERS* nil)
-(setq *DISPATCHER-VISIBLE-LAYERS* nil)
-(setq *DISPATCHER-SELECTED-LAYERS* nil)
-(setq *DISPATCHER-SELECTED-INDICES* nil)
-(setq *DISPATCHER-FILTER-FACADES* nil)   ; Фасады
-(setq *DISPATCHER-FILTER-VITRAZH* nil)   ; Витражи
-(setq *DISPATCHER-FILTER-FONAR* nil)     ; Фонарь 3D
-(setq *DISPATCHER-TASK-ID* 'FASONKA)
-(setq *DISPATCHER-REPORT-MODE* "DETAIL")
-(setq *DISPATCHER-EXPORT-EXCEL* nil)
-(setq *DISPATCHER-EXPORT-TXT* nil)
-(setq *DISPATCHER-CREATE-TABLE* T)
-(setq *DISPATCHER-ACTION* 'CANCEL)
+(setq *EXTRACTION-DCL-ID* nil)
+(setq *EXTRACTION-ALL-LAYERS* nil)
+(setq *EXTRACTION-VISIBLE-LAYERS* nil)
+(setq *EXTRACTION-SELECTED-LAYERS* nil)
+(setq *EXTRACTION-SELECTED-INDICES* nil)
+(setq *EXTRACTION-FILTER-FACADES* nil)   ; Фасады
+(setq *EXTRACTION-FILTER-VITRAZH* nil)   ; Витражи
+(setq *EXTRACTION-FILTER-FONAR* nil)     ; Фонарь 3D
+(setq *EXTRACTION-TASK-ID* 'FASONKA)
+(setq *EXTRACTION-REPORT-MODE* "DETAIL")
+(setq *EXTRACTION-EXPORT-EXCEL* nil)
+(setq *EXTRACTION-EXPORT-TXT* nil)
+(setq *EXTRACTION-CREATE-TABLE* T)
+(setq *EXTRACTION-ACTION* 'CANCEL)
 
 ;; ---------- Безопасное получение списка слоёв ----------
-(defun dsp-unique-ci (lst / out x key)
+(defun extraction-unique-ci (lst / out x key)
   (setq out '())
   (if (listp lst)
     (foreach x lst
@@ -38,7 +38,7 @@
   out
 )
 
-(defun dsp-layer-names ( / acad doc layers out name)
+(defun extraction-layer-names ( / acad doc layers out name)
   (setq out '())
   (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
   (if (and (not (vl-catch-all-error-p acad)) acad)
@@ -63,20 +63,20 @@
   )
   (setq out (vl-remove-if-not '(lambda (x) (= (type x) 'STR)) out))
   (setq out (vl-sort out '(lambda (a b) (< (strcase a) (strcase b)))))
-  (dsp-unique-ci out)
+  (extraction-unique-ci out)
 )
 
 ;; ---------- Загрузка модулей ----------
-(defun dispatcher-project-root ( / dsp)
+(defun extraction-project-root ( / dsp)
   (setq dsp (findfile "extraction.lsp"))
   (if dsp (vl-filename-directory (vl-filename-directory dsp)) nil)
 )
-(defun dispatcher-extraction-dir ( / dsp)
+(defun extraction-modules-dir ( / dsp)
   (setq dsp (findfile "extraction.lsp"))
   (if dsp (vl-filename-directory dsp) nil)
 )
-(defun dispatcher-load-all ( / root common f path)
-  (setq root (dispatcher-project-root))
+(defun extraction-load-all ( / root common f path)
+  (setq root (extraction-project-root))
   (if root
     (progn
       (setq common (strcat root "\\common\\"))
@@ -95,19 +95,13 @@
       (if (findfile path) (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
     )
-    (progn
-      (princ "\n[EXTRACTION] Корень не найден, загрузка по имени...")
-      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "txt-utils.lsp" "fasonka.lsp" "cutline.lsp" "cutsheet.lsp")
-        (setq path (findfile f))
-        (if path (load path) (princ (strcat "\n[EXTRACTION] Не найден: " f)))
-      )
-    )
+    (princ "\n[EXTRACTION] Корень проекта не найден.")
   )
   T
 )
 
 ;; ---------- Список слоёв в диалоге ----------
-(defun dispatcher-parse-indices (s / x)
+(defun extraction-parse-indices (s / x)
   (if (and (= (type s) 'STR) (/= s ""))
     (progn
       (setq x (read (strcat "(" s ")")))
@@ -117,26 +111,26 @@
   )
 )
 
-(defun dispatcher-selected-names ( / s indices out i n)
+(defun extraction-selected-names ( / s indices out i n)
   (setq s (get_tile "lst_layers"))
   (if (or (null s) (/= (type s) 'STR) (= s ""))
     nil
     (progn
-      (setq indices (dispatcher-parse-indices s))
+      (setq indices (extraction-parse-indices s))
       (setq out '())
-      (setq n (length *DISPATCHER-VISIBLE-LAYERS*))
+      (setq n (length *EXTRACTION-VISIBLE-LAYERS*))
       (foreach i indices
         (if (and (numberp i) (>= i 0) (< i n))
-          (setq out (cons (nth i *DISPATCHER-VISIBLE-LAYERS*) out))
+          (setq out (cons (nth i *EXTRACTION-VISIBLE-LAYERS*) out))
         )
       )
-      (dsp-unique-ci out)
+      (extraction-unique-ci out)
     )
   )
 )
 
 ;; Получение слоёв из выбранных фильтров по ключевым словам
-(defun dispatcher-filter-layers-by-keywords (keywords / filters result f fname)
+(defun extraction-filter-layers-by-keywords (keywords / filters result f fname)
   (setq filters (vl-catch-all-apply 'tu-group-filter-names-and-layers '()))
   (if (vl-catch-all-error-p filters) (setq filters nil))
   (setq result '())
@@ -152,72 +146,72 @@
       )
     )
   )
-  (dsp-unique-ci result)
+  (extraction-unique-ci result)
 )
 
-(defun dispatcher-rebuild-layer-list ( / restore vis keywords selected i item)
-  (setq restore (dispatcher-selected-names))
-  (setq *DISPATCHER-SELECTED-INDICES* '())
+(defun extraction-rebuild-layer-list ( / restore vis keywords selected i item)
+  (setq restore (extraction-selected-names))
+  (setq *EXTRACTION-SELECTED-INDICES* '())
 
   (setq keywords '())
-  (if *DISPATCHER-FILTER-FACADES* (setq keywords (cons "фасад" keywords)))
-  (if *DISPATCHER-FILTER-VITRAZH* (setq keywords (cons "витраж" keywords)))
-  (if *DISPATCHER-FILTER-FONAR*   (setq keywords (cons "фонар" keywords)))
+  (if *EXTRACTION-FILTER-FACADES* (setq keywords (cons "фасад" keywords)))
+  (if *EXTRACTION-FILTER-VITRAZH* (setq keywords (cons "витраж" keywords)))
+  (if *EXTRACTION-FILTER-FONAR*   (setq keywords (cons "фонар" keywords)))
 
   (if keywords
     (progn
-      (setq vis (dispatcher-filter-layers-by-keywords keywords))
+      (setq vis (extraction-filter-layers-by-keywords keywords))
       (if (or (null vis) (not (listp vis)))
-        (setq vis *DISPATCHER-ALL-LAYERS*)
+        (setq vis *EXTRACTION-ALL-LAYERS*)
       )
-      (setq *DISPATCHER-VISIBLE-LAYERS* vis)
+      (setq *EXTRACTION-VISIBLE-LAYERS* vis)
     )
-    (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
+    (setq *EXTRACTION-VISIBLE-LAYERS* *EXTRACTION-ALL-LAYERS*)
   )
 
-  (setq *DISPATCHER-VISIBLE-LAYERS*
+  (setq *EXTRACTION-VISIBLE-LAYERS*
     (vl-sort
       (vl-remove-if-not '(lambda (x) (= (type x) 'STR))
-                        (if (listp *DISPATCHER-VISIBLE-LAYERS*) *DISPATCHER-VISIBLE-LAYERS* '()))
+                        (if (listp *EXTRACTION-VISIBLE-LAYERS*) *EXTRACTION-VISIBLE-LAYERS* '()))
       '(lambda (a b) (< (strcase a) (strcase b)))
     )
   )
 
   (start_list "lst_layers")
-  (mapcar 'add_list *DISPATCHER-VISIBLE-LAYERS*)
+  (mapcar 'add_list *EXTRACTION-VISIBLE-LAYERS*)
   (end_list)
 
   (setq i 0)
-  (foreach item *DISPATCHER-VISIBLE-LAYERS*
+  (foreach item *EXTRACTION-VISIBLE-LAYERS*
     (if (vl-some '(lambda (x) (and (= (type x) 'STR) (= (type item) 'STR)
                                    (= (strcase x) (strcase item)))) restore)
-      (setq *DISPATCHER-SELECTED-INDICES* (cons i *DISPATCHER-SELECTED-INDICES*))
+      (setq *EXTRACTION-SELECTED-INDICES* (cons i *EXTRACTION-SELECTED-INDICES*))
     )
     (setq i (1+ i))
   )
 
   (setq selected "")
-  (foreach i (reverse *DISPATCHER-SELECTED-INDICES*)
+  (foreach i (reverse *EXTRACTION-SELECTED-INDICES*)
     (setq selected (if (= selected "") (itoa i) (strcat selected " " (itoa i))))
   )
   (set_tile "lst_layers" selected)
 )
 
 ;; ---------- Чтение параметров ----------
-(defun dispatcher-read-params ( / selected)
-  (setq selected (dispatcher-selected-names))
-  (setq *DISPATCHER-SELECTED-LAYERS* (if selected selected nil))
-  (setq *DISPATCHER-REPORT-MODE* (if (= (get_tile "rb_summary") "1") "SUMMARY" "DETAIL"))
-  (setq *DISPATCHER-EXPORT-EXCEL* (= (get_tile "chk_xls") "1"))
-  (setq *DISPATCHER-EXPORT-TXT* (= (get_tile "chk_txt") "1"))
-  (setq *DISPATCHER-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
+(defun extraction-read-params ( / selected)
+  (setq selected (extraction-selected-names))
+  (setq *EXTRACTION-SELECTED-LAYERS* (if selected selected nil))
+  (setq *EXTRACTION-REPORT-MODE* (if (= (get_tile "rb_summary") "1") "SUMMARY" "DETAIL"))
+  (setq *EXTRACTION-EXPORT-EXCEL* (= (get_tile "chk_xls") "1"))
+  (setq *EXTRACTION-EXPORT-TXT* (= (get_tile "chk_txt") "1"))
+  (setq *EXTRACTION-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
   (cond
-    ((= (get_tile "rb_task_fasonka") "1")      (setq *DISPATCHER-TASK-ID* 'FASONKA))
-    ((= (get_tile "rb_task_subsystem") "1")    (setq *DISPATCHER-TASK-ID* 'SUBSYSTEM))
-    ((= (get_tile "rb_task_cladding") "1")     (setq *DISPATCHER-TASK-ID* 'CLADDING))
-    ((= (get_tile "rb_task_vitrazh") "1")      (setq *DISPATCHER-TASK-ID* 'VITRAZH))
-    ((= (get_tile "rb_task_zapolnenie") "1")   (setq *DISPATCHER-TASK-ID* 'ZAPOLNENIE))
-    (t (setq *DISPATCHER-TASK-ID* 'FASONKA))
+    ((= (get_tile "rb_task_fasonka") "1")      (setq *EXTRACTION-TASK-ID* 'FASONKA))
+    ((= (get_tile "rb_task_subsystem") "1")    (setq *EXTRACTION-TASK-ID* 'SUBSYSTEM))
+    ((= (get_tile "rb_task_cladding") "1")     (setq *EXTRACTION-TASK-ID* 'CLADDING))
+    ((= (get_tile "rb_task_vitrazh") "1")      (setq *EXTRACTION-TASK-ID* 'VITRAZH))
+    ((= (get_tile "rb_task_zapolnenie") "1")   (setq *EXTRACTION-TASK-ID* 'ZAPOLNENIE))
+    (t (setq *EXTRACTION-TASK-ID* 'FASONKA))
   )
   T
 )
@@ -251,7 +245,7 @@
 )
 
 ;; ---------- Обработчики ----------
-(defun dispatcher-help ()
+(defun extraction-help ()
   (alert (strcat "Окно запуска задач.\n\n"
                  "Выбор одной задачи, слоёв, режима отчёта и форматов вывода.\n"
                  "Кнопки Раскрой хлыста / Раскрой листа запускают модули раскроя.\n\n"
@@ -259,60 +253,60 @@
                  "Сохранить как... - выбор пути и имени.\n"
                  "Если слои не выбраны - поиск по всем слоям."))
 )
-(defun dispatcher-save   () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVE)   (done_dialog 1))
-(defun dispatcher-saveas () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVEAS) (done_dialog 1))
-(defun dispatcher-close  () (setq *DISPATCHER-ACTION* 'CANCEL) (done_dialog 0))
-(defun dispatcher-cutline () (setq *DISPATCHER-ACTION* 'CUTLINE) (done_dialog 1))
-(defun dispatcher-cutsheet () (setq *DISPATCHER-ACTION* 'CUTSHEET) (done_dialog 1))
+(defun extraction-save   () (extraction-read-params) (setq *EXTRACTION-ACTION* 'SAVE)   (done_dialog 1))
+(defun extraction-saveas () (extraction-read-params) (setq *EXTRACTION-ACTION* 'SAVEAS) (done_dialog 1))
+(defun extraction-close  () (setq *EXTRACTION-ACTION* 'CANCEL) (done_dialog 0))
+(defun extraction-cutline () (setq *EXTRACTION-ACTION* 'CUTLINE) (done_dialog 1))
+(defun extraction-cutsheet () (setq *EXTRACTION-ACTION* 'CUTSHEET) (done_dialog 1))
 
-(defun dispatcher-filter-facades ()
-  (setq *DISPATCHER-FILTER-FACADES* (= (get_tile "chk_filter_facades") "1"))
-  (dispatcher-rebuild-layer-list)
+(defun extraction-filter-facades ()
+  (setq *EXTRACTION-FILTER-FACADES* (= (get_tile "chk_filter_facades") "1"))
+  (extraction-rebuild-layer-list)
 )
-(defun dispatcher-filter-vitrazh ()
-  (setq *DISPATCHER-FILTER-VITRAZH* (= (get_tile "chk_filter_vitrazh") "1"))
-  (dispatcher-rebuild-layer-list)
+(defun extraction-filter-vitrazh ()
+  (setq *EXTRACTION-FILTER-VITRAZH* (= (get_tile "chk_filter_vitrazh") "1"))
+  (extraction-rebuild-layer-list)
 )
-(defun dispatcher-filter-fonar ()
-  (setq *DISPATCHER-FILTER-FONAR* (= (get_tile "chk_filter_fonar") "1"))
-  (dispatcher-rebuild-layer-list)
+(defun extraction-filter-fonar ()
+  (setq *EXTRACTION-FILTER-FONAR* (= (get_tile "chk_filter_fonar") "1"))
+  (extraction-rebuild-layer-list)
 )
 
-(defun dispatcher-layer-selection ()
-  (setq *DISPATCHER-SELECTED-LAYERS* (dispatcher-selected-names))
+(defun extraction-layer-selection ()
+  (setq *EXTRACTION-SELECTED-LAYERS* (extraction-selected-names))
 )
 
 ;; ---------- Основная команда ----------
-(defun c:extraction ( / dcl-file save-base extraction-dir r)
+(defun c:extraction ( / dcl-file save-base modules-dir r)
   (vl-load-com)
-  (dispatcher-load-all)
+  (extraction-load-all)
 
   (setq dcl-file nil)
-  (setq extraction-dir (dispatcher-extraction-dir))
-  (if extraction-dir (setq dcl-file (findfile (strcat extraction-dir "\\extraction.dcl"))))
+  (setq modules-dir (extraction-modules-dir))
+  (if modules-dir (setq dcl-file (findfile (strcat modules-dir "\\extraction.dcl"))))
   (if (null dcl-file) (setq dcl-file (findfile "extraction.dcl")))
 
   (if (null dcl-file)
     (progn (alert "Не найден файл extraction.dcl.") (princ))
     (progn
-      (setq *DISPATCHER-ALL-LAYERS* (dsp-layer-names))
-      (setq *DISPATCHER-VISIBLE-LAYERS* *DISPATCHER-ALL-LAYERS*)
-      (setq *DISPATCHER-SELECTED-LAYERS* nil)
-      (setq *DISPATCHER-FILTER-FACADES* nil)
-      (setq *DISPATCHER-FILTER-VITRAZH* nil)
-      (setq *DISPATCHER-FILTER-FONAR* nil)
-      (setq *DISPATCHER-TASK-ID* 'FASONKA)
-      (setq *DISPATCHER-REPORT-MODE* "DETAIL")
-      (setq *DISPATCHER-EXPORT-EXCEL* T)
-      (setq *DISPATCHER-EXPORT-TXT* nil)
-      (setq *DISPATCHER-CREATE-TABLE* T)
-      (setq *DISPATCHER-ACTION* 'CANCEL)
+      (setq *EXTRACTION-ALL-LAYERS* (extraction-layer-names))
+      (setq *EXTRACTION-VISIBLE-LAYERS* *EXTRACTION-ALL-LAYERS*)
+      (setq *EXTRACTION-SELECTED-LAYERS* nil)
+      (setq *EXTRACTION-FILTER-FACADES* nil)
+      (setq *EXTRACTION-FILTER-VITRAZH* nil)
+      (setq *EXTRACTION-FILTER-FONAR* nil)
+      (setq *EXTRACTION-TASK-ID* 'FASONKA)
+      (setq *EXTRACTION-REPORT-MODE* "DETAIL")
+      (setq *EXTRACTION-EXPORT-EXCEL* T)
+      (setq *EXTRACTION-EXPORT-TXT* nil)
+      (setq *EXTRACTION-CREATE-TABLE* T)
+      (setq *EXTRACTION-ACTION* 'CANCEL)
 
-      (setq *DISPATCHER-DCL-ID* (load_dialog dcl-file))
-      (if (< *DISPATCHER-DCL-ID* 0)
+      (setq *EXTRACTION-DCL-ID* (load_dialog dcl-file))
+      (if (< *EXTRACTION-DCL-ID* 0)
         (alert "Не удалось загрузить extraction.dcl.")
         (progn
-          (if (new_dialog "extraction_dialog" *DISPATCHER-DCL-ID*)
+          (if (new_dialog "extraction_dialog" *EXTRACTION-DCL-ID*)
             (progn
               (set_tile "rb_detail" "1")
               (set_tile "rb_summary" "0")
@@ -329,39 +323,39 @@
               (mode_tile "rb_task_zapolnenie" 1)
               (mode_tile "lst_blocks" 1)
 
-              (dispatcher-rebuild-layer-list)
+              (extraction-rebuild-layer-list)
 
-              (action_tile "btn_help"   "(dispatcher-help)")
-              (action_tile "btn_save"   "(dispatcher-save)")
-              (action_tile "btn_saveas" "(dispatcher-saveas)")
-              (action_tile "btn_close"  "(dispatcher-close)")
-              (action_tile "btn_cutline" "(dispatcher-cutline)")
-              (action_tile "btn_cutsheet" "(dispatcher-cutsheet)")
-              (action_tile "chk_filter_facades" "(dispatcher-filter-facades)")
-              (action_tile "chk_filter_vitrazh" "(dispatcher-filter-vitrazh)")
-              (action_tile "chk_filter_fonar"   "(dispatcher-filter-fonar)")
-              (action_tile "lst_layers" "(dispatcher-layer-selection)")
-              (action_tile "rb_detail"  "(setq *DISPATCHER-REPORT-MODE* \"DETAIL\")")
-              (action_tile "rb_summary" "(setq *DISPATCHER-REPORT-MODE* \"SUMMARY\")")
+              (action_tile "btn_help"   "(extraction-help)")
+              (action_tile "btn_save"   "(extraction-save)")
+              (action_tile "btn_saveas" "(extraction-saveas)")
+              (action_tile "btn_close"  "(extraction-close)")
+              (action_tile "btn_cutline" "(extraction-cutline)")
+              (action_tile "btn_cutsheet" "(extraction-cutsheet)")
+              (action_tile "chk_filter_facades" "(extraction-filter-facades)")
+              (action_tile "chk_filter_vitrazh" "(extraction-filter-vitrazh)")
+              (action_tile "chk_filter_fonar"   "(extraction-filter-fonar)")
+              (action_tile "lst_layers" "(extraction-layer-selection)")
+              (action_tile "rb_detail"  "(setq *EXTRACTION-REPORT-MODE* \"DETAIL\")")
+              (action_tile "rb_summary" "(setq *EXTRACTION-REPORT-MODE* \"SUMMARY\")")
 
               (start_dialog)
 
               (cond
-                ((eq *DISPATCHER-ACTION* 'SAVE)
-                 (run-task *DISPATCHER-TASK-ID* *DISPATCHER-SELECTED-LAYERS*
-                           *DISPATCHER-REPORT-MODE* *DISPATCHER-EXPORT-EXCEL*
-                           *DISPATCHER-EXPORT-TXT* *DISPATCHER-CREATE-TABLE* nil))
-                ((eq *DISPATCHER-ACTION* 'SAVEAS)
-                 (setq save-base (vl-catch-all-apply 'tu-get-save-base (list *DISPATCHER-TASK-ID*)))
+                ((eq *EXTRACTION-ACTION* 'SAVE)
+                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* nil))
+                ((eq *EXTRACTION-ACTION* 'SAVEAS)
+                 (setq save-base (vl-catch-all-apply 'tu-get-save-base (list *EXTRACTION-TASK-ID*)))
                  (if (vl-catch-all-error-p save-base) (setq save-base nil))
-                 (run-task *DISPATCHER-TASK-ID* *DISPATCHER-SELECTED-LAYERS*
-                           *DISPATCHER-REPORT-MODE* *DISPATCHER-EXPORT-EXCEL*
-                           *DISPATCHER-EXPORT-TXT* *DISPATCHER-CREATE-TABLE* save-base))
-                ((eq *DISPATCHER-ACTION* 'CUTLINE)
+                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* save-base))
+                ((eq *EXTRACTION-ACTION* 'CUTLINE)
                  (setq r (vl-catch-all-apply 'c:CUTLINE '()))
                  (if (vl-catch-all-error-p r)
                    (princ "\nCUTLINE не загружен. Загрузите cutline.lsp.")))
-                ((eq *DISPATCHER-ACTION* 'CUTSHEET)
+                ((eq *EXTRACTION-ACTION* 'CUTSHEET)
                  (setq r (vl-catch-all-apply 'c:CUTSHEET '()))
                  (if (vl-catch-all-error-p r)
                    (princ "\nРаскрой листа: модуль в разработке (CUTSHEET).")))
@@ -369,8 +363,8 @@
             )
             (alert "Не удалось создать диалог extraction_dialog.")
           )
-          (unload_dialog *DISPATCHER-DCL-ID*)
-          (setq *DISPATCHER-DCL-ID* nil)
+          (unload_dialog *EXTRACTION-DCL-ID*)
+          (setq *EXTRACTION-DCL-ID* nil)
         )
       )
     )
