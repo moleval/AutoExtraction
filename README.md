@@ -1,25 +1,38 @@
 # AutoExtraction
 
-РњРѕРґСѓР»СЊРЅР°СЏ СЃРёСЃС‚РµРјР° AutoLISP РґР»СЏ AutoCAD.
+Модульная система AutoLISP для AutoCAD, предназначенная для автоматизации извлечения данных из чертежей, подсчёта материалов и раскроя.
 
-## РўРµРєСѓС‰Р°СЏ СЃС‚СЂСѓРєС‚СѓСЂР°
+## Возможности
+
+- Запуск задач через диалоговое окно (`EXTRACTION`) или из командной строки (`FASONKA`).
+- Поддержка режимов отчёта:
+  - **DETAIL** — детальный перечень с промежуточными итогами по группам;
+  - **SUMMARY** — сводный отчёт с общими итогами.
+- Экспорт результатов:
+  - в Excel (`.xls`) — XML Spreadsheet с формулами;
+  - в CSV (`.csv`) — запасной вариант при недоступности Excel;
+  - в текстовый файл (`.gal`) — для передачи в системы раскроя;
+  - в таблицу AutoCAD.
+- Модуль линейного раскроя (`CUTLINE`) — оптимизация размещения деталей на хлыстах.
+
+## Структура проекта
 
 ```text
-D:\AutoExtraction\
-в”њв”Ђв”Ђ Extraction\
-в”‚   в”њв”Ђв”Ђ extraction.lsp
-в”‚   в”њв”Ђв”Ђ extraction.dcl
-в”‚   в”њв”Ђв”Ђ fasonka.lsp
-в”‚   в”њв”Ђв”Ђ cutline.lsp
-в”‚   в””в”Ђв”Ђ cutsheet.lsp
-в”њв”Ђв”Ђ common\
-в”‚   в”њв”Ђв”Ђ task-utils.lsp
-в”‚   в”њв”Ђв”Ђ excel-utils.lsp
-в”‚   в”њв”Ђв”Ђ table-utils.lsp
-в”‚   в”њв”Ђв”Ђ layer-utils.lsp
-в”‚   в””в”Ђв”Ђ txt-utils.lsp
-в”њв”Ђв”Ђ docs\
-в”њв”Ђв”Ђ .vscode\
-в”‚   в””в”Ђв”Ђ settings.json
-в”њв”Ђв”Ђ .gitignore
-в””в”Ђв”Ђ README.md
+AutoExtraction/
+??? Extraction/
+?   ??? extraction.lsp       # диспетчер: диалог, маршрутизация задач
+?   ??? extraction.dcl       # описание диалогового окна
+?   ??? fasonka.lsp          # задача «Фасонка»
+?   ??? cutline.lsp          # линейный раскрой
+?   ??? cutsheet.lsp         # раскрой листа (заглушка)
+??? common/
+?   ??? task-utils.lsp       # универсальные функции (строки, списки, пути)
+?   ??? layer-utils.lsp      # работа со слоями и групповыми фильтрами
+?   ??? excel-utils.lsp      # экспорт в Excel/CSV
+?   ??? table-utils.lsp      # создание таблиц AutoCAD
+?   ??? txt-utils.lsp        # экспорт в GAL
+??? docs/                    # документация
+??? reload.lsp               # команда RELOAD — загрузка всех модулей
+??? AutoExtraction.prj       # проект Visual LISP
+??? .gitignore
+??? README.md

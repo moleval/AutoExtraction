@@ -279,8 +279,16 @@
 ;; ---------- Основная команда ----------
 (defun c:extraction ( / dcl-file save-base modules-dir r)
   (vl-load-com)
-  (extraction-load-all)
 
+  ;; Проверка загрузки модулей
+  (if (not (type fasonka-main))
+   (progn
+     (princ "\nСначала выполните RELOAD для загрузки модулей.")
+     (princ)
+     (exit)
+   )
+  )
+  
   (setq dcl-file nil)
   (setq modules-dir (extraction-modules-dir))
   (if modules-dir (setq dcl-file (findfile (strcat modules-dir "\\extraction.dcl"))))
