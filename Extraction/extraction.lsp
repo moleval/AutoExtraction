@@ -10,9 +10,9 @@
 (setq *EXTRACTION-VISIBLE-LAYERS* nil)
 (setq *EXTRACTION-SELECTED-LAYERS* nil)
 (setq *EXTRACTION-SELECTED-INDICES* nil)
-(setq *EXTRACTION-FILTER-FACADES* nil)   ; Фасады
-(setq *EXTRACTION-FILTER-VITRAZH* nil)   ; Витражи
-(setq *EXTRACTION-FILTER-FONAR* nil)     ; Фонарь 3D
+(setq *EXTRACTION-FILTER-FACADES* nil)
+(setq *EXTRACTION-FILTER-VITRAZH* nil)
+(setq *EXTRACTION-FILTER-FONAR* nil)
 (setq *EXTRACTION-TASK-ID* 'FASONKA)
 (setq *EXTRACTION-REPORT-MODE* "DETAIL")
 (setq *EXTRACTION-EXPORT-EXCEL* nil)
@@ -80,7 +80,7 @@
   (if root
     (progn
       (setq common (strcat root "\\common\\"))
-      (foreach f '("task-utils.lsp" "layer-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "txt-utils.lsp")
+      (foreach f '("task-utils.lsp" "layer-utils.lsp" "select-utils.lsp" "excel-utils.lsp" "table-utils.lsp" "txt-utils.lsp")
         (setq path (strcat common f))
         (if (findfile path) (load path)
           (princ (strcat "\n[EXTRACTION] Не найден: " path)))
@@ -279,16 +279,8 @@
 ;; ---------- Основная команда ----------
 (defun c:extraction ( / dcl-file save-base modules-dir r)
   (vl-load-com)
+  (extraction-load-all)
 
-  ;; Проверка загрузки модулей
-  (if (not (type fasonka-main))
-   (progn
-     (princ "\nСначала выполните RELOAD для загрузки модулей.")
-     (princ)
-     (exit)
-   )
-  )
-  
   (setq dcl-file nil)
   (setq modules-dir (extraction-modules-dir))
   (if modules-dir (setq dcl-file (findfile (strcat modules-dir "\\extraction.dcl"))))

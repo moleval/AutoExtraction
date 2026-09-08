@@ -3,8 +3,7 @@
 ;;; Команда RELOAD для перезагрузки всех модулей AutoExtraction
 ;;; ============================================================
 
-(defun c:RELOAD ( / root extraction-dir common-dir f)
-  ;; Определяем корень проекта через extraction.lsp
+(defun c:RELOAD ( / root common extraction-dir f)
   (setq root
     (if (findfile "extraction.lsp")
       (vl-filename-directory
@@ -16,28 +15,29 @@
 
   (if root
     (progn
-      (setq common-dir (strcat root "\\common\\"))
+      (setq common (strcat root "\\common\\"))
       (setq extraction-dir (strcat root "\\Extraction\\"))
 
-      ;; Загружаем общие библиотеки
+      ;; Общие библиотеки
       (foreach f
         '(
           "task-utils.lsp"
           "layer-utils.lsp"
+          "select-utils.lsp"
           "excel-utils.lsp"
           "table-utils.lsp"
           "txt-utils.lsp"
         )
-        (if (findfile (strcat common-dir f))
+        (if (findfile (strcat common f))
           (progn
-            (load (strcat common-dir f))
-            (princ (strcat "\nЗагружен: " common-dir f))
+            (load (strcat common f))
+            (princ (strcat "\nЗагружен: " common f))
           )
-          (princ (strcat "\nНЕ НАЙДЕН: " common-dir f))
+          (princ (strcat "\nНЕ НАЙДЕН: " common f))
         )
       )
 
-      ;; Загружаем модули задач (из Extraction)
+      ;; Задачи
       (foreach f
         '(
           "fasonka.lsp"

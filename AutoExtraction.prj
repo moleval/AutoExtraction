@@ -3,7 +3,7 @@
   :NAME
   AutoExtraction
   :OWN-LIST
-  ("d:/AutoExtraction/Extraction/extraction"
+  ("d:/AutoExtraction/Extraction/extraction" 
     "d:/AutoExtraction/Extraction/fasonka"
     "d:/AutoExtraction/Extraction/cutline"
     "d:/AutoExtraction/Extraction/cutsheet"
@@ -13,6 +13,7 @@
     "d:/AutoExtraction/common/task-utils"
     "d:/AutoExtraction/common/txt-utils"
     "reload"
+    "d:/AutoExtraction/common/select-utils"
   )
   :FAS-DIRECTORY
   nil
