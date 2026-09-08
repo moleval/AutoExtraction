@@ -1,6 +1,6 @@
 ;;; ============================================================
-;;; NEST1DS.LSP — раскрой хлыстов по выбранным элементам
-;;; Команда: NEST1DS
+;;; CUTLINE.LSP — раскрой хлыстов по выбранным элементам
+;;; Команда: CUTLINE
 ;;; Поддержка: LWPOLYLINE, POLYLINE, LINE, ARC, ELLIPSE, SPLINE, MLINE
 ;;; Алгоритм: First-Fit Decreasing (FFD)
 ;;; ============================================================
@@ -475,7 +475,7 @@
 )
 
 (defun n1-write-csv (bars stock kerf / fname f i bar pieces waste used util)
-  (setq fname (strcat (getvar "DWGPREFIX") "nest1ds_result.csv"))
+  (setq fname (strcat (getvar "DWGPREFIX") "cutline_result.csv"))
   (setq f (open fname "w"))
   (if f
     (progn
@@ -497,7 +497,7 @@
 )
 
 ;; ---------- главная команда ----------
-(defun c:NEST1DS ( / ss tol stock kerf insPt pieces sorted bars
+(defun c:cutline ( / ss tol stock kerf insPt pieces sorted bars
                     bbox1 bbox2 bbox dbg-cnt p1 p2 color-map
                     barHeight sumInsPt num-bars stock-total-mm
                     total-cnt total-product-mm kpd rec blockName baseName
@@ -616,5 +616,5 @@
   (princ)
 )
 
-(princ "\nNEST1DS.LSP загружен. Команда: NEST1DS")
+(princ "\nCUTLINE.LSP загружен. Команда: CUTLINE")
 (princ)
