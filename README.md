@@ -46,13 +46,13 @@ D:\AutoExtraction\
 3. Выполните команду:
 
 ```text
-TASKS
+Extraction
 ```
 
 или:
 
 ```text
-TASKDISPATCHER
+Экстракция
 ```
 
 Для прямого теста FASONKA:

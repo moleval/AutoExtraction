@@ -1,6 +1,7 @@
+```lisp
 ;;; ============================================================
 ;;; dispatcher.lsp  (версия с тремя отдельными фильтрами)
-;;; Команды: TASKDISPATCHER, TASKS
+;;; Команды: EXTRACTION, ЭКСТРАКЦИЯ
 ;;; ============================================================
 (vl-load-com)
 
@@ -260,8 +261,8 @@
 (defun dispatcher-save   () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVE)   (done_dialog 1))
 (defun dispatcher-saveas () (dispatcher-read-params) (setq *DISPATCHER-ACTION* 'SAVEAS) (done_dialog 1))
 (defun dispatcher-close  () (setq *DISPATCHER-ACTION* 'CANCEL) (done_dialog 0))
-(defun dispatcher-nest1d () (setq *DISPATCHER-ACTION* 'CUTLINE) (done_dialog 1))
-(defun dispatcher-nest2d () (setq *DISPATCHER-ACTION* 'CUTSHEET) (done_dialog 1))
+(defun dispatcher-cutline () (setq *DISPATCHER-ACTION* 'CUTLINE) (done_dialog 1))
+(defun dispatcher-cutsheet () (setq *DISPATCHER-ACTION* 'CUTSHEET) (done_dialog 1))
 
 (defun dispatcher-filter-facades ()
   (setq *DISPATCHER-FILTER-FACADES* (= (get_tile "chk_filter_facades") "1"))
@@ -281,7 +282,7 @@
 )
 
 ;; ---------- Основная команда ----------
-(defun c:taskdispatcher ( / dcl-file save-base tdir r)
+(defun c:extraction ( / dcl-file save-base tdir r)
   (vl-load-com)
   (dispatcher-load-all)
 
@@ -376,7 +377,9 @@
   (princ)
 )
 
-(defun c:tasks () (c:taskdispatcher))
+;; Русская команда
+(defun c:Экстракция () (c:extraction))
 
-(princ "\nDISPATCHER.LSP загружен. Команды: TASKDISPATCHER, TASKS")
+(princ "\nDISPATCHER.LSP загружен. Команды: EXTRACTION, ЭКСТРАКЦИЯ")
 (princ)
+```
