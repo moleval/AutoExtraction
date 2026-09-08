@@ -1,11 +1,10 @@
-```lisp
 ;;; ============================================================
 ;;;  SUBSYSTEM.LSP
 ;;;  Подсчёт элементов подсистемы по состоянию видимости
 ;;;  Мерные блоки (с ДЛИНА) ? погонаж
 ;;;  Штучные блоки (без ДЛИНА) ? только количество
 ;;;  DETAIL: сначала штучные, затем мерные с подитогами по группам
-;;;  SUMMARY: сводная таблица по наименованиям (с колонкой №)
+;;;  SUMMARY: сводная таблица по наименованиям
 ;;; ============================================================
 
 (vl-load-com)
@@ -36,7 +35,6 @@
       )
     )
 
-    ;; Ищем существующую запись
     (setq found nil)
     (foreach rec acc
       (if (and (= (car rec) name)
@@ -52,19 +50,14 @@
     (setq i (1+ i))
   )
 
-  ;; Сортировка
   (setq acc
     (vl-sort acc
       '(lambda (a b)
          (cond
-           ;; оба штучные
            ((and (null (cadr a)) (null (cadr b)))
             (< (car a) (car b)))
-           ;; a штучный, b мерный -> a первее
            ((null (cadr a)) T)
-           ;; b штучный, a мерный -> b первее
            ((null (cadr b)) nil)
-           ;; оба мерные
            (t
             (if (= (car a) (car b))
               (< (cadr a) (cadr b))
@@ -88,47 +81,36 @@
   (if pt
     (progn
       (setvar "CMDECHO" 0)
-      (setq nCols 5) ; №, Наименование, Длина, Кол-во, Сумма
-      ;; Вычисляем количество строк: заголовок + шапка + данные + подитоги
+      (setq nCols 5)
       (setq nRows 2)
-      ;; Штучные: каждая группа = одна строка
       (foreach rec data
         (if (null (cadr rec))
           (setq nRows (1+ nRows))
         )
       )
-      ;; Мерные: сгруппируем по имени
       (setq groups '())
       (foreach rec data
         (if (cadr rec)
-          (progn
-            (setq groupName (car rec))
-            (if (not (assoc groupName groups))
-              (setq groups (cons (list groupName) groups))
-            )
+          (if (not (assoc (car rec) groups))
+            (setq groups (cons (list (car rec)) groups))
           )
         )
       )
-      ;; Для каждой мерной группы: детальные строки + одна строка подитога
       (foreach grp groups
         (setq nRows (+ nRows (length (vl-remove-if-not '(lambda (x) (and (= (car x) (car grp)) (cadr x))) data)) 1))
       )
-      ;; Создаём таблицу
       (setq space (vla-get-modelspace (vla-get-activedocument (vlax-get-acad-object))))
       (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
 
-      ;; Ширины столбцов
       (vla-SetColumnWidth tbl 0 15.0)
-      (vla-SetColumnWidth tbl 1 150.0)   ; уменьшено
+      (vla-SetColumnWidth tbl 1 150.0)
       (vla-SetColumnWidth tbl 2 25.0)
       (vla-SetColumnWidth tbl 3 25.0)
       (vla-SetColumnWidth tbl 4 30.0)
 
-      ;; Заголовок
       (vla-MergeCells tbl 0 0 0 4)
       (vla-SetText tbl 0 0 "{\\LПодсистема}")
 
-      ;; Шапка
       (vla-SetText tbl 1 0 "№")
       (vla-SetText tbl 1 1 "Наименование")
       (vla-SetText tbl 1 2 "Длина, мм")
@@ -140,11 +122,10 @@
       (vla-SetCellAlignment tbl 1 3 5)
       (vla-SetCellAlignment tbl 1 4 5)
 
-      ;; Заполнение
       (setq row 2
             itemNum 0)
 
-      ;; Штучные блоки
+      ;; Штучные
       (foreach rec data
         (setq name (car rec)
               len  (cadr rec)
@@ -167,19 +148,17 @@
         )
       )
 
-      ;; Мерные блоки (с группировкой и подитогами)
+      ;; Мерные
       (setq groups (vl-sort groups '(lambda (a b) (< (car a) (car b)))))
       (foreach grp groups
         (setq groupName (car grp)
               groupRows '()
               totalSum 0.0)
-        ;; Собираем детальные строки этой группы
         (foreach rec data
           (if (and (= (car rec) groupName) (cadr rec))
             (setq groupRows (append groupRows (list rec)))
           )
         )
-        ;; Детальные строки
         (foreach rec groupRows
           (setq len (cadr rec)
                 cnt (caddr rec)
@@ -198,10 +177,8 @@
           (vla-SetCellAlignment tbl row 4 5)
           (setq row (1+ row))
         )
-        ;; Подитог
-        (vla-MergeCells tbl row row 1 3) ; объединяем столбцы 1-3
-        (vla-SetText tbl row 0 "") ; номер не нужен
-        ;; Три пробела + подчёркнутое наименование
+        (vla-MergeCells tbl row row 1 3)
+        (vla-SetText tbl row 0 "")
         (vla-SetText tbl row 1 (strcat "   " "{\\L" groupName "}"))
         (vla-SetCellAlignment tbl row 1 4)
         (vla-SetText tbl row 4 (rtos totalSum 2 2))
@@ -226,7 +203,6 @@
   (if pt
     (progn
       (setvar "CMDECHO" 0)
-      ;; Сначала агрегируем по имени
       (setq summaryList '())
       (foreach rec data
         (setq name (car rec)
@@ -260,22 +236,19 @@
       )
       (setq summaryList (reverse summaryList))
 
-      (setq nCols 4) ; №, Наименование, Кол-во, Сумма
-      (setq nRows (+ 2 (length summaryList))) ; заголовок + шапка + данные (без итога)
+      (setq nCols 4)
+      (setq nRows (+ 2 (length summaryList)))
       (setq space (vla-get-modelspace (vla-get-activedocument (vlax-get-acad-object))))
       (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
 
-      ;; Ширины
-      (vla-SetColumnWidth tbl 0 15.0)    ; №
-      (vla-SetColumnWidth tbl 1 150.0)   ; Наименование
-      (vla-SetColumnWidth tbl 2 25.0)    ; Кол-во
-      (vla-SetColumnWidth tbl 3 30.0)    ; Сумма
+      (vla-SetColumnWidth tbl 0 15.0)
+      (vla-SetColumnWidth tbl 1 150.0)
+      (vla-SetColumnWidth tbl 2 25.0)
+      (vla-SetColumnWidth tbl 3 30.0)
 
-      ;; Заголовок
       (vla-MergeCells tbl 0 0 0 3)
       (vla-SetText tbl 0 0 "{\\LПодсистема}")
 
-      ;; Шапка
       (vla-SetText tbl 1 0 "№")
       (vla-SetText tbl 1 1 "Наименование")
       (vla-SetText tbl 1 2 "Кол-во, шт.")
@@ -285,15 +258,12 @@
       (vla-SetCellAlignment tbl 1 2 5)
       (vla-SetCellAlignment tbl 1 3 5)
 
-      ;; Данные
-      (setq row 2
-            totalCount 0
-            totalLen 0.0)
+      (setq row 2)
       (foreach s summaryList
         (setq name (car s)
               cnt  (cadr s)
               sum  (caddr s))
-        (vla-SetText tbl row 0 (itoa (1+ (- row 2)))) ; номер по порядку
+        (vla-SetText tbl row 0 (itoa (1+ (- row 2))))
         (vla-SetText tbl row 1 name)
         (vla-SetText tbl row 2 (itoa cnt))
         (if sum
@@ -304,8 +274,6 @@
         (vla-SetCellAlignment tbl row 1 4)
         (vla-SetCellAlignment tbl row 2 5)
         (vla-SetCellAlignment tbl row 3 5)
-        (setq totalCount (+ totalCount cnt))
-        (if sum (setq totalLen (+ totalLen sum)))
         (setq row (1+ row))
       )
 
@@ -317,14 +285,13 @@
 )
 
 ;; ------------------------------------------------------------
-;; ОСНОВНАЯ ФУНКЦИЯ ЗАДАЧИ
+;; ОСНОВНАЯ ФУНКЦИЯ
 ;; ------------------------------------------------------------
 (defun subsystem-main (layers report-mode export-excel export-txt create-table save-base
                        / *error* inserts data csvfile xlsfile base-name
-                         total-count total-length rec)
+                         total-count total-length rec summary-data)
   (vl-load-com)
 
-  ;; Сброс предварительного выделения
   (sssetfirst nil nil)
 
   (defun *error* (msg)
@@ -334,17 +301,14 @@
     (princ)
   )
 
-  ;; Выборка блоков
   (setq inserts (su-select-inserts layers))
 
   (if inserts
     (progn
-      ;; Агрегация
       (setq data (subsystem-aggregate inserts))
 
       (if data
         (progn
-          ;; Имя файла (пока не используется для экспорта, но оставлено)
           (if (null save-base)
             (setq base-name (strcat (getvar "dwgprefix")
                                     (vl-filename-base (getvar "dwgname"))
@@ -352,10 +316,74 @@
             (setq base-name save-base)
           )
 
-          ;; Экспорт в Excel/CSV (временно не реализован)
+          ;; Экспорт в Excel/CSV
           (if export-excel
-            (princ "\nЭкспорт в Excel для Подсистемы пока не реализован.")
+            (progn
+              (setq xlsfile (strcat base-name ".xls"))
+              (if (= report-mode "DETAIL")
+                (if (eu-export-subsystem-detail data xlsfile)
+                  (princ (strcat "\nXLS сохранён: " xlsfile))
+                  (progn
+                    (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+                    (setq csvfile (strcat base-name ".csv"))
+                    (if (eu-export-subsystem-csv-detail data csvfile)
+                      (princ (strcat "\nCSV сохранён: " csvfile))
+                      (princ "\nНе удалось открыть CSV-файл.")
+                    )
+                  )
+                )
+                ;; SUMMARY: сначала агрегируем по имени
+                (progn
+                  (setq summary-data '())
+                  (foreach rec data
+                    (setq name (car rec)
+                          len  (cadr rec)
+                          cnt  (caddr rec)
+                          sum  (if len (/ (* len cnt) 1000.0) nil))
+                    (setq found nil)
+                    (foreach s summary-data
+                      (if (= (car s) name)
+                        (setq found s)
+                      )
+                    )
+                    (if found
+                      (progn
+                        (setq summary-data
+                          (subst
+                            (list name
+                                  (+ (cadr found) cnt)
+                                  (if (caddr found)
+                                    (+ (caddr found) (if sum sum 0))
+                                    (if sum sum nil)
+                                  )
+                            )
+                            found
+                            summary-data
+                          )
+                        )
+                      )
+                      (setq summary-data (cons (list name cnt sum) summary-data))
+                    )
+                  )
+                  (setq summary-data (reverse summary-data))
+
+                  (if (eu-export-subsystem-summary summary-data xlsfile)
+                    (princ (strcat "\nXLS сохранён: " xlsfile))
+                    (progn
+                      (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+                      (setq csvfile (strcat base-name ".csv"))
+                      (if (eu-export-subsystem-csv-summary summary-data csvfile)
+                        (princ (strcat "\nCSV сохранён: " csvfile))
+                        (princ "\nНе удалось открыть CSV-файл.")
+                      )
+                    )
+                  )
+                )
+              )
+            )
           )
+
+          ;; Экспорт TXT (пока не реализован для Подсистемы, но параметр принимаем)
           (if export-txt
             (princ "\nЭкспорт в TXT для Подсистемы пока не реализован.")
           )
@@ -368,7 +396,7 @@
             )
           )
 
-          ;; Вывод сводки
+          ;; Сводка
           (setq total-count 0
                 total-length 0.0)
           (foreach rec data
@@ -392,7 +420,6 @@
 ;; Интерактивная команда (автономный запуск)
 ;; ------------------------------------------------------------
 (defun c:subsystem ( / layers report-mode export-excel export-txt create-table use-default save-base)
-  ;; Проверяем, загружены ли общие модули
   (if (not (type su-get-visibility))
     (progn
       (princ "\nСначала выполните RELOAD для загрузки общих модулей.")
@@ -433,4 +460,3 @@
 
 (princ "\nSUBSYSTEM.LSP загружен. Команда: SUBSYSTEM")
 (princ)
-```

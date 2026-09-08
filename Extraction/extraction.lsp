@@ -1,5 +1,5 @@
 ;;; ============================================================
-;;; extraction.lsp  (версия с перекрёстной синхронизацией слоёв)
+;;; extraction.lsp  (исправления повторного открытия и проверки)
 ;;; Команды: EXTRACTION, ЭКСТРАКЦИЯ
 ;;; ============================================================
 (vl-load-com)
@@ -234,7 +234,6 @@
 ;; ---------- Обработчик чекбокса подсистемы ----------
 (defun extraction-subsystem-check-changed (key / val layers-to-select)
   (setq val (= (get_tile (strcat "chk_subsystem_" (itoa key))) "1"))
-  ;; Обновляем сохранённый список
   (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS*
         (list
           (if (= key 1) val (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
@@ -242,46 +241,38 @@
           (if (= key 3) val (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
         )
   )
-  ;; Собираем слои для выделения
   (setq layers-to-select '())
   (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема" layers-to-select)))
   (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
   (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
-  ;; Устанавливаем выделение в списке слоёв
   (extraction-select-layers-in-list layers-to-select)
-  ;; Синхронизируем чекбоксы
   (extraction-sync-checks-from-layers)
 )
 
 ;; ---------- Переключение задачи ----------
 (defun extraction-toggle-subsystem-layers ( / layers-to-select)
   (if (= (get_tile "rb_task_subsystem") "1")
-    ;; Подсистема: блок активен
     (progn
-      (mode_tile "box_subsystem_layers" 0)        ; показать
-      (mode_tile "chk_subsystem_1" 0)             ; активен
+      (mode_tile "box_subsystem_layers" 0)
+      (mode_tile "chk_subsystem_1" 0)
       (mode_tile "chk_subsystem_2" 0)
       (mode_tile "chk_subsystem_3" 0)
-      ;; Устанавливаем чекбоксы из сохранённых
       (set_tile "chk_subsystem_1" (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
       (set_tile "chk_subsystem_2" (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
       (set_tile "chk_subsystem_3" (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
-      ;; Сбрасываем фильтры и показываем все слои
       (setq *EXTRACTION-FILTER-FACADES* nil)
       (setq *EXTRACTION-FILTER-VITRAZH* nil)
       (setq *EXTRACTION-FILTER-FONAR* nil)
       (extraction-rebuild-layer-list)
-      ;; Устанавливаем выделение согласно чекбоксам
       (setq layers-to-select '())
       (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема" layers-to-select)))
       (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
       (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
       (extraction-select-layers-in-list layers-to-select)
     )
-    ;; Любая другая задача: блок неактивен, выбор сброшен
     (progn
-      (mode_tile "box_subsystem_layers" 1)        ; скрыть (или можно оставить видимым, но отключить)
-      (mode_tile "chk_subsystem_1" 1)             ; неактивен
+      (mode_tile "box_subsystem_layers" 1)
+      (mode_tile "chk_subsystem_1" 1)
       (mode_tile "chk_subsystem_2" 1)
       (mode_tile "chk_subsystem_3" 1)
       (extraction-clear-layer-selection)
@@ -294,7 +285,6 @@
 ;; ---------- Обработчик изменения выбора в списке слоёв ----------
 (defun extraction-layer-selection-changed ()
   (setq *EXTRACTION-SELECTED-LAYERS* (extraction-selected-names))
-  ;; Если задача Подсистема, синхронизируем чекбоксы
   (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
     (extraction-sync-checks-from-layers)
   )
@@ -322,14 +312,13 @@
     (t (setq *EXTRACTION-TASK-ID* 'FASONKA))
   )
   (setq *EXTRACTION-LAST-TASK* *EXTRACTION-TASK-ID*)
-  ;; Если задача Подсистема и не выбрано слоёв, предупреждение
   (if (and (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM) (null *EXTRACTION-SELECTED-LAYERS*))
     (progn
       (alert "Не выбрано ни одного слоя. Поиск по всем слоям может занять много времени.")
-      (setq *EXTRACTION-ACTION* 'CANCEL)
+      nil
     )
+    T
   )
-  T
 )
 
 ;; ---------- Диспетчер ----------
@@ -370,8 +359,22 @@
                  "Сохранить как... - выбор пути и имени.\n"
                  "Если слои не выбраны - поиск по всем слоям."))
 )
-(defun extraction-save   () (extraction-read-params) (setq *EXTRACTION-ACTION* 'SAVE)   (done_dialog 1))
-(defun extraction-saveas () (extraction-read-params) (setq *EXTRACTION-ACTION* 'SAVEAS) (done_dialog 1))
+(defun extraction-save ()
+  (if (extraction-read-params)
+    (progn
+      (setq *EXTRACTION-ACTION* 'SAVE)
+      (done_dialog 1)
+    )
+  )
+)
+(defun extraction-saveas ()
+  (if (extraction-read-params)
+    (progn
+      (setq *EXTRACTION-ACTION* 'SAVEAS)
+      (done_dialog 1)
+    )
+  )
+)
 (defun extraction-close  () (setq *EXTRACTION-ACTION* 'CANCEL) (done_dialog 0))
 (defun extraction-cutline () (setq *EXTRACTION-ACTION* 'CUTLINE) (done_dialog 1))
 (defun extraction-cutsheet () (setq *EXTRACTION-ACTION* 'CUTSHEET) (done_dialog 1))
@@ -454,11 +457,30 @@
               (set_tile "chk_subsystem_2" (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
               (set_tile "chk_subsystem_3" (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
 
-              ;; Показ/скрытие блока подсистемы и настройка выделения
-              (extraction-toggle-subsystem-layers)
-
-              ;; Перестроение списка слоёв (с учётом фильтров)
+              ;; Перестроение списка слоёв
               (extraction-rebuild-layer-list)
+
+              ;; Восстановление полного выбора слоёв (если он был сохранён)
+              (if *EXTRACTION-LAST-SELECTED-LAYERS*
+                (extraction-select-layers-in-list *EXTRACTION-LAST-SELECTED-LAYERS*)
+              )
+
+              ;; Показать/скрыть блок подсистемы в зависимости от задачи
+              (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+                (progn
+                  (mode_tile "box_subsystem_layers" 0)
+                  (mode_tile "chk_subsystem_1" 0)
+                  (mode_tile "chk_subsystem_2" 0)
+                  (mode_tile "chk_subsystem_3" 0)
+                  (extraction-sync-checks-from-layers)
+                )
+                (progn
+                  (mode_tile "box_subsystem_layers" 1)
+                  (mode_tile "chk_subsystem_1" 1)
+                  (mode_tile "chk_subsystem_2" 1)
+                  (mode_tile "chk_subsystem_3" 1)
+                )
+              )
 
               ;; Обработчики
               (action_tile "btn_help"   "(extraction-help)")
@@ -486,17 +508,15 @@
 
               (cond
                 ((eq *EXTRACTION-ACTION* 'SAVE)
-                 (if (not (eq *EXTRACTION-ACTION* 'CANCEL))
-                   (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
-                             *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
-                             *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* nil)))
+                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* nil))
                 ((eq *EXTRACTION-ACTION* 'SAVEAS)
                  (setq save-base (vl-catch-all-apply 'tu-get-save-base (list *EXTRACTION-TASK-ID*)))
                  (if (vl-catch-all-error-p save-base) (setq save-base nil))
-                 (if (not (eq *EXTRACTION-ACTION* 'CANCEL))
-                   (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
-                             *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
-                             *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* save-base)))
+                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* save-base))
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
                  (setq r (vl-catch-all-apply 'c:CUTLINE '()))
                  (if (vl-catch-all-error-p r)
