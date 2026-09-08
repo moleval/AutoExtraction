@@ -11,6 +11,36 @@
 (defun c:fasonka () (fasonka-main))
 (defun c:Фасонка () (fasonka-main))
 
+;; ------------------------------------------------------------
+;; Загрузка общих библиотек (используется при автономном запуске)
+;; ------------------------------------------------------------
+(defun fasonka-load-common ( / fasonka-file tasks-root project-root files f)
+  (setq fasonka-file (findfile "fasonka.lsp"))
+  (if fasonka-file
+    (progn
+      (setq tasks-root (vl-filename-directory fasonka-file))
+      (setq project-root (vl-filename-directory tasks-root))
+      (setq files
+        (list
+          (strcat project-root "\\common\\task-utils.lsp")
+          (strcat project-root "\\common\\layer-utils.lsp")
+          (strcat project-root "\\common\\excel-utils.lsp")
+          (strcat project-root "\\common\\table-utils.lsp")
+          (strcat project-root "\\common\\txt-utils.lsp")
+        )
+      )
+      (foreach f files
+        (if (findfile f)
+          (load f)
+          (princ (strcat "\nПредупреждение: " f " не найден."))
+        )
+      )
+    )
+    (princ "\nПредупреждение: не удалось определить расположение fasonka.lsp.")
+  )
+  T
+)
+
 (defun fasonka-main (layers report-mode export-excel export-txt create-table save-base
                      / *error*
                      val name len acc rec found
@@ -21,52 +51,9 @@
                      summary-groups totalCount totalSum
                      report-data report-type
                      total-blocks total-pos total-types total-sum
-                     base-name xlsfile
-                     txt-utils-path table-utils-path excel-utils-path)
+                     base-name xlsfile csvfile)
 
   (vl-load-com)
-
-  ;; Загрузка txt-utils.lsp для GAL-экспорта
-  (setq txt-utils-path
-    (strcat
-      (vl-filename-directory
-        (vl-filename-directory (findfile "fasonka.lsp"))
-      )
-      "\\common\\txt-utils.lsp"
-    )
-  )
-  (if (findfile txt-utils-path)
-    (load txt-utils-path)
-    (princ "\nПредупреждение: txt-utils.lsp не найден по пути " txt-utils-path)
-  )
-
-  ;; Загрузка table-utils.lsp для создания таблиц AutoCAD
-  (setq table-utils-path
-    (strcat
-      (vl-filename-directory
-        (vl-filename-directory (findfile "fasonka.lsp"))
-      )
-      "\\common\\table-utils.lsp"
-    )
-  )
-  (if (findfile table-utils-path)
-    (load table-utils-path)
-    (princ "\nПредупреждение: table-utils.lsp не найден по пути " table-utils-path)
-  )
-
-  ;; Загрузка excel-utils.lsp
-  (setq excel-utils-path
-    (strcat
-      (vl-filename-directory
-        (vl-filename-directory (findfile "fasonka.lsp"))
-      )
-      "\\common\\excel-utils.lsp"
-    )
-  )
-  (if (findfile excel-utils-path)
-    (load excel-utils-path)
-    (princ "\nПредупреждение: excel-utils.lsp не найден по пути " excel-utils-path)
-  )
 
   ;; Обработчик ошибок
   (defun *error* (msg)
@@ -273,7 +260,10 @@
 )
 
 ;; ==================== Интерактивные команды ====================
-(defun c:fasonka ()
+(defun c:fasonka ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
+  ;; Загружаем общие модули, если они ещё не загружены
+  (fasonka-load-common)
+
   (setq layers-str (getstring "\nВведите слои через запятую (Enter — все слои): "))
   (if (= layers-str "")
     (setq layers nil)
