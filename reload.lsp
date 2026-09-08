@@ -41,6 +41,7 @@
       (foreach f
         '(
           "fasonka.lsp"
+          "subsystem.lsp"
           "extraction.lsp"
           "cutline.lsp"
           "cutsheet.lsp"

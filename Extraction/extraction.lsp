@@ -1,10 +1,22 @@
 ;;; ============================================================
-;;; extraction.lsp  (версия с тремя отдельными фильтрами)
+;;; extraction.lsp  (версия с перекрёстной синхронизацией слоёв)
 ;;; Команды: EXTRACTION, ЭКСТРАКЦИЯ
 ;;; ============================================================
 (vl-load-com)
 
-;; ---------- Глобальное состояние ----------
+;; ---------- Глобальные переменные для хранения последних настроек ----------
+(if (not (boundp '*EXTRACTION-LAST-TASK*)) (setq *EXTRACTION-LAST-TASK* 'FASONKA))
+(if (not (boundp '*EXTRACTION-LAST-REPORT-MODE*)) (setq *EXTRACTION-LAST-REPORT-MODE* "DETAIL"))
+(if (not (boundp '*EXTRACTION-LAST-EXPORT-EXCEL*)) (setq *EXTRACTION-LAST-EXPORT-EXCEL* nil))
+(if (not (boundp '*EXTRACTION-LAST-EXPORT-TXT*)) (setq *EXTRACTION-LAST-EXPORT-TXT* nil))
+(if (not (boundp '*EXTRACTION-LAST-CREATE-TABLE*)) (setq *EXTRACTION-LAST-CREATE-TABLE* T))
+(if (not (boundp '*EXTRACTION-LAST-SELECTED-LAYERS*)) (setq *EXTRACTION-LAST-SELECTED-LAYERS* nil))
+(if (not (boundp '*EXTRACTION-LAST-FILTER-FACADES*)) (setq *EXTRACTION-LAST-FILTER-FACADES* nil))
+(if (not (boundp '*EXTRACTION-LAST-FILTER-VITRAZH*)) (setq *EXTRACTION-LAST-FILTER-VITRAZH* nil))
+(if (not (boundp '*EXTRACTION-LAST-FILTER-FONAR*)) (setq *EXTRACTION-LAST-FILTER-FONAR* nil))
+(if (not (boundp '*EXTRACTION-LAST-SUBSYSTEM-CHECKS*)) (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS* '(T T T)))
+
+;; ---------- Глобальное состояние (рабочие переменные) ----------
 (setq *EXTRACTION-DCL-ID* nil)
 (setq *EXTRACTION-ALL-LAYERS* nil)
 (setq *EXTRACTION-VISIBLE-LAYERS* nil)
@@ -13,11 +25,11 @@
 (setq *EXTRACTION-FILTER-FACADES* nil)
 (setq *EXTRACTION-FILTER-VITRAZH* nil)
 (setq *EXTRACTION-FILTER-FONAR* nil)
-(setq *EXTRACTION-TASK-ID* 'FASONKA)
-(setq *EXTRACTION-REPORT-MODE* "DETAIL")
-(setq *EXTRACTION-EXPORT-EXCEL* nil)
-(setq *EXTRACTION-EXPORT-TXT* nil)
-(setq *EXTRACTION-CREATE-TABLE* T)
+(setq *EXTRACTION-TASK-ID* *EXTRACTION-LAST-TASK*)
+(setq *EXTRACTION-REPORT-MODE* *EXTRACTION-LAST-REPORT-MODE*)
+(setq *EXTRACTION-EXPORT-EXCEL* *EXTRACTION-LAST-EXPORT-EXCEL*)
+(setq *EXTRACTION-EXPORT-TXT* *EXTRACTION-LAST-EXPORT-TXT*)
+(setq *EXTRACTION-CREATE-TABLE* *EXTRACTION-LAST-CREATE-TABLE*)
 (setq *EXTRACTION-ACTION* 'CANCEL)
 
 ;; ---------- Безопасное получение списка слоёв ----------
@@ -88,6 +100,9 @@
       (setq path (strcat root "\\Extraction\\fasonka.lsp"))
       (if (findfile path) (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+      (setq path (strcat root "\\Extraction\\subsystem.lsp"))
+      (if (findfile path) (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
       (setq path (strcat root "\\Extraction\\cutline.lsp"))
       (if (findfile path) (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
@@ -150,7 +165,7 @@
 )
 
 (defun extraction-rebuild-layer-list ( / restore vis keywords selected i item)
-  (setq restore (extraction-selected-names))
+  ;; Перестраиваем список без восстановления выбора
   (setq *EXTRACTION-SELECTED-INDICES* '())
 
   (setq keywords '())
@@ -181,30 +196,123 @@
   (mapcar 'add_list *EXTRACTION-VISIBLE-LAYERS*)
   (end_list)
 
+  ;; Очищаем выбор
+  (set_tile "lst_layers" "")
+)
+
+;; ---------- Сброс выбора в списке слоёв ----------
+(defun extraction-clear-layer-selection ()
+  (set_tile "lst_layers" "")
+)
+
+;; ---------- Установка выделения определённых слоёв ----------
+(defun extraction-select-layers-in-list (layers-to-select / i item selected str)
+  (setq selected '())
   (setq i 0)
   (foreach item *EXTRACTION-VISIBLE-LAYERS*
-    (if (vl-some '(lambda (x) (and (= (type x) 'STR) (= (type item) 'STR)
-                                   (= (strcase x) (strcase item)))) restore)
-      (setq *EXTRACTION-SELECTED-INDICES* (cons i *EXTRACTION-SELECTED-INDICES*))
+    (if (vl-some '(lambda (x) (= (strcase x) (strcase item))) layers-to-select)
+      (setq selected (cons i selected))
     )
     (setq i (1+ i))
   )
-
-  (setq selected "")
-  (foreach i (reverse *EXTRACTION-SELECTED-INDICES*)
-    (setq selected (if (= selected "") (itoa i) (strcat selected " " (itoa i))))
+  (setq selected (reverse selected))
+  (setq str "")
+  (foreach i selected
+    (setq str (if (= str "") (itoa i) (strcat str " " (itoa i))))
   )
-  (set_tile "lst_layers" selected)
+  (set_tile "lst_layers" str)
+)
+
+;; ---------- Синхронизация чекбоксов подсистемы из списка слоёв ----------
+(defun extraction-sync-checks-from-layers ()
+  (setq selected (extraction-selected-names))
+  (set_tile "chk_subsystem_1" (if (member "Подсистема" selected) "1" "0"))
+  (set_tile "chk_subsystem_2" (if (member "Подсистема оцинкованная" selected) "1" "0"))
+  (set_tile "chk_subsystem_3" (if (member "Подсистема алюминиевая" selected) "1" "0"))
+)
+
+;; ---------- Обработчик чекбокса подсистемы ----------
+(defun extraction-subsystem-check-changed (key / val layers-to-select)
+  (setq val (= (get_tile (strcat "chk_subsystem_" (itoa key))) "1"))
+  ;; Обновляем сохранённый список
+  (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS*
+        (list
+          (if (= key 1) val (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
+          (if (= key 2) val (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
+          (if (= key 3) val (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
+        )
+  )
+  ;; Собираем слои для выделения
+  (setq layers-to-select '())
+  (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема" layers-to-select)))
+  (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
+  (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
+  ;; Устанавливаем выделение в списке слоёв
+  (extraction-select-layers-in-list layers-to-select)
+  ;; Синхронизируем чекбоксы
+  (extraction-sync-checks-from-layers)
+)
+
+;; ---------- Переключение задачи ----------
+(defun extraction-toggle-subsystem-layers ( / layers-to-select)
+  (if (= (get_tile "rb_task_subsystem") "1")
+    ;; Подсистема: блок активен
+    (progn
+      (mode_tile "box_subsystem_layers" 0)        ; показать
+      (mode_tile "chk_subsystem_1" 0)             ; активен
+      (mode_tile "chk_subsystem_2" 0)
+      (mode_tile "chk_subsystem_3" 0)
+      ;; Устанавливаем чекбоксы из сохранённых
+      (set_tile "chk_subsystem_1" (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+      (set_tile "chk_subsystem_2" (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+      (set_tile "chk_subsystem_3" (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+      ;; Сбрасываем фильтры и показываем все слои
+      (setq *EXTRACTION-FILTER-FACADES* nil)
+      (setq *EXTRACTION-FILTER-VITRAZH* nil)
+      (setq *EXTRACTION-FILTER-FONAR* nil)
+      (extraction-rebuild-layer-list)
+      ;; Устанавливаем выделение согласно чекбоксам
+      (setq layers-to-select '())
+      (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема" layers-to-select)))
+      (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
+      (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
+      (extraction-select-layers-in-list layers-to-select)
+    )
+    ;; Любая другая задача: блок неактивен, выбор сброшен
+    (progn
+      (mode_tile "box_subsystem_layers" 1)        ; скрыть (или можно оставить видимым, но отключить)
+      (mode_tile "chk_subsystem_1" 1)             ; неактивен
+      (mode_tile "chk_subsystem_2" 1)
+      (mode_tile "chk_subsystem_3" 1)
+      (extraction-clear-layer-selection)
+      (setq *EXTRACTION-SELECTED-LAYERS* nil)
+      (setq *EXTRACTION-LAST-SELECTED-LAYERS* nil)
+    )
+  )
+)
+
+;; ---------- Обработчик изменения выбора в списке слоёв ----------
+(defun extraction-layer-selection-changed ()
+  (setq *EXTRACTION-SELECTED-LAYERS* (extraction-selected-names))
+  ;; Если задача Подсистема, синхронизируем чекбоксы
+  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+    (extraction-sync-checks-from-layers)
+  )
 )
 
 ;; ---------- Чтение параметров ----------
 (defun extraction-read-params ( / selected)
   (setq selected (extraction-selected-names))
   (setq *EXTRACTION-SELECTED-LAYERS* (if selected selected nil))
+  (setq *EXTRACTION-LAST-SELECTED-LAYERS* *EXTRACTION-SELECTED-LAYERS*)
   (setq *EXTRACTION-REPORT-MODE* (if (= (get_tile "rb_summary") "1") "SUMMARY" "DETAIL"))
+  (setq *EXTRACTION-LAST-REPORT-MODE* *EXTRACTION-REPORT-MODE*)
   (setq *EXTRACTION-EXPORT-EXCEL* (= (get_tile "chk_xls") "1"))
+  (setq *EXTRACTION-LAST-EXPORT-EXCEL* *EXTRACTION-EXPORT-EXCEL*)
   (setq *EXTRACTION-EXPORT-TXT* (= (get_tile "chk_txt") "1"))
+  (setq *EXTRACTION-LAST-EXPORT-TXT* *EXTRACTION-EXPORT-TXT*)
   (setq *EXTRACTION-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
+  (setq *EXTRACTION-LAST-CREATE-TABLE* *EXTRACTION-CREATE-TABLE*)
   (cond
     ((= (get_tile "rb_task_fasonka") "1")      (setq *EXTRACTION-TASK-ID* 'FASONKA))
     ((= (get_tile "rb_task_subsystem") "1")    (setq *EXTRACTION-TASK-ID* 'SUBSYSTEM))
@@ -212,6 +320,14 @@
     ((= (get_tile "rb_task_vitrazh") "1")      (setq *EXTRACTION-TASK-ID* 'VITRAZH))
     ((= (get_tile "rb_task_zapolnenie") "1")   (setq *EXTRACTION-TASK-ID* 'ZAPOLNENIE))
     (t (setq *EXTRACTION-TASK-ID* 'FASONKA))
+  )
+  (setq *EXTRACTION-LAST-TASK* *EXTRACTION-TASK-ID*)
+  ;; Если задача Подсистема и не выбрано слоёв, предупреждение
+  (if (and (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM) (null *EXTRACTION-SELECTED-LAYERS*))
+    (progn
+      (alert "Не выбрано ни одного слоя. Поиск по всем слоям может занять много времени.")
+      (setq *EXTRACTION-ACTION* 'CANCEL)
+    )
   )
   T
 )
@@ -227,7 +343,8 @@
     ((eq task-id 'SUBSYSTEM)
      (setq r (vl-catch-all-apply 'subsystem-main
                (list layers report-mode export-excel export-txt create-table save-base)))
-     (if (vl-catch-all-error-p r) (princ "\nМодуль Подсистема не загружен.")))
+     (if (vl-catch-all-error-p r)
+       (princ "\nМодуль Подсистема не загружен или ошибка выполнения.")))
     ((eq task-id 'CLADDING)
      (setq r (vl-catch-all-apply 'cladding-main
                (list layers report-mode export-excel export-txt create-table save-base)))
@@ -261,19 +378,22 @@
 
 (defun extraction-filter-facades ()
   (setq *EXTRACTION-FILTER-FACADES* (= (get_tile "chk_filter_facades") "1"))
+  (setq *EXTRACTION-LAST-FILTER-FACADES* *EXTRACTION-FILTER-FACADES*)
   (extraction-rebuild-layer-list)
 )
 (defun extraction-filter-vitrazh ()
   (setq *EXTRACTION-FILTER-VITRAZH* (= (get_tile "chk_filter_vitrazh") "1"))
+  (setq *EXTRACTION-LAST-FILTER-VITRAZH* *EXTRACTION-FILTER-VITRAZH*)
   (extraction-rebuild-layer-list)
 )
 (defun extraction-filter-fonar ()
   (setq *EXTRACTION-FILTER-FONAR* (= (get_tile "chk_filter_fonar") "1"))
+  (setq *EXTRACTION-LAST-FILTER-FONAR* *EXTRACTION-FILTER-FONAR*)
   (extraction-rebuild-layer-list)
 )
 
 (defun extraction-layer-selection ()
-  (setq *EXTRACTION-SELECTED-LAYERS* (extraction-selected-names))
+  (extraction-layer-selection-changed)
 )
 
 ;; ---------- Основная команда ----------
@@ -289,17 +409,18 @@
   (if (null dcl-file)
     (progn (alert "Не найден файл extraction.dcl.") (princ))
     (progn
+      ;; Инициализация рабочих переменных из сохранённых
       (setq *EXTRACTION-ALL-LAYERS* (extraction-layer-names))
       (setq *EXTRACTION-VISIBLE-LAYERS* *EXTRACTION-ALL-LAYERS*)
       (setq *EXTRACTION-SELECTED-LAYERS* nil)
-      (setq *EXTRACTION-FILTER-FACADES* nil)
-      (setq *EXTRACTION-FILTER-VITRAZH* nil)
-      (setq *EXTRACTION-FILTER-FONAR* nil)
-      (setq *EXTRACTION-TASK-ID* 'FASONKA)
-      (setq *EXTRACTION-REPORT-MODE* "DETAIL")
-      (setq *EXTRACTION-EXPORT-EXCEL* T)
-      (setq *EXTRACTION-EXPORT-TXT* nil)
-      (setq *EXTRACTION-CREATE-TABLE* T)
+      (setq *EXTRACTION-FILTER-FACADES* *EXTRACTION-LAST-FILTER-FACADES*)
+      (setq *EXTRACTION-FILTER-VITRAZH* *EXTRACTION-LAST-FILTER-VITRAZH*)
+      (setq *EXTRACTION-FILTER-FONAR* *EXTRACTION-LAST-FILTER-FONAR*)
+      (setq *EXTRACTION-TASK-ID* *EXTRACTION-LAST-TASK*)
+      (setq *EXTRACTION-REPORT-MODE* *EXTRACTION-LAST-REPORT-MODE*)
+      (setq *EXTRACTION-EXPORT-EXCEL* *EXTRACTION-LAST-EXPORT-EXCEL*)
+      (setq *EXTRACTION-EXPORT-TXT* *EXTRACTION-LAST-EXPORT-TXT*)
+      (setq *EXTRACTION-CREATE-TABLE* *EXTRACTION-LAST-CREATE-TABLE*)
       (setq *EXTRACTION-ACTION* 'CANCEL)
 
       (setq *EXTRACTION-DCL-ID* (load_dialog dcl-file))
@@ -308,23 +429,38 @@
         (progn
           (if (new_dialog "extraction_dialog" *EXTRACTION-DCL-ID*)
             (progn
-              (set_tile "rb_detail" "1")
-              (set_tile "rb_summary" "0")
-              (set_tile "chk_xls" "0")
-              (set_tile "chk_txt" "0")
-              (set_tile "chk_acad" "1")
-              (set_tile "chk_filter_facades" "0")
-              (set_tile "chk_filter_vitrazh" "0")
-              (set_tile "chk_filter_fonar" "0")
-              (set_tile "rb_task_fasonka" "1")
-              (mode_tile "rb_task_subsystem" 1)
-              (mode_tile "rb_task_cladding" 1)
-              (mode_tile "rb_task_vitrazh" 1)
-              (mode_tile "rb_task_zapolnenie" 1)
-              (mode_tile "lst_blocks" 1)
+              ;; Установка радиокнопок и чекбоксов из сохранённых настроек
+              (set_tile "rb_detail" (if (= *EXTRACTION-LAST-REPORT-MODE* "DETAIL") "1" "0"))
+              (set_tile "rb_summary" (if (= *EXTRACTION-LAST-REPORT-MODE* "SUMMARY") "1" "0"))
+              (set_tile "chk_xls" (if *EXTRACTION-LAST-EXPORT-EXCEL* "1" "0"))
+              (set_tile "chk_txt" (if *EXTRACTION-LAST-EXPORT-TXT* "1" "0"))
+              (set_tile "chk_acad" (if *EXTRACTION-LAST-CREATE-TABLE* "1" "0"))
 
+              (set_tile "chk_filter_facades" (if *EXTRACTION-LAST-FILTER-FACADES* "1" "0"))
+              (set_tile "chk_filter_vitrazh" (if *EXTRACTION-LAST-FILTER-VITRAZH* "1" "0"))
+              (set_tile "chk_filter_fonar" (if *EXTRACTION-LAST-FILTER-FONAR* "1" "0"))
+
+              (cond
+                ((eq *EXTRACTION-LAST-TASK* 'FASONKA) (set_tile "rb_task_fasonka" "1"))
+                ((eq *EXTRACTION-LAST-TASK* 'SUBSYSTEM) (set_tile "rb_task_subsystem" "1"))
+                ((eq *EXTRACTION-LAST-TASK* 'CLADDING) (set_tile "rb_task_cladding" "1"))
+                ((eq *EXTRACTION-LAST-TASK* 'VITRAZH) (set_tile "rb_task_vitrazh" "1"))
+                ((eq *EXTRACTION-LAST-TASK* 'ZAPOLNENIE) (set_tile "rb_task_zapolnenie" "1"))
+                (t (set_tile "rb_task_fasonka" "1"))
+              )
+
+              ;; Установка чекбоксов подсистемы
+              (set_tile "chk_subsystem_1" (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+              (set_tile "chk_subsystem_2" (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+              (set_tile "chk_subsystem_3" (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*) "1" "0"))
+
+              ;; Показ/скрытие блока подсистемы и настройка выделения
+              (extraction-toggle-subsystem-layers)
+
+              ;; Перестроение списка слоёв (с учётом фильтров)
               (extraction-rebuild-layer-list)
 
+              ;; Обработчики
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
               (action_tile "btn_saveas" "(extraction-saveas)")
@@ -335,22 +471,32 @@
               (action_tile "chk_filter_vitrazh" "(extraction-filter-vitrazh)")
               (action_tile "chk_filter_fonar"   "(extraction-filter-fonar)")
               (action_tile "lst_layers" "(extraction-layer-selection)")
-              (action_tile "rb_detail"  "(setq *EXTRACTION-REPORT-MODE* \"DETAIL\")")
-              (action_tile "rb_summary" "(setq *EXTRACTION-REPORT-MODE* \"SUMMARY\")")
+              (action_tile "rb_detail"  "(setq *EXTRACTION-REPORT-MODE* \"DETAIL\")(setq *EXTRACTION-LAST-REPORT-MODE* \"DETAIL\")")
+              (action_tile "rb_summary" "(setq *EXTRACTION-REPORT-MODE* \"SUMMARY\")(setq *EXTRACTION-LAST-REPORT-MODE* \"SUMMARY\")")
+              (action_tile "rb_task_fasonka"   "(setq *EXTRACTION-TASK-ID* 'FASONKA)(setq *EXTRACTION-LAST-TASK* 'FASONKA)(extraction-toggle-subsystem-layers)")
+              (action_tile "rb_task_subsystem" "(setq *EXTRACTION-TASK-ID* 'SUBSYSTEM)(setq *EXTRACTION-LAST-TASK* 'SUBSYSTEM)(extraction-toggle-subsystem-layers)")
+              (action_tile "rb_task_cladding"  "(setq *EXTRACTION-TASK-ID* 'CLADDING)(setq *EXTRACTION-LAST-TASK* 'CLADDING)(extraction-toggle-subsystem-layers)")
+              (action_tile "rb_task_vitrazh"   "(setq *EXTRACTION-TASK-ID* 'VITRAZH)(setq *EXTRACTION-LAST-TASK* 'VITRAZH)(extraction-toggle-subsystem-layers)")
+              (action_tile "rb_task_zapolnenie" "(setq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)(setq *EXTRACTION-LAST-TASK* 'ZAPOLNENIE)(extraction-toggle-subsystem-layers)")
+              (action_tile "chk_subsystem_1" "(extraction-subsystem-check-changed 1)")
+              (action_tile "chk_subsystem_2" "(extraction-subsystem-check-changed 2)")
+              (action_tile "chk_subsystem_3" "(extraction-subsystem-check-changed 3)")
 
               (start_dialog)
 
               (cond
                 ((eq *EXTRACTION-ACTION* 'SAVE)
-                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
-                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
-                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* nil))
+                 (if (not (eq *EXTRACTION-ACTION* 'CANCEL))
+                   (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                             *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                             *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* nil)))
                 ((eq *EXTRACTION-ACTION* 'SAVEAS)
                  (setq save-base (vl-catch-all-apply 'tu-get-save-base (list *EXTRACTION-TASK-ID*)))
                  (if (vl-catch-all-error-p save-base) (setq save-base nil))
-                 (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
-                           *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
-                           *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* save-base))
+                 (if (not (eq *EXTRACTION-ACTION* 'CANCEL))
+                   (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS*
+                             *EXTRACTION-REPORT-MODE* *EXTRACTION-EXPORT-EXCEL*
+                             *EXTRACTION-EXPORT-TXT* *EXTRACTION-CREATE-TABLE* save-base)))
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
                  (setq r (vl-catch-all-apply 'c:CUTLINE '()))
                  (if (vl-catch-all-error-p r)

@@ -20,7 +20,7 @@
   )
 )
 
-;; Преобразование значения в число (точная копия fasonka-value-to-number)
+;; Преобразование значения в число
 (defun su-value-to-number (value / x s)
   (cond
     ((numberp value)
@@ -55,19 +55,22 @@
 )
 
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
-(defun su-select-inserts (layers / ss i ent data layer out)
+(defun su-select-inserts (layers / ss i ent data layer out layer-name)
   (setq out '())
   (setq ss (ssget "_I"))
   (if (null ss)
     (progn
-      (cond
-        ((null layers)
-         (setq ss (ssget "_X" '((0 . "INSERT")))))
-        (t
-         (setq layer-filter (list '(0 . "INSERT")))
-         (foreach lay layers
-           (setq layer-filter (append layer-filter (list (cons 8 lay)))))
-         (setq ss (ssget "_X" layer-filter))
+      (if (null layers)
+        (setq ss (ssget "_X" '((0 . "INSERT"))))
+        (progn
+          ;; Формируем строку слоёв через запятую
+          (setq layer-name
+            (apply 'strcat
+              (mapcar '(lambda (x) (strcat x ",")) layers)
+            )
+          )
+          (setq layer-name (substr layer-name 1 (1- (strlen layer-name))))
+          (setq ss (ssget "_X" (list '(0 . "INSERT") (cons 8 layer-name))))
         )
       )
     )
@@ -116,7 +119,64 @@
   )
 )
 
-;; Получение длины из динамических свойств (точная копия fasonka-get-length)
+;; Получение строкового значения видимости
+(defun su-get-visibility (obj / dynprops prop pname val result s)
+  (setq dynprops
+    (vl-catch-all-apply
+      'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)
+    )
+  )
+  (if (vl-catch-all-error-p dynprops)
+    nil
+    (progn
+      (setq result nil)
+      (foreach prop dynprops
+        (if (null result)
+          (progn
+            (setq pname
+              (vl-catch-all-apply
+                'vla-get-PropertyName
+                (list prop)
+              )
+            )
+            (if (and
+                  (not (vl-catch-all-error-p pname))
+                  pname
+                  (= (type pname) 'STR)
+                  (or
+                    (vl-string-search "VISIBILITY" (strcase pname))
+                    (vl-string-search "ВИДИМОСТЬ" (strcase pname))
+                  )
+                )
+              (progn
+                (setq val
+                  (vl-catch-all-apply
+                    'vla-get-Value
+                    (list prop)
+                  )
+                )
+                (if (not (vl-catch-all-error-p val))
+                  (progn
+                    (if (= (type val) 'VARIANT)
+                      (setq val (vlax-variant-value val))
+                    )
+                    (if val
+                      (setq result (vl-princ-to-string val))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+      result
+    )
+  )
+)
+
+;; Получение длины из динамических свойств
 (defun su-get-length (obj / dynprops prop pname value result)
   (setq dynprops
     (vl-catch-all-apply
@@ -161,7 +221,6 @@
           )
         )
       )
-      ;; Исходное преобразование в целое число
       (if (numberp result)
         (atoi (rtos result 2 0))
         nil

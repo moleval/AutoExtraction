@@ -1,5 +1,5 @@
 extraction_dialog : dialog {
-  label = "Выбор слоёв и задачи";
+  label = "AutoExtraction";
   initial_focus = "lst_layers";
 
   : row {
@@ -19,15 +19,20 @@ extraction_dialog : dialog {
 
   : spacer { height = 0.2; }
 
+  /* Верхний ряд: Слои | Блоки */
   : row {
     : boxed_column {
       label = "Слои";
-      : list_box { key = "lst_layers"; width = 32; height = 15; multiple_select = true; }
+      width = 40;
+      fixed_width = true;
+      : list_box { key = "lst_layers"; width = 36; height = 15; multiple_select = true; }
       : text { label = "Если слои не выбраны - поиск по всем слоям"; }
     }
     : spacer { width = 2; }
     : boxed_column {
       label = "Блоки";
+      width = 40;
+      fixed_width = true;
       : list_box { key = "lst_blocks"; width = 36; height = 15; multiple_select = true; }
       : text { label = "Пока не используется"; }
     }
@@ -35,15 +40,20 @@ extraction_dialog : dialog {
 
   : spacer { height = 0.5; }
 
+  /* Средний ряд: Режим отчёта | Вывод */
   : row {
     : boxed_radio_column {
       label = "Режим отчёта";
+      width = 40;
+      fixed_width = true;
       : radio_button { key = "rb_detail";  label = "Подробный"; }
       : radio_button { key = "rb_summary"; label = "Краткий"; }
     }
     : spacer { width = 2; }
     : boxed_column {
       label = "Вывод";
+      width = 40;
+      fixed_width = true;
       : toggle { key = "chk_xls";  label = ".xls"; }
       : toggle { key = "chk_txt";  label = ".txt"; }
       : toggle { key = "chk_acad"; label = "AutoCAD"; }
@@ -52,13 +62,28 @@ extraction_dialog : dialog {
 
   : spacer { height = 0.5; }
 
-  : boxed_radio_column {
-    label = "Задачи";
-    : radio_button { key = "rb_task_fasonka";     label = "Фасонка"; }
-    : radio_button { key = "rb_task_subsystem";   label = "Подсистема"; }
-    : radio_button { key = "rb_task_cladding";    label = "Облицовка"; }
-    : radio_button { key = "rb_task_vitrazh";     label = "Витраж"; }
-    : radio_button { key = "rb_task_zapolnenie";  label = "Заполнение"; }
+  /* Нижний ряд: Задачи | Слои подсистемы (вертикально) */
+  : row {
+    : boxed_radio_column {
+      label = "Задачи";
+      width = 40;
+      fixed_width = true;
+      : radio_button { key = "rb_task_fasonka";     label = "Фасонка"; }
+      : radio_button { key = "rb_task_subsystem";   label = "Подсистема"; }
+      : radio_button { key = "rb_task_cladding";    label = "Облицовка"; }
+      : radio_button { key = "rb_task_vitrazh";     label = "Витраж"; }
+      : radio_button { key = "rb_task_zapolnenie";  label = "Заполнение"; }
+    }
+    : spacer { width = 2; }
+    : boxed_column {
+      label = "Слои подсистемы";
+      key = "box_subsystem_layers";
+      width = 40;
+      fixed_width = true;
+      : toggle { key = "chk_subsystem_1"; label = "Подсистема"; }
+      : toggle { key = "chk_subsystem_2"; label = "Подсистема оцинкованная"; }
+      : toggle { key = "chk_subsystem_3"; label = "Подсистема алюминиевая"; }
+    }
   }
 
   : spacer { height = 0.5; }
