@@ -3,36 +3,25 @@
 ;;;  Извлечение данных о фасонном железе
 ;;;  Поддержка режимов DETAIL и SUMMARY
 ;;;  Экспорт в XLS (XML Spreadsheet), CSV, GAL (TXT)
-;;;  Создание таблиц AutoCAD
+;;;  Создание таблиц AutoCAD (вынесено в common/table-utils.lsp)
 ;;; ============================================================
 
 (defun c:fasonka () (fasonka-main))
 (defun c:Фасонка () (fasonka-main))
 
 (defun fasonka-main (layers report-mode export-excel export-txt create-table save-base
-                     / *error* acad doc ss i ent obj effname dynprops prop val
-                     csvfile f pt table nCols row ans space pt_wcs
-                     name len clean-name acc rec found n groups group
-                     total neededRows count oldEcho
-                     grp recs recCount curName curRecs
-                     doTotals skipSingleTotals mergeTotals alignData
-                     maxRowsPerTable idealRowsPerTable minFill
-                     indexed-groups groupIndex currentGroups currentDataRows
-                     tableIndex createdTables
-                     gIndex gName gRecs
-                     tableObj groupRows
-                     save-xls save-xls-summary
-                     ig canAdd g excelRow startRow endRow itemNum xlsfile
-                     sum totalSum
-                     summary-groups summary-indexed
-                     total-blocks total-pos total-types total-sum
+                     / *error* csvfile f
+                     val name len acc rec found
+                     ss i ent obj effname dynprops prop
                      layer-filter lay
-                     table-summary fill-table-summary
-                     currentSummaryGroups
-                     i
-                     base-name
-                     ;; Добавляем путь к txt-utils
-                     txt-utils-path)
+                     detail-groups curName curRecs
+                     indexed-detail groupIndex
+                     summary-groups totalCount totalSum
+                     report-data report-type
+                     total-blocks total-pos total-types total-sum
+                     base-name xlsfile
+                     save-xls save-xls-summary
+                     txt-utils-path table-utils-path)
 
   (vl-load-com)
 
@@ -50,12 +39,25 @@
     (princ "\nПредупреждение: txt-utils.lsp не найден по пути " txt-utils-path)
   )
 
+  ;; Загрузка table-utils.lsp для создания таблиц
+  (setq table-utils-path
+    (strcat
+      (vl-filename-directory
+        (vl-filename-directory (findfile "fasonka.lsp"))
+      )
+      "\\common\\table-utils.lsp"
+    )
+  )
+  (if (findfile table-utils-path)
+    (load table-utils-path)
+    (princ "\nПредупреждение: table-utils.lsp не найден по пути " table-utils-path)
+  )
+
   ;; Обработчик ошибок
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\nОшибка: " msg))
     )
-    (if oldEcho (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho)))
     (princ)
   )
 
@@ -91,111 +93,6 @@
       (setq str (substr str 2))
     )
     result
-  )
-
-  ;; ============ Функции заполнения таблиц AutoCAD ============
-  ;; DETAIL: 5 колонок
-  (defun fill-table-detail (table groups / row g gIdx gName gRecs totalSum itemNum len count sum)
-    (vla-SetColumnWidth table 0 17.5)
-    (vla-SetColumnWidth table 1 150.0)   ; ширина 150
-    (vla-SetColumnWidth table 2 25.0)
-    (vla-SetColumnWidth table 3 25.0)
-    (vla-SetColumnWidth table 4 30.0)
-    (vla-MergeCells table 0 0 0 4)
-    (vla-SetText table 0 0 "{\\LФасонное железо}")
-    (vla-SetText table 1 0 "№")
-    (vla-SetText table 1 1 "Тип фасонки")
-    (vla-SetText table 1 2 "Длина, мм")
-    (vla-SetText table 1 3 "Кол-во, шт.")
-    (vla-SetText table 1 4 "Сумма, м.п.")
-    (vla-SetCellAlignment table 1 0 5)
-    (vla-SetCellAlignment table 1 1 5)
-    (vla-SetCellAlignment table 1 2 5)
-    (vla-SetCellAlignment table 1 3 5)
-    (vla-SetCellAlignment table 1 4 5)
-    (setq row 2)
-    (foreach g groups
-      (setq gIdx     (car g)
-            gName    (cadr g)
-            gRecs    (caddr g)
-            totalSum 0.0
-            itemNum  0)
-      (foreach rec gRecs
-        (setq itemNum (1+ itemNum)
-              len     (cadr rec)
-              count   (caddr rec)
-              sum     (/ (* len count) 1000.0)
-              totalSum (+ totalSum sum))
-        (vla-SetText table row 0 (strcat (itoa gIdx) "." (itoa itemNum)))
-        (vla-SetText table row 1 (strcat " " gName))
-        (vla-SetText table row 2 (rtos len 2 0))
-        (vla-SetText table row 3 (itoa count))
-        (vla-SetText table row 4 (rtos sum 2 2))
-        (vla-SetCellAlignment table row 0 5)
-        (vla-SetCellAlignment table row 1 4)
-        (vla-SetCellAlignment table row 2 5)
-        (vla-SetCellAlignment table row 3 5)
-        (vla-SetCellAlignment table row 4 5)
-        (setq row (1+ row))
-      )
-      (vla-MergeCells table row row 1 3)
-      (vla-SetText table row 0 (strcat "{\\fArial|b1|i0|c0|p34;" (itoa gIdx) "}"))
-      (vla-SetCellAlignment table row 0 5)
-      (vla-SetText table row 1 (strcat "{\\L" gName "}"))
-      (vla-SetCellAlignment table row 1 4)
-      (vla-SetText table row 4 (rtos totalSum 2 2))
-      (vla-SetCellAlignment table row 4 5)
-      (setq row (1+ row))
-    )
-  )
-
-  ;; SUMMARY: 4 колонки (№, Тип, Кол-во, Сумма) + итоговая строка
-  (defun fill-table-summary (table groups / row i name count sum totalCount totalSum)
-    (vla-SetColumnWidth table 0 10.0)
-    (vla-SetColumnWidth table 1 150.0)
-    (vla-SetColumnWidth table 2 25.0)
-    (vla-SetColumnWidth table 3 30.0)
-    (vla-MergeCells table 0 0 0 3)
-    (vla-SetText table 0 0 "{\\LФасонное железо}")
-    (vla-SetText table 1 0 "№")
-    (vla-SetText table 1 1 "Тип фасонки")
-    (vla-SetText table 1 2 "Кол-во, шт.")
-    (vla-SetText table 1 3 "Сумма, м.п.")
-    (vla-SetCellAlignment table 1 0 5)
-    (vla-SetCellAlignment table 1 1 5)
-    (vla-SetCellAlignment table 1 2 5)
-    (vla-SetCellAlignment table 1 3 5)
-    (setq row 2
-          i 0)
-    (foreach g groups
-      (setq name  (car g)
-            count (cadr g)
-            sum   (caddr g))
-      (setq i (1+ i))
-      (vla-SetText table row 0 (itoa i))
-      (vla-SetText table row 1 (strcat " " name))
-      (vla-SetText table row 2 (itoa count))
-      (vla-SetText table row 3 (rtos sum 2 2))
-      (vla-SetCellAlignment table row 0 5)
-      (vla-SetCellAlignment table row 1 4)
-      (vla-SetCellAlignment table row 2 5)
-      (vla-SetCellAlignment table row 3 5)
-      (setq row (1+ row))
-    )
-    ;; Итоговая строка
-    (setq totalCount 0
-          totalSum   0.0)
-    (foreach g groups
-      (setq totalCount (+ totalCount (cadr g))
-            totalSum   (+ totalSum (caddr g)))
-    )
-    (vla-MergeCells table row row 0 1)  ; объединяем № и Тип
-    (vla-SetText table row 0 "      Итого")
-    (vla-SetCellAlignment table row 0 4)
-    (vla-SetText table row 2 (itoa totalCount))
-    (vla-SetCellAlignment table row 2 5)
-    (vla-SetText table row 3 (rtos totalSum 2 2))
-    (vla-SetCellAlignment table row 3 5)
   )
 
   ;; ============ Экспорт в XLS ============
@@ -388,10 +285,10 @@
         (write-line " </Styles>" f)
         (write-line " <Worksheet ss:Name=\"Summary\">" f)
         (write-line "  <Table>" f)
-        (write-line "   <Column ss:Width=\"30\"/>" f)   ; №
-        (write-line "   <Column ss:Width=\"200\"/>" f) ; Тип
-        (write-line "   <Column ss:Width=\"75\"/>" f)  ; Кол-во
-        (write-line "   <Column ss:Width=\"75\"/>" f)  ; Сумма
+        (write-line "   <Column ss:Width=\"30\"/>" f)
+        (write-line "   <Column ss:Width=\"200\"/>" f)
+        (write-line "   <Column ss:Width=\"75\"/>" f)
+        (write-line "   <Column ss:Width=\"75\"/>" f)
         (write-line "   <Row ss:Height=\"20\">" f)
         (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Фасонное железо</Data></Cell>" f)
         (write-line "   </Row>" f)
@@ -644,111 +541,7 @@
 
           ;; ==================== Создание таблиц AutoCAD ====================
           (if create-table
-            (progn
-              (initget "Yes No")
-              (setq ans (getkword "\nСоздать таблицу AutoCAD? [Yes/No] <Yes>: "))
-              (if (null ans) (setq ans "Yes"))
-              (if (= ans "Yes")
-                (progn
-                  (setq pt (getpoint "\nУкажите точку вставки первой таблицы: "))
-                  (if pt
-                    (progn
-                      (setq acad (vlax-get-acad-object)
-                            doc (vla-get-activedocument acad)
-                            space (vla-get-modelspace doc)
-                            pt_wcs (trans pt 1 0))
-                      (setq doTotals T skipSingleTotals nil mergeTotals T alignData T)
-                      (setq maxRowsPerTable 60 idealRowsPerTable 45 minFill 40)
-                      (setq oldEcho (getvar "CMDECHO"))
-                      (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
-                      (vla-startundomark doc)
-
-                      (if (= report-type "DETAIL")
-                        ;; DETAIL: несколько таблиц с разбиением
-                        (progn
-                          (setq indexed-groups report-data)
-                          (setq tableIndex 0 createdTables '() currentGroups '() currentDataRows 0)
-                          (while indexed-groups
-                            (setq ig (car indexed-groups) indexed-groups (cdr indexed-groups)
-                                  gIndex (car ig) gName (cadr ig) gRecs (caddr ig)
-                                  recCount (length gRecs)
-                                  groupRows (+ recCount (if doTotals 1 0)))
-                            (setq canAdd nil)
-                            (cond
-                              ((zerop currentDataRows) (setq canAdd T))
-                              ((<= (+ currentDataRows groupRows) idealRowsPerTable) (setq canAdd T))
-                              ((< currentDataRows minFill) (if (<= (+ currentDataRows groupRows) maxRowsPerTable) (setq canAdd T) (setq canAdd nil)))
-                              (t (setq canAdd nil))
-                            )
-                            (if canAdd
-                              (progn (setq currentGroups (append currentGroups (list ig)) currentDataRows (+ currentDataRows groupRows)))
-                              (progn
-                                (if currentGroups
-                                  (progn
-                                    (setq neededRows 2)
-                                    (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
-                                    (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
-                                    (if (vl-catch-all-error-p tableObj)
-                                      (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
-                                      (progn
-                                        (fill-table-detail tableObj currentGroups)
-                                        (vla-update tableObj)
-                                        (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
-                                        (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
-                                        (setq pt_wcs (list (car pt_wcs) (- (cadr pt_wcs) (+ (* neededRows 10.0) 20.0)) 0.0))
-                                      )
-                                    )
-                                  )
-                                )
-                                (setq currentGroups (list ig) currentDataRows groupRows)
-                              )
-                            )
-                          )
-                          (if currentGroups
-                            (progn
-                              (setq neededRows 2)
-                              (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
-                              (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
-                              (if (vl-catch-all-error-p tableObj)
-                                (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
-                                (progn
-                                  (fill-table-detail tableObj currentGroups)
-                                  (vla-update tableObj)
-                                  (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
-                                  (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
-                                )
-                              )
-                            )
-                          )
-                        )
-                        ;; SUMMARY: одна таблица на все данные
-                        (progn
-                          (setq neededRows (+ 3 (length report-data))) ; заголовок + шапка + строки + итого
-                          (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
-                          (if (vl-catch-all-error-p tableObj)
-                            (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
-                            (progn
-                              (fill-table-summary tableObj report-data)
-                              (vla-update tableObj)
-                              (princ "\nТаблица SUMMARY создана.")
-                            )
-                          )
-                        )
-                      )
-
-                      (vla-endundomark doc)
-                      (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
-                      (if createdTables
-                        (princ (strcat "\nВсего создано таблиц: " (itoa tableIndex)))
-                        (princ "\nТаблицы не созданы.")
-                      )
-                    )
-                    (princ "\nТочка не указана.")
-                  )
-                )
-                (princ "\nТаблица не создана.")
-              )
-            )
+            (tbl-create-report report-type report-data)
           )
         )
         (princ "\nБлоки со свойством 'Длина' не найдены.")
