@@ -1,9 +1,9 @@
-;;; VLisp project file [V2.0] AutoExtraction saved to:[d:\AutoExtraction] at:[08.09.2026]
+;;; VLisp project file [V2.0] AutoExtraction saved to:[d:\AutoExtraction] at:[09.09.2026]
 (VLISP-PROJECT-LIST 
   :NAME
   AutoExtraction
   :OWN-LIST
-  ("d:/AutoExtraction/Extraction/extraction"
+  ("d:/AutoExtraction/Extraction/extraction" 
     "d:/AutoExtraction/Extraction/fasonka"
     "d:/AutoExtraction/Extraction/subsystem"
     "d:/AutoExtraction/Extraction/cutline"
@@ -15,6 +15,7 @@
     "d:/AutoExtraction/common/task-utils"
     "d:/AutoExtraction/common/txt-utils"
     "reload"
+    "d:/AutoExtraction/Extraction/zapolnenie"
   )
   :FAS-DIRECTORY
   nil
