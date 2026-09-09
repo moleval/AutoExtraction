@@ -1,7 +1,7 @@
 ;;; ============================================================
 ;;; common/excel-utils.lsp
 ;;; Экспорт отчётов в Excel (XML Spreadsheet) и CSV
-;;; Функции для Фасонки и Подсистемы
+;;; Функции для Фасонки, Подсистемы и Заполнения
 ;;; ============================================================
 
 (vl-load-com)
@@ -593,6 +593,474 @@
           (strcat (itoa i) ";" name ";" (itoa cnt) ";"
                   (if sum (vl-string-translate "." "," (rtos sum 2 2)) "")) f)
       )
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ============================================================
+;; ФУНКЦИИ ДЛЯ ЗАПОЛНЕНИЯ
+;; ============================================================
+
+;; ------------------------------------------------------------
+;; Экранирование текстового значения для CSV
+;; Заключает в кавычки, если есть точка с запятой, кавычка или перевод строки
+;; Внутренние кавычки удваиваются
+;; ------------------------------------------------------------
+(defun eu-csv-quote (str / result)
+  (if (null str)
+    ""
+    (if (or (vl-string-search ";" str)
+            (vl-string-search "\"" str)
+            (vl-string-search "\n" str))
+      (progn
+        (setq result (vl-string-subst "\"\"" "\"" str))
+        (strcat "\"" result "\"")
+      )
+      str
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение DETAIL в XLS (XML Spreadsheet)
+;; data: список (тип высота-мм ширина-мм количество)
+;; Формулы: Площадь = Высота ? Ширина ? Кол-во / 1000000
+;; Группировка по типам с подитогами
+;; Общий итог суммирует только строки подитогов групп
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-detail (data xlsfile / f rowNum i rec tip h w cnt area
+                                     total-cnt total-area
+                                     groups grp grpName grpRows grpCnt grpArea
+                                     startRow endRow itemNum
+                                     subtotal-rows formula-cnt formula-area r)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line " <Styles>" f)
+      (write-line "  <Style ss:ID=\"Default\" ss:Name=\"Normal\">" f)
+      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Data\">" f)
+      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Header\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Num\">" f)
+      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"BoldUnderline\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"BoldUnderlineNum\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line " </Styles>" f)
+
+      (write-line " <Worksheet ss:Name=\"ZapolnenieDetail\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"5\"><Data ss:Type=\"String\">Заполнение</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      ;; Группировка по типам (данные уже отсортированы по типу)
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))
+        )
+      )
+
+      (setq rowNum 3 itemNum 0 total-cnt 0 total-area 0.0
+            subtotal-rows '())
+
+      ;; Вывод по группам с подитогами
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0
+              startRow rowNum)
+
+        ;; Строки группы
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                area (/ (* h w cnt) 1000000.0))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea area)
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area area))
+
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa h) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+          ;; Площадь с формулой: Высота ? Ширина ? Кол-во / 1000000
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-3]*RC[-2]*RC[-1]/1000000\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+          (setq rowNum (1+ rowNum))
+        )
+
+        (setq endRow (1- rowNum))
+
+        ;; Подитог группы с формулами
+        (write-line "   <Row>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C5:R" (itoa endRow) "C5)\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C6:R" (itoa endRow) "C6)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+
+        ;; Запоминаем номер строки подитога для формулы общего итога
+        (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
+      )
+
+      ;; Построение формул общего итога: суммируем только строки подитогов групп
+      (setq formula-cnt "" formula-area "")
+      (foreach r subtotal-rows
+        (if (= formula-cnt "")
+          (setq formula-cnt (strcat "=R" (itoa r) "C5"))
+          (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C5"))
+        )
+        (if (= formula-area "")
+          (setq formula-area (strcat "=R" (itoa r) "C6"))
+          (setq formula-area (strcat formula-area "+R" (itoa r) "C6"))
+        )
+      )
+
+      ;; Общий итог с формулами, суммирующими только подитоги групп
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Итого</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"" formula-cnt "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"" formula-area "\"><Data ss:Type=\"Number\">" (rtos total-area 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение SUMMARY в XLS (XML Spreadsheet)
+;; data: список (тип количество площадь-м2)
+;; Итоговые формулы корректны (нет промежуточных подитогов)
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-summary (data xlsfile / f rowNum i rec tip cnt area total-cnt total-area startRow endRow)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line " <Styles>" f)
+      (write-line "  <Style ss:ID=\"Default\" ss:Name=\"Normal\">" f)
+      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Data\">" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Header\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"Num\">" f)
+      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"BoldUnderline\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line "  <Style ss:ID=\"BoldUnderlineNum\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+      (write-line " </Styles>" f)
+
+      (write-line " <Worksheet ss:Name=\"ZapolnenieSummary\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Заполнение</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3 i 0 total-cnt 0 total-area 0.0 startRow 3)
+      (foreach rec data
+        (setq i (1+ i)
+              tip (car rec)
+              cnt (cadr rec)
+              area (caddr rec))
+        (setq total-cnt (+ total-cnt cnt)
+              total-area (+ total-area area))
+
+        (write-line "   <Row>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape tip) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+
+        (setq rowNum (1+ rowNum))
+      )
+
+      (setq endRow (1- rowNum))
+
+      ;; Итоговая строка с формулами (корректно, т.к. нет промежуточных подитогов)
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">Итого</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C3:R" (itoa endRow) "C3)\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C4:R" (itoa endRow) "C4)\"><Data ss:Type=\"Number\">" (rtos total-area 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение DETAIL в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; Площадь и текстовые значения — в кавычках при необходимости
+;; data: список (тип высота-мм ширина-мм количество)
+;; Группировка по типам с подитогами
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-csv-detail (data csvfile / f i rec tip h w cnt area
+                                         total-cnt total-area
+                                         groups grp grpName grpRows grpCnt grpArea itemNum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Заполнение" f)
+      (write-line "№;Тип;Высота, мм;Ширина, мм;Кол-во, шт.;Площадь, м2" f)
+      (setq i 0 total-cnt 0 total-area 0.0 itemNum 0)
+
+      ;; Группировка по типам (данные уже отсортированы по типу)
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))
+        )
+      )
+
+      ;; Вывод по группам с подитогами
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0)
+
+        ;; Строки группы
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                area (/ (* h w cnt) 1000000.0))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea area)
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area area))
+          (write-line
+            (strcat (itoa itemNum) ";"
+                    (eu-csv-quote grpName) ";"
+                    (itoa h) ";"
+                    (itoa w) ";"
+                    (itoa cnt) ";"
+                    "\"" (vl-string-translate "." "," (rtos area 2 2)) "\"")
+            f)
+        )
+
+        ;; Подитог группы
+        (write-line
+          (strcat ";" (eu-csv-quote grpName) ";;;"
+                  (itoa grpCnt) ";"
+                  "\"" (vl-string-translate "." "," (rtos grpArea 2 2)) "\"")
+          f)
+      )
+
+      ;; Общий итог (3 точки с запятой: данные в колонках 5 и 6)
+      (write-line
+        (strcat "Итого;;;"
+                (itoa total-cnt) ";"
+                "\"" (vl-string-translate "." "," (rtos total-area 2 2)) "\"")
+        f)
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение SUMMARY в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; data: список (тип количество площадь-м2)
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-csv-summary (data csvfile / f i rec tip cnt area total-cnt total-area)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Заполнение" f)
+      (write-line "№;Тип;Кол-во, шт.;Площадь, м2" f)
+      (setq i 0 total-cnt 0 total-area 0.0)
+      (foreach rec data
+        (setq i (1+ i)
+              tip (car rec)
+              cnt (cadr rec)
+              area (caddr rec))
+        (setq total-cnt (+ total-cnt cnt)
+              total-area (+ total-area area))
+        (write-line
+          (strcat (itoa i) ";"
+                  (eu-csv-quote tip) ";"
+                  (itoa cnt) ";"
+                  "\"" (vl-string-translate "." "," (rtos area 2 2)) "\"")
+          f)
+      )
+      ;; Итоговая строка (2 точки с запятой: данные в колонках 3 и 4)
+      (write-line
+        (strcat "Итого;;"
+                (itoa total-cnt) ";"
+                "\"" (vl-string-translate "." "," (rtos total-area 2 2)) "\"")
+        f)
       (close f)
       T
     )
