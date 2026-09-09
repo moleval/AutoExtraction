@@ -1081,7 +1081,7 @@
 
 (defun c:subsystem ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
   ;; Запрос слоёв
-  (setq layers-str (getstring "\nВведите слои через запятую (Enter — все слои): "))
+  (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
   (if (= layers-str "")
     (setq layers nil)
     (setq layers (mapcar 'strcase (split-string layers-str ",")))
@@ -1113,17 +1113,6 @@
 
   (subsystem-main layers report-mode export-excel export-txt create-table save-base)
   (princ)
-)
-
-;; Вспомогательная функция split-string (можно вынести в common, но продублируем)
-(defun split-string (str delim / pos result)
-  (setq result '())
-  (while (setq pos (vl-string-search delim str))
-    (setq result (append result (list (substr str 1 pos))))
-    (setq str (substr str (+ pos 2)))
-  )
-  (setq result (append result (list str)))
-  result
 )
 
 ;; Русская команда

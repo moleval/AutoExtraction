@@ -9,7 +9,7 @@
 ;;; ============================================================
 
 (defun c:fasonka ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
-  (setq layers-str (getstring "\nВведите слои через запятую (Enter — все слои): "))
+  (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
   (if (= layers-str "")
     (setq layers nil)
     (setq layers (mapcar 'strcase (split-string layers-str ",")))
@@ -245,17 +245,6 @@
     (princ "\nОбъекты не найдены.")
   )
   (princ)
-)
-
-;; Вспомогательная функция разбиения строки
-(defun split-string (str delim / pos result)
-  (setq result '())
-  (while (setq pos (vl-string-search delim str))
-    (setq result (append result (list (substr str 1 pos))))
-    (setq str (substr str (+ pos 2)))
-  )
-  (setq result (append result (list str)))
-  result
 )
 
 (princ "\nКоманды: FASONKA, ФАСОНКА")

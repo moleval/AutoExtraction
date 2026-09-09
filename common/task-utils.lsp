@@ -120,5 +120,20 @@
   result
 )
 
+;; ------------------------------------------------------------
+;; Разбиение строки на список по произвольному разделителю
+;; Используется для разбора строки слоёв, введённой через запятую
+;; Пример: (split-string "a,b,c" ",") ? ("a" "b" "c")
+;; ------------------------------------------------------------
+(defun split-string (str delim / pos result)
+  (setq result '())
+  (while (setq pos (vl-string-search delim str))
+    (setq result (append result (list (substr str 1 pos))))
+    (setq str (substr str (+ pos 2)))
+  )
+  (setq result (append result (list str)))
+  result
+)
+
 (princ "\nTASK-UTILS.LSP загружен.")
 (princ)
