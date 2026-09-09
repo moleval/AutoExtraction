@@ -1,3 +1,6 @@
+// ============================================================
+// extraction.dcl — Диалог AutoExtraction
+// ============================================================
 extraction_dialog : dialog {
   label = "AutoExtraction";
   initial_focus = "lst_layers";
@@ -25,6 +28,10 @@ extraction_dialog : dialog {
       label = "Слои";
       width = 40;
       fixed_width = true;
+      : row {
+        : button { key = "btn_select_all"; label = "Выбрать все"; }
+        : button { key = "btn_clear_all";  label = "Снять выделение"; }
+      }
       : list_box { key = "lst_layers"; width = 36; height = 15; multiple_select = true; }
       : text { label = "Если слои не выбраны - поиск по всем слоям"; }
     }
@@ -81,8 +88,8 @@ extraction_dialog : dialog {
       width = 40;
       fixed_width = true;
       : toggle { key = "chk_subsystem_1"; label = "Подсистема"; }
-      : toggle { key = "chk_subsystem_2"; label = "Подсистема оцинкованная"; }
-      : toggle { key = "chk_subsystem_3"; label = "Подсистема алюминиевая"; }
+      : toggle { key = "chk_subsystem_2"; label = "Подсистема алюминиевая"; }
+      : toggle { key = "chk_subsystem_3"; label = "Подсистема оцинкованная"; }
     }
   }
 

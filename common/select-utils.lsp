@@ -57,7 +57,17 @@
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
 (defun su-select-inserts (layers / ss i ent data layer out layer-name)
   (setq out '())
-  (setq ss (ssget "_I"))
+  
+  ;; Проверяем сохранённый предварительный выбор от диспетчера
+  (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
+    (progn
+      (setq ss *extraction-preselected-set*)
+      (setq *extraction-preselected-set* nil)  ; очищаем после использования
+    )
+    (setq ss (ssget "_I"))
+  )
+  
+  ;; Если предварительного выбора нет — выбираем по слоям или все
   (if (null ss)
     (progn
       (if (null layers)
@@ -75,7 +85,8 @@
       )
     )
   )
-
+  
+  ;; Фильтрация по слоям (даже для предварительного выбора)
   (if ss
     (progn
       (setq i 0)
@@ -90,7 +101,7 @@
       )
     )
   )
-
+  
   (reverse out)
 )
 

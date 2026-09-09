@@ -31,12 +31,6 @@
 )
 
 ;; ------------------------------------------------------------
-;; Агрегация данных Подсистемы
-;; Запись: (наименование длина-или-nil количество)
-;; ------------------------------------------------------------
-
-
-;; ------------------------------------------------------------
 ;; Ключи сортировки.
 ;;
 ;; Правило:
@@ -860,10 +854,18 @@
               (strcat
                 (getvar "dwgprefix")
                 (vl-filename-base (getvar "dwgname"))
-                " Подсистема"
+                " Подсистема "
+                (if (= (strcase report-mode) "DETAIL") "подробный" "краткий")
               )
             )
-            (setq base-name save-base)
+            (setq
+              base-name
+              (strcat
+                save-base
+                " "
+                (if (= (strcase report-mode) "DETAIL") "подробный" "краткий")
+              )
+            )
           )
 
           ;; ==================================================
@@ -1074,143 +1076,62 @@
 )
 
 ;; ------------------------------------------------------------
-;; Автономная команда
+;; Автономная команда (модифицирована: запрос слоёв)
 ;; ------------------------------------------------------------
 
-(defun c:subsystem
-       ( / layers report-mode export-excel export-txt
-           create-table use-default save-base)
-
-  (if
-    (not (type su-get-visibility))
-    (progn
-      (princ
-        "\nСначала выполните RELOAD для загрузки общих модулей."
-      )
-      (princ)
-      (exit)
-    )
-  )
-
-  ;; При автономном запуске по умолчанию используются
-  ;; три наиболее вероятных слоя Подсистемы.
-  (setq
-    layers
-    '(
-      "Подсистема"
-      "Подсистема оцинкованная"
-      "Подсистема алюминиевая"
-     )
+(defun c:subsystem ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
+  ;; Запрос слоёв
+  (setq layers-str (getstring "\nВведите слои через запятую (Enter — все слои): "))
+  (if (= layers-str "")
+    (setq layers nil)
+    (setq layers (mapcar 'strcase (split-string layers-str ",")))
   )
 
   (initget "D S")
-  (setq
-    report-mode
-    (getkword
-      "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "
-    )
-  )
-
-  (if (null report-mode)
-    (setq report-mode "D")
-  )
-
-  (setq
-    report-mode
-    (if (= report-mode "D")
-      "DETAIL"
-      "SUMMARY"
-    )
-  )
+  (setq report-mode (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "))
+  (if (null report-mode) (setq report-mode "D"))
+  (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
 
   (initget "Y N")
-  (setq
-    export-excel
-    (getkword
-      "\nЭкспорт в Excel? [Да(Y)/Нет(N)] <N>: "
-    )
-  )
-
-  (if
-    (or
-      (null export-excel)
-      (= export-excel "N")
-    )
-    (setq export-excel nil)
-    (setq export-excel T)
-  )
+  (setq export-excel (getkword "\nЭкспорт в Excel? [Да(Y)/Нет(N)] <N>: "))
+  (if (or (null export-excel) (= export-excel "N")) (setq export-excel nil) (setq export-excel T))
 
   (initget "Y N")
-  (setq
-    export-txt
-    (getkword
-      "\nЭкспорт в TXT (GAL)? [Да(Y)/Нет(N)] <N>: "
-    )
-  )
-
-  (if
-    (or
-      (null export-txt)
-      (= export-txt "N")
-    )
-    (setq export-txt nil)
-    (setq export-txt T)
-  )
+  (setq export-txt (getkword "\nЭкспорт в TXT (GAL)? [Да(Y)/Нет(N)] <N>: "))
+  (if (or (null export-txt) (= export-txt "N")) (setq export-txt nil) (setq export-txt T))
 
   (initget "Y N")
-  (setq
-    create-table
-    (getkword
-      "\nСоздать таблицу AutoCAD? [Да(Y)/Нет(N)] <Y>: "
-    )
-  )
-
-  (if
-    (or
-      (null create-table)
-      (= create-table "Y")
-    )
-    (setq create-table T)
-    (setq create-table nil)
-  )
+  (setq create-table (getkword "\nСоздать таблицу AutoCAD? [Да(Y)/Нет(N)] <Y>: "))
+  (if (or (null create-table) (= create-table "Y")) (setq create-table T) (setq create-table nil))
 
   (initget "Y N")
-  (setq
-    use-default
-    (getkword
-      "\nИспользовать путь по умолчанию? [Да(Y)/Нет(N)] <Y>: "
-    )
-  )
-
-  (if
-    (or
-      (null use-default)
-      (= use-default "Y")
-    )
-
+  (setq use-default (getkword "\nИспользовать путь по умолчанию? [Да(Y)/Нет(N)] <Y>: "))
+  (if (or (null use-default) (= use-default "Y"))
     (setq save-base nil)
-
-    (setq
-      save-base
-      (getstring
-        "\nБазовое имя файла (без расширения): "
-      )
-    )
+    (setq save-base (getstring "\nБазовое имя файла (без расширения): "))
   )
 
-  (subsystem-main
-    layers
-    report-mode
-    export-excel
-    export-txt
-    create-table
-    save-base
-  )
-
+  (subsystem-main layers report-mode export-excel export-txt create-table save-base)
   (princ)
 )
 
+;; Вспомогательная функция split-string (можно вынести в common, но продублируем)
+(defun split-string (str delim / pos result)
+  (setq result '())
+  (while (setq pos (vl-string-search delim str))
+    (setq result (append result (list (substr str 1 pos))))
+    (setq str (substr str (+ pos 2)))
+  )
+  (setq result (append result (list str)))
+  result
+)
+
+;; Русская команда
+(defun c:ПОДСИСТЕМА ()
+  (c:subsystem)
+)
+
 (princ
-  "\nSUBSYSTEM.LSP загружен. Команда: SUBSYSTEM"
+  "\nSUBSYSTEM.LSP загружен. Команды: SUBSYSTEM, ПОДСИСТЕМА"
 )
 (princ)

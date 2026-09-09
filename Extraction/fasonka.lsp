@@ -189,12 +189,13 @@
             )
           )
 
-          ;; Имена файлов
+          ;; Имена файлов (с добавлением "подробный"/"краткий")
           (if (null save-base)
             (setq base-name (strcat (getvar "dwgprefix")
                                     (vl-filename-base (getvar "dwgname"))
-                                    " Фасонка"))
-            (setq base-name save-base)
+                                    " Фасонка "
+                                    (if (= (strcase report-mode) "DETAIL") "подробный" "краткий")))
+            (setq base-name (strcat save-base " " (if (= (strcase report-mode) "DETAIL") "подробный" "краткий")))
           )
 
           ;; Excel / CSV
