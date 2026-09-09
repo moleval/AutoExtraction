@@ -708,7 +708,7 @@
       (write-line " <Worksheet ss:Name=\"ZapolnenieDetail\">" f)
       (write-line "  <Table>" f)
       (write-line "   <Column ss:Width=\"30\"/>" f)
-      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"125\"/>" f)
       (write-line "   <Column ss:Width=\"80\"/>" f)
       (write-line "   <Column ss:Width=\"80\"/>" f)
       (write-line "   <Column ss:Width=\"80\"/>" f)
@@ -897,7 +897,7 @@
       (write-line " <Worksheet ss:Name=\"ZapolnenieSummary\">" f)
       (write-line "  <Table>" f)
       (write-line "   <Column ss:Width=\"30\"/>" f)
-      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"125\"/>" f)
       (write-line "   <Column ss:Width=\"80\"/>" f)
       (write-line "   <Column ss:Width=\"80\"/>" f)
 
