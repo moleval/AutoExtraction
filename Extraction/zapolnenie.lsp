@@ -12,7 +12,6 @@
 ;;;          GAL (common/txt-utils.lsp),
 ;;;          таблица AutoCAD
 ;;;
-;;
 ;;; ТЕХНИЧЕСКИЕ ПРАВИЛА (согласованы на Этапе 0):
 ;;;   - Видимость отсутствует -> EffectiveName, НЕ пропускать
 ;;;   - Высота: приоритет "ВЫСОТА В СВЕТУ" -> "ВЫСОТА"
@@ -20,9 +19,9 @@
 ;;;   - Поиск свойства: сначала точное совпадение, затем подстрока
 ;;;   - Припуск: +26 мм (константа)
 ;;;   - Округление размеров: fix (до целых мм)
-;;;   - Нулевой размер: пропуск
-;;;   - Площадь: мм2 -> м2, НЕ округлять до агрегации
-;;;   - Округление площади: только при выводе (rtos 2 2)
+;;;   - Нулевой размер: пропуск (с раздельным счётчиком причин)
+;;;   - Площадь: мм2 -> м2, округление ДО суммирования (до двух знаков)
+;;;   - Отображение площади: подавление лишних нулей (3,00 -> 3)
 ;;;   - DETAIL ключ: UPPERCASE(ТИП) + ВЫСОТА + ШИРИНА
 ;;;   - Отображаемое имя: из первой записи группы
 ;;;   - SUMMARY: строить из DETAIL (один проход)
@@ -51,6 +50,53 @@
 (setq *ZAPOLNENIE-HEIGHT-KEYWORDS* '("ВЫСОТА В СВЕТУ" "ВЫСОТА"))
 ;; Ширина: сначала "ШИРИНА В СВЕТУ", затем "ШИРИНА", затем "ДЛИНА"
 (setq *ZAPOLNENIE-WIDTH-KEYWORDS* '("ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА"))
+
+;; Счётчики пропущенных блоков (ведутся раздельно по причинам)
+(setq *zapolnenie-skipped-no-height* 0)
+(setq *zapolnenie-skipped-no-width* 0)
+
+
+;; ============================================================
+;; ОКРУГЛЕНИЕ ДО ДВУХ ЗНАКОВ ПОСЛЕ ЗАПЯТОЙ
+;; ============================================================
+;; Применяется ДО суммирования, чтобы подитоги и итоги
+;; точно соответствовали сумме отображаемых значений
+;; (не терялась 0,01 при накоплении погрешностей).
+;; ============================================================
+(defun zapolnenie-round2 (x)
+  (/ (fix (+ (* x 100.0) 0.5)) 100.0)
+)
+
+
+;; ============================================================
+;; ФОРМАТИРОВАНИЕ ПЛОЩАДИ С ПОДАВЛЕНИЕМ ЛИШНИХ НУЛЕЙ
+;; ============================================================
+;; Предполагает, что area уже округлено до двух знаков.
+;; Подавляет лишние нули:
+;;   3,00 -> 3
+;;   3,10 -> 3,1
+;;   3,01 -> 3,01
+;;   3,15 -> 3,15
+;; ============================================================
+(defun zapolnenie-format-area (area / int-part frac-hundredths)
+  (setq int-part (fix area))
+  (setq frac-hundredths (fix (+ (* (- area int-part) 100.0) 0.5)))
+  (cond
+    ;; Нет дробной части: 3,00 -> 3
+    ((= frac-hundredths 0)
+     (itoa int-part))
+    ;; Сотые нулевые, десятые ненулевые: 3,10 -> 3,1
+    ((= (rem frac-hundredths 10) 0)
+     (strcat (itoa int-part) "," (itoa (/ frac-hundredths 10))))
+    ;; Обе цифры значимые: 3,01 -> 3,01 ; 3,15 -> 3,15
+    (T
+     (if (< frac-hundredths 10)
+       (strcat (itoa int-part) ",0" (itoa frac-hundredths))
+       (strcat (itoa int-part) "," (itoa frac-hundredths))
+     )
+    )
+  )
+)
 
 
 ;; ============================================================
@@ -158,23 +204,26 @@
 ;; ============================================================
 ;; Последовательность: свойство -> числовое значение -> +26 -> fix
 ;; Возвращает (высота-мм ширина-мм) или nil, если размеры не найдены
-;; или равны нулю.
+;; или равны нулю. При пропуске увеличивает соответствующий счётчик.
 ;; ============================================================
 (defun zapolnenie-compute-dims (obj / raw-h raw-w h w)
-  ;; Извлекаем высоту по приоритетному списку
   (setq raw-h (zapolnenie-get-dimension obj *ZAPOLNENIE-HEIGHT-KEYWORDS*))
-  ;; Извлекаем ширину по приоритетному списку (включая "ДЛИНА")
   (setq raw-w (zapolnenie-get-dimension obj *ZAPOLNENIE-WIDTH-KEYWORDS*))
 
-  ;; Проверяем наличие и положительность обоих размеров
-  (if (and raw-h raw-w (> raw-h 0.0) (> raw-w 0.0))
-    (progn
-      ;; Применяем припуск и округляем до целых мм
-      (setq h (fix (+ raw-h *ZAPOLNENIE-FRAME-ALLOWANCE*)))
-      (setq w (fix (+ raw-w *ZAPOLNENIE-FRAME-ALLOWANCE*)))
-      (list h w)
-    )
-    nil
+  (cond
+    ;; Нет высоты или она нулевая
+    ((or (null raw-h) (<= raw-h 0.0))
+     (setq *zapolnenie-skipped-no-height* (1+ *zapolnenie-skipped-no-height*))
+     nil)
+    ;; Нет ширины или она нулевая
+    ((or (null raw-w) (<= raw-w 0.0))
+     (setq *zapolnenie-skipped-no-width* (1+ *zapolnenie-skipped-no-width*))
+     nil)
+    ;; Оба размера в порядке — применяем припуск и округляем до целых мм
+    (T
+     (setq h (fix (+ raw-h *ZAPOLNENIE-FRAME-ALLOWANCE*)))
+     (setq w (fix (+ raw-w *ZAPOLNENIE-FRAME-ALLOWANCE*)))
+     (list h w))
   )
 )
 
@@ -220,6 +269,10 @@
   (setq acc '()
         display-names '()
         i 0)
+
+  ;; Сброс счётчиков пропусков перед обработкой
+  (setq *zapolnenie-skipped-no-height* 0)
+  (setq *zapolnenie-skipped-no-width* 0)
 
   (repeat (length inserts)
     (setq ent (nth i inserts)
@@ -275,7 +328,8 @@
 ;; SUMMARY ИЗ DETAIL (один проход)
 ;; ============================================================
 ;; Агрегирует DETAIL-данные по типу.
-;; Площадь считается как сумма (кол-во ? площадь_панели) по позициям.
+;; Площадь каждой панели округляется ДО суммирования,
+;; чтобы итог по типу точно соответствовал сумме строк.
 ;;
 ;; Вход:  (тип высота-мм ширина-мм количество)
 ;; Выход: (тип количество площадь-м2)
@@ -288,8 +342,8 @@
           h    (cadr rec)
           w    (caddr rec)
           cnt  (cadddr rec)
-          ;; Площадь панели в м2 (не округляется до агрегации)
-          area (/ (* h w cnt) 1000000.0)
+          ;; Округление ДО суммирования — чтобы итог был точным
+          area (zapolnenie-round2 (/ (* h w cnt) 1000000.0))
           key  (strcase name))
 
     ;; Ищем существующую запись по нормализованному имени
@@ -319,10 +373,11 @@
 ;; ТАБЛИЦА AUTOCAD — DETAIL
 ;; ============================================================
 ;; С группировкой по типам и подитогами групп.
-;; Наименования подитогов — с подчёркиванием (формат {\L...}),
-;; как в Подсистеме.
-;; Конкретная реализация для Заполнения (без преждевременной
-;; генерализации, согласно решению Этапа 0).
+;; Площадь каждой панели округляется ДО суммирования,
+;; чтобы подитоги точно соответствовали сумме строк.
+;; Наименования подитогов — с подчёркиванием (формат {\L...})
+;; и тремя пробелами для визуального отступа (как в Подсистеме).
+;; Площади выводятся с подавлением лишних нулей.
 ;; ============================================================
 (defun zapolnenie-create-table-detail (data / pt tbl row nRows nCols space
                                         rec tip h w cnt area itemNum
@@ -357,7 +412,7 @@
 
       ;; Ширины колонок
       (vla-SetColumnWidth tbl 0 15.0)   ; №
-      (vla-SetColumnWidth tbl 1 75.0)  ; Тип
+      (vla-SetColumnWidth tbl 1 75.0)   ; Тип (уменьшена в два раза)
       (vla-SetColumnWidth tbl 2 30.0)   ; Высота
       (vla-SetColumnWidth tbl 3 30.0)   ; Ширина
       (vla-SetColumnWidth tbl 4 30.0)   ; Кол-во
@@ -400,7 +455,8 @@
                 h   (cadr rec)
                 w   (caddr rec)
                 cnt (cadddr rec)
-                area (/ (* h w cnt) 1000000.0))
+                ;; Округление ДО суммирования — чтобы подитоги были точными
+                area (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
           (setq grpCnt (+ grpCnt cnt)
                 grpArea (+ grpArea area)
                 total-cnt (+ total-cnt cnt)
@@ -411,7 +467,7 @@
           (vla-SetText tbl row 2 (itoa h))
           (vla-SetText tbl row 3 (itoa w))
           (vla-SetText tbl row 4 (itoa cnt))
-          (vla-SetText tbl row 5 (rtos area 2 2))
+          (vla-SetText tbl row 5 (zapolnenie-format-area area))
 
           ;; Выравнивание: Тип — влево, остальное — по центру
           (vla-SetCellAlignment tbl row 0 5)
@@ -424,12 +480,12 @@
           (setq row (1+ row))
         )
 
-        ;; Подитог группы (с подчёркиванием наименования, как в Подсистеме)
+        ;; Подитог группы (с подчёркиванием наименования и отступом, как в Подсистеме)
         (vla-MergeCells tbl row row 1 3)
         (vla-SetText tbl row 0 "")
         (vla-SetText tbl row 1 (strcat "   {\\L" grpName "}"))
         (vla-SetText tbl row 4 (itoa grpCnt))
-        (vla-SetText tbl row 5 (rtos grpArea 2 2))
+        (vla-SetText tbl row 5 (zapolnenie-format-area grpArea))
         (vla-SetCellAlignment tbl row 0 5)
         (vla-SetCellAlignment tbl row 1 4)
         (vla-SetCellAlignment tbl row 4 5)
@@ -442,7 +498,7 @@
       (vla-MergeCells tbl row row 0 3)
       (vla-SetText tbl row 0 "{\\LИтого}")
       (vla-SetText tbl row 4 (itoa total-cnt))
-      (vla-SetText tbl row 5 (rtos total-area 2 2))
+      (vla-SetText tbl row 5 (zapolnenie-format-area total-area))
       (vla-SetCellAlignment tbl row 0 5)
       (vla-SetCellAlignment tbl row 4 5)
       (vla-SetCellAlignment tbl row 5 5)
@@ -458,6 +514,8 @@
 
 ;; ============================================================
 ;; ТАБЛИЦА AUTOCAD — SUMMARY
+;; ============================================================
+;; Площади выводятся с подавлением лишних нулей.
 ;; ============================================================
 (defun zapolnenie-create-table-summary (data / pt tbl row nRows nCols space
                                          rec tip cnt area
@@ -479,7 +537,7 @@
 
       ;; Ширины колонок
       (vla-SetColumnWidth tbl 0 15.0)   ; №
-      (vla-SetColumnWidth tbl 1 75.0)  ; Тип
+      (vla-SetColumnWidth tbl 1 75.0)   ; Тип (уменьшена в два раза)
       (vla-SetColumnWidth tbl 2 30.0)   ; Кол-во
       (vla-SetColumnWidth tbl 3 35.0)   ; Площадь
 
@@ -516,7 +574,7 @@
         (vla-SetText tbl row 0 (itoa (1+ (- row 2))))
         (vla-SetText tbl row 1 tip)
         (vla-SetText tbl row 2 (itoa cnt))
-        (vla-SetText tbl row 3 (rtos area 2 2))
+        (vla-SetText tbl row 3 (zapolnenie-format-area area))
 
         ;; Выравнивание: Тип — влево, остальное — по центру
         (vla-SetCellAlignment tbl row 0 5)
@@ -531,7 +589,7 @@
       (vla-MergeCells tbl row row 0 1)
       (vla-SetText tbl row 0 "{\\LИтого}")
       (vla-SetText tbl row 2 (itoa total-cnt))
-      (vla-SetText tbl row 3 (rtos total-area 2 2))
+      (vla-SetText tbl row 3 (zapolnenie-format-area total-area))
       (vla-SetCellAlignment tbl row 0 5)
       (vla-SetCellAlignment tbl row 2 5)
       (vla-SetCellAlignment tbl row 3 5)
@@ -553,6 +611,7 @@
                           inserts data summary-data
                           base-name xlsfile csvfile
                           total-count total-area
+                          skipped-total
                           rec)
   (vl-load-com)
   (sssetfirst nil nil)
@@ -571,7 +630,7 @@
 
   (if inserts
     (progn
-      ;; Агрегация данных
+      ;; Агрегация данных (внутри ведётся подсчёт пропусков)
       (setq data (zapolnenie-aggregate inserts))
 
       (if data
@@ -649,17 +708,33 @@
           )
 
           ;; ================================================
-          ;; ИТОГОВОЕ СООБЩЕНИЕ
+          ;; ИТОГОВОЕ СООБЩЕНИЕ (с раздельным счётчиком пропусков)
           ;; ================================================
           (setq total-count 0 total-area 0.0)
           (foreach rec data
             (setq total-count (+ total-count (cadddr rec))
-                  total-area (+ total-area (/ (* (cadr rec) (caddr rec) (cadddr rec)) 1000000.0)))
+                  ;; Округление ДО суммирования
+                  total-area (+ total-area (zapolnenie-round2 (/ (* (cadr rec) (caddr rec) (cadddr rec)) 1000000.0))))
           )
 
-          (princ (strcat
-                   "\nЗаполнение: элементов " (itoa total-count)
-                   ", общая площадь " (rtos total-area 2 2) " м2"))
+          (setq skipped-total (+ *zapolnenie-skipped-no-height* *zapolnenie-skipped-no-width*))
+
+          (if (> skipped-total 0)
+            ;; Есть пропущенные блоки — выводим подробности
+            (progn
+              (princ (strcat
+                       "\nЗаполнение: обработано " (itoa total-count) " блоков"
+                       ", общая площадь " (zapolnenie-format-area total-area) " м2"
+                       ", пропущено " (itoa skipped-total) "."))
+              (princ (strcat
+                       "\n  Без высоты: " (itoa *zapolnenie-skipped-no-height*)
+                       ", без ширины: " (itoa *zapolnenie-skipped-no-width*)))
+            )
+            ;; Всё обработано — краткое сообщение
+            (princ (strcat
+                     "\nЗаполнение: обработано " (itoa total-count) " блоков"
+                     ", общая площадь " (zapolnenie-format-area total-area) " м2"))
+          )
         )
         (princ "\nНет данных для отчёта.")
       )

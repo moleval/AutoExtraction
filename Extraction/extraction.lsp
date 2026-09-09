@@ -36,7 +36,7 @@
   (setq *EXTRACTION-LAST-FASONKA-LAYERS* nil)
 )
 
-;; Последние слои Подсистемы (новый порядок: алюминий, оцинковка)
+;; Последние слои Подсистемы (порядок: алюминий, оцинковка)
 (if (not (boundp '*EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
   (setq
     *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
@@ -465,7 +465,7 @@
               (if (= key 3) val (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))))
 
   ;; Формируем список слоёв подсистемы по чекбоксам
-  ;; (новый порядок: алюминий — второй, оцинковка — третий)
+  ;; (порядок: алюминий — второй, оцинковка — третий)
   (setq layers-to-select '())
   (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
     (setq layers-to-select (cons "Подсистема" layers-to-select)))
@@ -612,6 +612,9 @@
 
 ;; ============================================================
 ;; ЗАПУСК ЗАДАЧИ
+;; ============================================================
+;; Все задачи обрабатываются единообразно через vl-catch-all-apply.
+;; Функция fboudp НЕ используется (её нет в AutoLISP).
 ;; ============================================================
 
 (defun run-task (task-id layers report-mode export-excel export-txt create-table save-base / r)
@@ -845,6 +848,8 @@
 
               (start_dialog)
 
+              ;; Обработка действий после закрытия диалога
+              ;; Все вызовы через vl-catch-all-apply (fboundp не используется)
               (cond
                 ((eq *EXTRACTION-ACTION* 'SAVE)
                  (run-task *EXTRACTION-TASK-ID* *EXTRACTION-SELECTED-LAYERS* *EXTRACTION-REPORT-MODE*
@@ -861,10 +866,12 @@
                  )
                 )
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
-                 (if (fboundp 'cutline-main) (cutline-main) (princ "\nМодуль CUTLINE не загружен."))
+                 (setq r (vl-catch-all-apply 'cutline-main '()))
+                 (if (vl-catch-all-error-p r) (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
                 )
                 ((eq *EXTRACTION-ACTION* 'CUTSHEET)
-                 (if (fboundp 'cutsheet-main) (cutsheet-main) (princ "\nМодуль CUTSHEET не загружен."))
+                 (setq r (vl-catch-all-apply 'cutsheet-main '()))
+                 (if (vl-catch-all-error-p r) (princ "\nМодуль CUTSHEET не загружен или ошибка выполнения."))
                 )
               )
 

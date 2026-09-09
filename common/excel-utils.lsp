@@ -605,6 +605,16 @@
 ;; ============================================================
 
 ;; ------------------------------------------------------------
+;; Округление до двух знаков после запятой (для Заполнения)
+;; Применяется ДО суммирования, чтобы подитоги и итоги
+;; точно соответствовали сумме отображаемых значений
+;; (не терялась 0,01 при накоплении погрешностей).
+;; ------------------------------------------------------------
+(defun eu-round2 (x)
+  (/ (fix (+ (* x 100.0) 0.5)) 100.0)
+)
+
+;; ------------------------------------------------------------
 ;; Экранирование текстового значения для CSV
 ;; Заключает в кавычки, если есть точка с запятой, кавычка или перевод строки
 ;; Внутренние кавычки удваиваются
@@ -625,11 +635,36 @@
 )
 
 ;; ------------------------------------------------------------
+;; Форматирование площади для CSV с подавлением лишних нулей
+;; 3,00 -> 3 ; 3,10 -> 3,1 ; 3,01 -> 3,01 ; 3,15 -> 3,15
+;; ------------------------------------------------------------
+(defun eu-format-area-csv (area / int-part frac-hundredths)
+  (setq int-part (fix area))
+  (setq frac-hundredths (fix (+ (* (- area int-part) 100.0) 0.5)))
+  (cond
+    ;; Нет дробной части: 3,00 -> 3
+    ((= frac-hundredths 0)
+     (itoa int-part))
+    ;; Сотые нулевые, десятые ненулевые: 3,10 -> 3,1
+    ((= (rem frac-hundredths 10) 0)
+     (strcat (itoa int-part) "," (itoa (/ frac-hundredths 10))))
+    ;; Обе цифры значимые: 3,01 -> 3,01 ; 3,15 -> 3,15
+    (T
+     (if (< frac-hundredths 10)
+       (strcat (itoa int-part) ",0" (itoa frac-hundredths))
+       (strcat (itoa int-part) "," (itoa frac-hundredths))
+     )
+    )
+  )
+)
+
+;; ------------------------------------------------------------
 ;; Экспорт Заполнение DETAIL в XLS (XML Spreadsheet)
 ;; data: список (тип высота-мм ширина-мм количество)
 ;; Формулы: Площадь = Высота ? Ширина ? Кол-во / 1000000
 ;; Группировка по типам с подитогами
 ;; Общий итог суммирует только строки подитогов групп
+;; Формат площади: 0.## (подавление лишних нулей)
 ;; ------------------------------------------------------------
 (defun eu-export-zapolnenie-detail (data xlsfile / f rowNum i rec tip h w cnt area
                                      total-cnt total-area
@@ -672,7 +707,7 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
       (write-line "  <Style ss:ID=\"Num\">" f)
-      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.##\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -694,7 +729,7 @@
       (write-line "  <Style ss:ID=\"BoldUnderlineNum\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
-      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.##\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -756,7 +791,8 @@
                 h   (cadr rec)
                 w   (caddr rec)
                 cnt (cadddr rec)
-                area (/ (* h w cnt) 1000000.0))
+                ;; Округление ДО суммирования — чтобы подитоги были точными
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
           (setq grpCnt (+ grpCnt cnt)
                 grpArea (+ grpArea area)
                 total-cnt (+ total-cnt cnt)
@@ -768,9 +804,10 @@
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa h) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
-          ;; Площадь с формулой: Высота ? Ширина ? Кол-во / 1000000
-          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-3]*RC[-2]*RC[-1]/1000000\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+          ;; Площадь с формулой округления
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(RC[-3]*RC[-2]*RC[-1]/1000000,2)\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
           (write-line "   </Row>" f)
+
           (setq rowNum (1+ rowNum))
         )
 
@@ -823,7 +860,7 @@
 ;; ------------------------------------------------------------
 ;; Экспорт Заполнение SUMMARY в XLS (XML Spreadsheet)
 ;; data: список (тип количество площадь-м2)
-;; Итоговые формулы корректны (нет промежуточных подитогов)
+;; Формат площади: 0.## (подавление лишних нулей)
 ;; ------------------------------------------------------------
 (defun eu-export-zapolnenie-summary (data xlsfile / f rowNum i rec tip cnt area total-cnt total-area startRow endRow)
   (setq f (open xlsfile "w"))
@@ -861,7 +898,7 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
       (write-line "  <Style ss:ID=\"Num\">" f)
-      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.##\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -883,7 +920,7 @@
       (write-line "  <Style ss:ID=\"BoldUnderlineNum\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
-      (write-line "   <NumberFormat ss:Format=\"0.00\"/>" f)
+      (write-line "   <NumberFormat ss:Format=\"0.##\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -953,7 +990,7 @@
 ;; Экспорт Заполнение DETAIL в CSV
 ;; Разделитель: точка с запятой (единообразно с Подсистемой)
 ;; Десятичный разделитель: запятая
-;; Площадь и текстовые значения — в кавычках при необходимости
+;; Площадь в кавычках, с подавлением лишних нулей
 ;; data: список (тип высота-мм ширина-мм количество)
 ;; Группировка по типам с подитогами
 ;; ------------------------------------------------------------
@@ -992,7 +1029,8 @@
                 h   (cadr rec)
                 w   (caddr rec)
                 cnt (cadddr rec)
-                area (/ (* h w cnt) 1000000.0))
+                ;; Округление ДО суммирования — чтобы подитоги были точными
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
           (setq grpCnt (+ grpCnt cnt)
                 grpArea (+ grpArea area)
                 total-cnt (+ total-cnt cnt)
@@ -1003,7 +1041,7 @@
                     (itoa h) ";"
                     (itoa w) ";"
                     (itoa cnt) ";"
-                    "\"" (vl-string-translate "." "," (rtos area 2 2)) "\"")
+                    "\"" (eu-format-area-csv area) "\"")
             f)
         )
 
@@ -1011,7 +1049,7 @@
         (write-line
           (strcat ";" (eu-csv-quote grpName) ";;;"
                   (itoa grpCnt) ";"
-                  "\"" (vl-string-translate "." "," (rtos grpArea 2 2)) "\"")
+                  "\"" (eu-format-area-csv grpArea) "\"")
           f)
       )
 
@@ -1019,7 +1057,7 @@
       (write-line
         (strcat "Итого;;;"
                 (itoa total-cnt) ";"
-                "\"" (vl-string-translate "." "," (rtos total-area 2 2)) "\"")
+                "\"" (eu-format-area-csv total-area) "\"")
         f)
       (close f)
       T
@@ -1032,6 +1070,7 @@
 ;; Экспорт Заполнение SUMMARY в CSV
 ;; Разделитель: точка с запятой (единообразно с Подсистемой)
 ;; Десятичный разделитель: запятая
+;; Площадь в кавычках, с подавлением лишних нулей
 ;; data: список (тип количество площадь-м2)
 ;; ------------------------------------------------------------
 (defun eu-export-zapolnenie-csv-summary (data csvfile / f i rec tip cnt area total-cnt total-area)
@@ -1052,14 +1091,14 @@
           (strcat (itoa i) ";"
                   (eu-csv-quote tip) ";"
                   (itoa cnt) ";"
-                  "\"" (vl-string-translate "." "," (rtos area 2 2)) "\"")
+                  "\"" (eu-format-area-csv area) "\"")
           f)
       )
       ;; Итоговая строка (2 точки с запятой: данные в колонках 3 и 4)
       (write-line
         (strcat "Итого;;"
                 (itoa total-cnt) ";"
-                "\"" (vl-string-translate "." "," (rtos total-area 2 2)) "\"")
+                "\"" (eu-format-area-csv total-area) "\"")
         f)
       (close f)
       T
