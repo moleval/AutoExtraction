@@ -42,6 +42,7 @@
         '(
           "fasonka.lsp"
           "subsystem.lsp"
+          "zapolnenie.lsp"
           "extraction.lsp"
           "cutline.lsp"
           "cutsheet.lsp"
