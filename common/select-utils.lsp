@@ -1,6 +1,13 @@
 ;;; ============================================================
 ;;; common/select-utils.lsp
 ;;; Выбор вхождений блоков и извлечение динамических свойств
+;;
+;;; ИСПРАВЛЕНИЕ (аудит Этап 3, пункт B4):
+;;; su-get-length использует двухступенчатый поиск:
+;;;   1. Сначала точное совпадение "ДЛИНА"
+;;;   2. Если не найдено — поиск по подстроке "ДЛИНА"
+;;; Это защищает от ложных срабатываний и находит свойства типа
+;;; "Длина_уплотнителя", "Длина в свету" и т.д.
 ;;; ============================================================
 (vl-load-com)
 
@@ -187,7 +194,14 @@
   )
 )
 
+;; ============================================================
 ;; Получение длины из динамических свойств
+;; ИСПРАВЛЕНО (аудит Этап 3, пункт B4):
+;; Двухступенчатый поиск: сначала точное совпадение, затем подстрока.
+;; Это защищает от ложных срабатываний и находит свойства типа
+;; "Длина_уплотнителя", "Длина в свету" и т.д.
+;; Результат округляется до целого числа (мм).
+;; ============================================================
 (defun su-get-length (obj / dynprops prop pname value result)
   (setq dynprops
     (vl-catch-all-apply
@@ -200,6 +214,8 @@
     nil
     (progn
       (setq result nil)
+
+      ;; Шаг 1: точное совпадение "ДЛИНА"
       (foreach prop dynprops
         (if (null result)
           (progn
@@ -223,8 +239,40 @@
                   )
                 )
                 (if (not (vl-catch-all-error-p value))
-                  (setq result
-                    (su-value-to-number value)
+                  (setq result (su-value-to-number value))
+                )
+              )
+            )
+          )
+        )
+      )
+
+      ;; Шаг 2: поиск по подстроке "ДЛИНА" (если точное не найдено)
+      (if (null result)
+        (foreach prop dynprops
+          (if (null result)
+            (progn
+              (setq pname
+                (vl-catch-all-apply
+                  'vla-get-PropertyName
+                  (list prop)
+                )
+              )
+              (if (and
+                    (not (vl-catch-all-error-p pname))
+                    pname
+                    (= (type pname) 'STR)
+                    (vl-string-search "ДЛИНА" (strcase pname))
+                  )
+                (progn
+                  (setq value
+                    (vl-catch-all-apply
+                      'vla-get-Value
+                      (list prop)
+                    )
+                  )
+                  (if (not (vl-catch-all-error-p value))
+                    (setq result (su-value-to-number value))
                   )
                 )
               )
@@ -232,6 +280,8 @@
           )
         )
       )
+
+      ;; Округление до целого числа (мм) — ожидаемое поведение для Фасонки
       (if (numberp result)
         (atoi (rtos result 2 0))
         nil

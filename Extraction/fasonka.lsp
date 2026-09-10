@@ -6,6 +6,10 @@
 ;;;  Экспорт XLS/CSV — в common/excel-utils.lsp
 ;;;  GAL — в common/txt-utils.lsp
 ;;;  Таблицы AutoCAD — в common/table-utils.lsp
+;;
+;;;  ИСПРАВЛЕНИЕ (аудит Этап 3, пункт B2):
+;;;  clean-name обрезает префикс ТОЛЬКО если имя начинается с него.
+;;;  Если префикс не найден — имя возвращается без изменений.
 ;;; ============================================================
 
 (defun c:fasonka ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
@@ -73,20 +77,47 @@
     (princ)
   )
 
-  ;; Очистка имени блока
-  (defun clean-name (str / tmp first rest)
-    (if (and str (> (strlen str) 7))
+  ;; ============================================================
+  ;; Очистка имени блока от префикса
+  ;; ИСПРАВЛЕНО (аудит Этап 3, пункт B2):
+  ;; Префикс обрезается ТОЛЬКО если имя начинается с него.
+  ;; Если префикс не найден — имя возвращается без изменений.
+  ;; ============================================================
+  (defun clean-name (str / prefixes p result found first rest)
+    ;; Список возможных префиксов
+    ;; Каждый префикс должен включать завершающий символ (пробел, подчёркивание)
+    (setq prefixes '("Железо " "Железо_" "ФАСОНКА_" "ФАСОНКА " "Фасонка_" "Фасонка "))
+    (setq result str
+          found nil)
+    ;; Проверяем каждый префикс (без учёта регистра)
+    (if (and str (> (strlen str) 0))
       (progn
-        (setq tmp (substr str 8))
-        (if (> (strlen tmp) 0)
-          (setq first (strcase (substr tmp 1 1))
-                rest  (substr tmp 2)
-                tmp   (strcat first rest))
+        (foreach p prefixes
+          (if (not found)
+            (progn
+              ;; Проверяем, начинается ли имя с префикса
+              (if (and (>= (strlen str) (strlen p))
+                       (= (strcase (substr str 1 (strlen p))) (strcase p)))
+                (progn
+                  ;; Обрезаем префикс
+                  (setq result (substr str (1+ (strlen p))))
+                  (setq found T)
+                )
+              )
+            )
+          )
         )
-        tmp
+        ;; Делаем первую букву заглавной (только если префикс был обрезан)
+        (if (and found (> (strlen result) 0))
+          (progn
+            (setq first (strcase (substr result 1 1))
+                  rest  (substr result 2)
+                  result (strcat first rest))
+          )
+        )
       )
-      str
     )
+    result
   )
 
   ;; ==================== Выборка блоков ====================
