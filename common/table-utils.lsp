@@ -2,15 +2,17 @@
 ;;; common/table-utils.lsp
 ;;; Создание таблиц AutoCAD для отчётов Фасонки
 ;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.1):
+;;; ИСПРАВЛЕНИЯ (аудит Этап 4.1 и 4.2):
+;;;   Этап 4.1:
 ;;;   D7: добавлены переменные ans, oldEcho, recCount в /-список
 ;;;       tbl-create-report
 ;;;   D8: убран интерактивный вопрос о создании таблицы.
-;;;       Решение принимается на уровне диспетчера (chk_acad)
-;;;       или автономных команд.
-;;;   БАГ: в ветке SUMMARY не обновлялся список createdTables,
-;;;       из-за чего выводилось противоречивое сообщение
-;;;       "Таблица SUMMARY создана." и "Таблицы не созданы."
+;;;   БАГ: в ветке SUMMARY не обновлялся список createdTables.
+;;
+;;;   Этап 4.2:
+;;;   D4: Оптимизация группировки в ветке DETAIL —
+;;;       append заменён на cons (O(1) вместо O(N)).
+;;;       Порядок групп сохраняется через reverse перед использованием.
 ;;; ============================================================
 
 (vl-load-com)
@@ -128,9 +130,11 @@
 ;; ИСПРАВЛЕНО (аудит Этап 4.1):
 ;;   D7: добавлены ans, oldEcho, recCount в /-список
 ;;   D8: убран вопрос о создании таблицы.
-;;       Решение о создании принято до вызова этой функции
-;;       (на уровне диспетчера или автономной команды).
 ;;   БАГ: в ветке SUMMARY не обновлялся список createdTables.
+;; ИСПРАВЛЕНО (аудит Этап 4.2):
+;;   D4: Оптимизация группировки в ветке DETAIL —
+;;       append заменён на cons (O(1) вместо O(N)).
+;;       Порядок групп сохраняется через reverse перед использованием.
 ;; ------------------------------------------------------------
 (defun tbl-create-report (report-type report-data / acad doc space pt pt_wcs
                           doTotals skipSingleTotals mergeTotals alignData
@@ -181,10 +185,15 @@
               (t (setq canAdd nil))
             )
             (if canAdd
-              (progn (setq currentGroups (append currentGroups (list ig)) currentDataRows (+ currentDataRows groupRows)))
+              ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+              ;; cons вместо append для накопления групп
+              (progn (setq currentGroups (cons ig currentGroups) currentDataRows (+ currentDataRows groupRows)))
               (progn
                 (if currentGroups
                   (progn
+                    ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+                    ;; Восстанавливаем порядок групп перед использованием
+                    (setq currentGroups (reverse currentGroups))
                     (setq neededRows 2)
                     (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
                     (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
@@ -206,6 +215,9 @@
           )
           (if currentGroups
             (progn
+              ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+              ;; Восстанавливаем порядок групп перед использованием
+              (setq currentGroups (reverse currentGroups))
               (setq neededRows 2)
               (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
               (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
@@ -232,7 +244,7 @@
             (progn
               (tbl-fill-summary tableObj report-data)
               (vla-update tableObj)
-              ;; ИСПРАВЛЕНО: добавляем таблицу в список созданных
+              ;; ИСПРАВЛЕНО (аудит Этап 4.1): добавляем таблицу в список созданных
               (setq createdTables (cons tableObj createdTables)
                     tableIndex (1+ tableIndex))
               (princ "\nТаблица SUMMARY создана.")

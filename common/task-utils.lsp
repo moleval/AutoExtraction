@@ -2,8 +2,14 @@
 ;;; common/task-utils.lsp
 ;;; Универсальные функции для задач AutoExtraction
 ;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.1):
-;;;   D7: добавлена переменная pos в /-список tu-strip-extension
+;;; ИСПРАВЛЕНИЯ (аудит Этап 4.2):
+;;;   D4: Оптимизация циклов — заменено append на cons/reverse
+;;;       в функциях:
+;;;       - tu-list-unique-ci
+;;;       - tu-parse-comma-list
+;;;       - split-string
+;;;   D14: Исправление утечки файлового дескриптора
+;;;       в функции tu-file-writable-p
 ;;; ============================================================
 
 (vl-load-com)
@@ -28,7 +34,12 @@
   (or (null str) (= str "") (not (= (type str) 'STR)))
 )
 
+;; ============================================================
 ;; Уникализация списка строк без учёта регистра
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+;; Оптимизировано: cons вместо append (O(1) вместо O(N))
+;; Порядок элементов сохраняется через reverse в конце.
+;; ============================================================
 (defun tu-list-unique-ci (lst / out x key)
   (setq out '())
   (if (listp lst)
@@ -37,13 +48,13 @@
         (progn
           (setq key (strcase x))
           (if (not (vl-some '(lambda (y) (= (strcase y) key)) out))
-            (setq out (append out (list x)))
+            (setq out (cons x out))
           )
         )
       )
     )
   )
-  out
+  (reverse out)
 )
 
 ;; Сортировка строк без учёта регистра
@@ -63,12 +74,8 @@
   )
 )
 
-;; ============================================================
 ;; Удаление расширения из пути
-;; ИСПРАВЛЕНО (аудит Этап 4.1, пункт D7):
-;; Добавлена переменная pos в /-список для предотвращения
-;; загрязнения глобального состояния AutoLISP.
-;; ============================================================
+;; Исправлено на Этапе 4.1: добавлена pos в /-список
 (defun tu-strip-extension (path / pos)
   (if (setq pos (vl-string-position 46 (vl-string-left-trim "\\/" path) 0 T nil))
     (substr path 1 pos)
@@ -102,9 +109,22 @@
   )
 )
 
+;; ============================================================
 ;; Проверка возможности записи файла
-(defun tu-file-writable-p (path)
-  (not (null (open path "a")))
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D14):
+;; Файловый дескриптор теперь закрывается после проверки.
+;; Ранее результат open не закрывался, что приводило к утечке
+;; файловых дескрипторов при многократных вызовах.
+;; ============================================================
+(defun tu-file-writable-p (path / f)
+  (setq f (open path "a"))
+  (if f
+    (progn
+      (close f)
+      T
+    )
+    nil
+  )
 )
 
 ;; Проверка существования каталога
@@ -115,39 +135,47 @@
   )
 )
 
+;; ============================================================
 ;; Разбор строки со списком, разделённым запятыми
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+;; Оптимизировано: cons вместо append (O(1) вместо O(N))
+;; Порядок элементов сохраняется через reverse в конце.
+;; ============================================================
 (defun tu-parse-comma-list (str / pos result)
   (setq result '())
   (while (setq pos (vl-string-search "," str))
-    (setq result (append result (list (vl-string-trim " " (substr str 1 pos)))))
+    (setq result (cons (vl-string-trim " " (substr str 1 pos)) result))
     (setq str (substr str (+ pos 2)))
   )
   (if (> (strlen (vl-string-trim " " str)) 0)
-    (setq result (append result (list (vl-string-trim " " str))))
+    (setq result (cons (vl-string-trim " " str) result))
   )
-  result
+  (reverse result)
 )
 
-;; ------------------------------------------------------------
+;; ============================================================
 ;; Разбиение строки на список по произвольному разделителю
 ;; Используется для разбора строки слоёв, введённой через запятую
 ;; С обрезкой пробелов по краям каждого элемента.
 ;; Это гарантирует корректную работу при вводе слоёв
 ;; вида "Заполнение, Стекло" (с пробелом после запятой).
 ;; Пример: (split-string "a, b ,c" ",") ? ("a" "b" "c")
-;; ------------------------------------------------------------
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+;; Оптимизировано: cons вместо append (O(1) вместо O(N))
+;; Порядок элементов сохраняется через reverse в конце.
+;; ============================================================
 (defun split-string (str delim / pos result item)
   (setq result '())
   (while (setq pos (vl-string-search delim str))
     (setq item (vl-string-trim " " (substr str 1 pos)))
-    (setq result (append result (list item)))
+    (setq result (cons item result))
     (setq str (substr str (+ pos 2)))
   )
   (setq item (vl-string-trim " " str))
   (if (> (strlen item) 0)
-    (setq result (append result (list item)))
+    (setq result (cons item result))
   )
-  result
+  (reverse result)
 )
 
 (princ "\nTASK-UTILS.LSP загружен.")
