@@ -123,15 +123,22 @@
 ;; ------------------------------------------------------------
 ;; Разбиение строки на список по произвольному разделителю
 ;; Используется для разбора строки слоёв, введённой через запятую
-;; Пример: (split-string "a,b,c" ",") ? ("a" "b" "c")
+;; С обрезкой пробелов по краям каждого элемента.
+;; Это гарантирует корректную работу при вводе слоёв
+;; вида "Заполнение, Стекло" (с пробелом после запятой).
+;; Пример: (split-string "a, b ,c" ",") ? ("a" "b" "c")
 ;; ------------------------------------------------------------
-(defun split-string (str delim / pos result)
+(defun split-string (str delim / pos result item)
   (setq result '())
   (while (setq pos (vl-string-search delim str))
-    (setq result (append result (list (substr str 1 pos))))
+    (setq item (vl-string-trim " " (substr str 1 pos)))
+    (setq result (append result (list item)))
     (setq str (substr str (+ pos 2)))
   )
-  (setq result (append result (list str)))
+  (setq item (vl-string-trim " " str))
+  (if (> (strlen item) 0)
+    (setq result (append result (list item)))
+  )
   result
 )
 

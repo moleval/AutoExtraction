@@ -26,6 +26,26 @@
   result
 )
 
+;; ------------------------------------------------------------
+;; Экранирование текстового значения для CSV
+;; Заключает в кавычки, если есть точка с запятой, кавычка или перевод строки
+;; Внутренние кавычки удваиваются
+;; ------------------------------------------------------------
+(defun eu-csv-quote (str / result)
+  (if (null str)
+    ""
+    (if (or (vl-string-search ";" str)
+            (vl-string-search "\"" str)
+            (vl-string-search "\n" str))
+      (progn
+        (setq result (vl-string-subst "\"\"" "\"" str))
+        (strcat "\"" result "\"")
+      )
+      str
+    )
+  )
+)
+
 ;; ============================================================
 ;; ФУНКЦИИ ДЛЯ ФАСОНКИ (восстановлены полностью)
 ;; ============================================================
@@ -267,6 +287,93 @@
       (close f)
       T
     )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Фасонка DETAIL в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; data: список (номер-группы имя-группы список-записей)
+;;   где запись: (номер длина количество)
+;; ------------------------------------------------------------
+(defun eu-export-csv-detail (data csvfile / f groupIndex name recs rec itemNum len count sum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Фасонное железо" f)
+      (write-line "№;Тип фасонки;Длина, мм;Кол-во, шт.;Сумма, м.п." f)
+
+      (foreach ig data
+        (setq groupIndex (car ig)
+              name       (cadr ig)
+              recs       (caddr ig)
+              itemNum    0)
+
+        (foreach rec recs
+          (setq itemNum (1+ itemNum)
+                len     (cadr rec)
+                count   (caddr rec)
+                sum     (/ (* len count) 1000.0))
+
+          (write-line
+            (strcat (itoa groupIndex) "-" (itoa itemNum) ";"   ; ? дефис здесь
+                    (eu-csv-quote name) ";"
+                    (rtos len 2 0) ";"
+                    (itoa count) ";"
+                    "\"" (vl-string-translate "." "," (rtos sum 2 2)) "\"")
+            f)
+        )
+      )
+
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Фасонка SUMMARY в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; data: список (имя количество сумма)
+;; ------------------------------------------------------------
+(defun eu-export-csv-summary (data csvfile / f i name count sum totalCount totalSum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Фасонное железо" f)
+      (write-line "№;Тип фасонки;Кол-во, шт.;Сумма, м.п." f)
+
+      (setq i 0 totalCount 0 totalSum 0.0)
+      (foreach rec data
+        (setq i (1+ i)
+              name  (car rec)
+              count (cadr rec)
+              sum   (caddr rec))
+        (setq totalCount (+ totalCount count)
+              totalSum   (+ totalSum sum))
+
+        (write-line
+          (strcat (itoa i) ";"
+                  (eu-csv-quote name) ";"
+                  (itoa count) ";"
+                  "\"" (vl-string-translate "." "," (rtos sum 2 2)) "\"")
+            f)
+      )
+
+      ;; Итоговая строка
+      (write-line
+        (strcat "Итого;;"
+                (itoa totalCount) ";"
+                "\"" (vl-string-translate "." "," (rtos totalSum 2 2)) "\"")
+        f)
+
+      (close f)
+      T
+    )
+    nil
   )
 )
 
@@ -612,26 +719,6 @@
 ;; ------------------------------------------------------------
 (defun eu-round2 (x)
   (/ (fix (+ (* x 100.0) 0.5)) 100.0)
-)
-
-;; ------------------------------------------------------------
-;; Экранирование текстового значения для CSV
-;; Заключает в кавычки, если есть точка с запятой, кавычка или перевод строки
-;; Внутренние кавычки удваиваются
-;; ------------------------------------------------------------
-(defun eu-csv-quote (str / result)
-  (if (null str)
-    ""
-    (if (or (vl-string-search ";" str)
-            (vl-string-search "\"" str)
-            (vl-string-search "\n" str))
-      (progn
-        (setq result (vl-string-subst "\"\"" "\"" str))
-        (strcat "\"" result "\"")
-      )
-      str
-    )
-  )
 )
 
 ;; ------------------------------------------------------------
