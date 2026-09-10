@@ -1,6 +1,16 @@
 ;;; ============================================================
 ;;; common/table-utils.lsp
 ;;; Создание таблиц AutoCAD для отчётов Фасонки
+;;
+;;; ИСПРАВЛЕНИЯ (аудит Этап 4.1):
+;;;   D7: добавлены переменные ans, oldEcho, recCount в /-список
+;;;       tbl-create-report
+;;;   D8: убран интерактивный вопрос о создании таблицы.
+;;;       Решение принимается на уровне диспетчера (chk_acad)
+;;;       или автономных команд.
+;;;   БАГ: в ветке SUMMARY не обновлялся список createdTables,
+;;;       из-за чего выводилось противоречивое сообщение
+;;;       "Таблица SUMMARY создана." и "Таблицы не созданы."
 ;;; ============================================================
 
 (vl-load-com)
@@ -115,6 +125,12 @@
 
 ;; ------------------------------------------------------------
 ;; Основная функция создания таблиц AutoCAD
+;; ИСПРАВЛЕНО (аудит Этап 4.1):
+;;   D7: добавлены ans, oldEcho, recCount в /-список
+;;   D8: убран вопрос о создании таблицы.
+;;       Решение о создании принято до вызова этой функции
+;;       (на уровне диспетчера или автономной команды).
+;;   БАГ: в ветке SUMMARY не обновлялся список createdTables.
 ;; ------------------------------------------------------------
 (defun tbl-create-report (report-type report-data / acad doc space pt pt_wcs
                           doTotals skipSingleTotals mergeTotals alignData
@@ -122,108 +138,117 @@
                           indexed-groups groupIndex currentGroups currentDataRows
                           tableIndex createdTables
                           gIndex gName gRecs tableObj groupRows
-                          neededRows currentGroups ig canAdd)
-  (initget "Yes No")
-  (setq ans (getkword "\nСоздать таблицу AutoCAD? [Yes/No] <Yes>: "))
-  (if (null ans) (setq ans "Yes"))
-  (if (= ans "Yes")
-    (progn
-      (setq pt (getpoint "\nУкажите точку вставки первой таблицы: "))
-      (if pt
-        (progn
-          (setq acad (vlax-get-acad-object)
-                doc (vla-get-activedocument acad)
-                space (vla-get-modelspace doc)
-                pt_wcs (trans pt 1 0))
-          (setq doTotals T skipSingleTotals nil mergeTotals T alignData T)
-          (setq maxRowsPerTable 60 idealRowsPerTable 45 minFill 40)
-          (setq oldEcho (getvar "CMDECHO"))
-          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
-          (vla-startundomark doc)
+                          neededRows ig canAdd
+                          ans oldEcho recCount)
 
-          (if (= report-type "DETAIL")
-            (progn
-              (setq indexed-groups report-data)
-              (setq tableIndex 0 createdTables '() currentGroups '() currentDataRows 0)
-              (while indexed-groups
-                (setq ig (car indexed-groups) indexed-groups (cdr indexed-groups)
-                      gIndex (car ig) gName (cadr ig) gRecs (caddr ig)
-                      recCount (length gRecs)
-                      groupRows (+ recCount (if doTotals 1 0)))
-                (setq canAdd nil)
-                (cond
-                  ((zerop currentDataRows) (setq canAdd T))
-                  ((<= (+ currentDataRows groupRows) idealRowsPerTable) (setq canAdd T))
-                  ((< currentDataRows minFill) (if (<= (+ currentDataRows groupRows) maxRowsPerTable) (setq canAdd T) (setq canAdd nil)))
-                  (t (setq canAdd nil))
-                )
-                (if canAdd
-                  (progn (setq currentGroups (append currentGroups (list ig)) currentDataRows (+ currentDataRows groupRows)))
+  ;; Решение о создании таблицы принято на уровне вызывающего кода.
+  ;; Эта функция вызывается только если create-table = T.
+  ;; Никаких дополнительных вопросов пользователю не задаётся.
+  (setq pt (getpoint "\nУкажите точку вставки первой таблицы: "))
+  (if pt
+    (progn
+      (setq acad (vlax-get-acad-object)
+            doc (vla-get-activedocument acad)
+            space (vla-get-modelspace doc)
+            pt_wcs (trans pt 1 0))
+      (setq doTotals T skipSingleTotals nil mergeTotals T alignData T)
+      (setq maxRowsPerTable 60 idealRowsPerTable 45 minFill 40)
+      (setq oldEcho (getvar "CMDECHO"))
+      (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+      (vla-startundomark doc)
+
+      ;; Инициализация списка созданных таблиц и счётчика
+      (setq createdTables '()
+            tableIndex 0)
+
+      (if (= report-type "DETAIL")
+        ;; ============================================================
+        ;; ВЕТКА DETAIL
+        ;; ============================================================
+        (progn
+          (setq indexed-groups report-data)
+          (setq currentGroups '() currentDataRows 0)
+          (while indexed-groups
+            (setq ig (car indexed-groups) indexed-groups (cdr indexed-groups)
+                  gIndex (car ig) gName (cadr ig) gRecs (caddr ig)
+                  recCount (length gRecs)
+                  groupRows (+ recCount (if doTotals 1 0)))
+            (setq canAdd nil)
+            (cond
+              ((zerop currentDataRows) (setq canAdd T))
+              ((<= (+ currentDataRows groupRows) idealRowsPerTable) (setq canAdd T))
+              ((< currentDataRows minFill) (if (<= (+ currentDataRows groupRows) maxRowsPerTable) (setq canAdd T) (setq canAdd nil)))
+              (t (setq canAdd nil))
+            )
+            (if canAdd
+              (progn (setq currentGroups (append currentGroups (list ig)) currentDataRows (+ currentDataRows groupRows)))
+              (progn
+                (if currentGroups
                   (progn
-                    (if currentGroups
+                    (setq neededRows 2)
+                    (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
+                    (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
+                    (if (vl-catch-all-error-p tableObj)
+                      (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
                       (progn
-                        (setq neededRows 2)
-                        (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
-                        (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
-                        (if (vl-catch-all-error-p tableObj)
-                          (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
-                          (progn
-                            (tbl-fill-detail tableObj currentGroups)
-                            (vla-update tableObj)
-                            (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
-                            (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
-                            (setq pt_wcs (list (car pt_wcs) (- (cadr pt_wcs) (+ (* neededRows 10.0) 20.0)) 0.0))
-                          )
-                        )
+                        (tbl-fill-detail tableObj currentGroups)
+                        (vla-update tableObj)
+                        (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
+                        (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
+                        (setq pt_wcs (list (car pt_wcs) (- (cadr pt_wcs) (+ (* neededRows 10.0) 20.0)) 0.0))
                       )
                     )
-                    (setq currentGroups (list ig) currentDataRows groupRows)
                   )
                 )
-              )
-              (if currentGroups
-                (progn
-                  (setq neededRows 2)
-                  (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
-                  (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
-                  (if (vl-catch-all-error-p tableObj)
-                    (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
-                    (progn
-                      (tbl-fill-detail tableObj currentGroups)
-                      (vla-update tableObj)
-                      (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
-                      (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
-                    )
-                  )
-                )
+                (setq currentGroups (list ig) currentDataRows groupRows)
               )
             )
-            ;; SUMMARY
+          )
+          (if currentGroups
             (progn
-              (setq neededRows (+ 3 (length report-data)))
-              (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
+              (setq neededRows 2)
+              (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
+              (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 5 10.0 50.0)))
               (if (vl-catch-all-error-p tableObj)
                 (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
                 (progn
-                  (tbl-fill-summary tableObj report-data)
+                  (tbl-fill-detail tableObj currentGroups)
                   (vla-update tableObj)
-                  (princ "\nТаблица SUMMARY создана.")
+                  (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
+                  (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
                 )
               )
             )
           )
-
-          (vla-endundomark doc)
-          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
-          (if createdTables
-            (princ (strcat "\nВсего создано таблиц: " (itoa tableIndex)))
-            (princ "\nТаблицы не созданы.")
+        )
+        ;; ============================================================
+        ;; ВЕТКА SUMMARY
+        ;; ============================================================
+        (progn
+          (setq neededRows (+ 3 (length report-data)))
+          (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
+          (if (vl-catch-all-error-p tableObj)
+            (princ (strcat "\nОшибка при создании таблицы: " (vl-catch-all-error-message tableObj)))
+            (progn
+              (tbl-fill-summary tableObj report-data)
+              (vla-update tableObj)
+              ;; ИСПРАВЛЕНО: добавляем таблицу в список созданных
+              (setq createdTables (cons tableObj createdTables)
+                    tableIndex (1+ tableIndex))
+              (princ "\nТаблица SUMMARY создана.")
+            )
           )
         )
-        (princ "\nТочка не указана.")
+      )
+
+      (vla-endundomark doc)
+      (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+      (if createdTables
+        (princ (strcat "\nВсего создано таблиц: " (itoa tableIndex)))
+        (princ "\nТаблицы не созданы.")
       )
     )
-    (princ "\nТаблица не создана.")
+    (princ "\nТочка не указана.")
   )
 )
 
