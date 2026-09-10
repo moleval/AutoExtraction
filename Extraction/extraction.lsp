@@ -691,11 +691,17 @@
 )
 
 (defun extraction-cutline ()
+  ;; Считываем галки ДО закрытия диалога (пока тайлы доступны)
+  (setq *CUTLINE-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
+  (setq *CUTLINE-CREATE-XLS*   (= (get_tile "chk_xls") "1"))
   (setq *EXTRACTION-ACTION* 'CUTLINE)
   (done_dialog 1)
 )
 
 (defun extraction-cutsheet ()
+  ;; Считываем галки ДО закрытия диалога (пока тайлы доступны)
+  (setq *CUTSHEET-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
+  (setq *CUTSHEET-CREATE-XLS*   (= (get_tile "chk_xls") "1"))
   (setq *EXTRACTION-ACTION* 'CUTSHEET)
   (done_dialog 1)
 )
@@ -866,10 +872,12 @@
                  )
                 )
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
+                 ;; Галки уже считаны в extraction-cutline ДО закрытия диалога
                  (setq r (vl-catch-all-apply 'cutline-main '()))
-                 (if (vl-catch-all-error-p r) (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
+                (if (vl-catch-all-error-p r) (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
                 )
                 ((eq *EXTRACTION-ACTION* 'CUTSHEET)
+                 ;; Галки уже считаны в extraction-cutsheet ДО закрытия диалога
                  (setq r (vl-catch-all-apply 'cutsheet-main '()))
                  (if (vl-catch-all-error-p r) (princ "\nМодуль CUTSHEET не загружен или ошибка выполнения."))
                 )
