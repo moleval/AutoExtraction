@@ -46,6 +46,7 @@
           "extraction.lsp"
           "cutline.lsp"
           "cutsheet.lsp"
+          "blockrename.lsp"
         )
         (if (findfile (strcat extraction-dir f))
           (progn
