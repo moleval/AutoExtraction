@@ -1,17 +1,6 @@
 ;;; ============================================================
 ;;; common/select-utils.lsp
 ;;; Выбор вхождений блоков и извлечение динамических свойств
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 3, пункт B4):
-;;; su-get-length использует двухступенчатый поиск:
-;;;   1. Сначала точное совпадение "ДЛИНА"
-;;;   2. Если не найдено — поиск по подстроке "ДЛИНА"
-;;; Это защищает от ложных срабатываний и находит свойства типа
-;;; "Длина_уплотнителя", "Длина в свету" и т.д.
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.4, пункт D2):
-;;; Добавлен поясняющий комментарий об очистке предварительного
-;;; выбора в функции su-select-inserts.
 ;;; ============================================================
 (vl-load-com)
 
@@ -65,45 +54,23 @@
   )
 )
 
-;; ============================================================
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
-;; ИСПРАВЛЕНО (аудит Этап 4.4, пункт D2):
-;; Добавлен поясняющий комментарий об очистке предварительного
-;; выбора.
-;; ============================================================
 (defun su-select-inserts (layers / ss i ent data layer out layer-name)
   (setq out '())
-  
-  ;; ============================================================
-  ;; Проверяем сохранённый предварительный выбор от диспетчера
-  ;; ИСПРАВЛЕНО (аудит Этап 4.4, пункт D2):
-  ;; Добавлен поясняющий комментарий об очистке выбора.
-  ;;
-  ;; Предварительный набор используется только для текущего
-  ;; запуска команды и после получения выборки намеренно
-  ;; очищается. Это предотвращает использование устаревшего
-  ;; выбора при повторных запусках задач.
-  ;;
-  ;; Если произойдёт ошибка после очистки, выбор будет потерян,
-  ;; но это ожидаемое поведение — пользователь может выбрать
-  ;; объекты заново при повторном запуске.
-  ;; ============================================================
+
   (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
     (progn
       (setq ss *extraction-preselected-set*)
-      ;; Намеренно очищаем после использования — см. комментарий выше
       (setq *extraction-preselected-set* nil)
     )
     (setq ss (ssget "_I"))
   )
-  
-  ;; Если предварительного выбора нет — выбираем по слоям или все
+
   (if (null ss)
     (progn
       (if (null layers)
         (setq ss (ssget "_X" '((0 . "INSERT"))))
         (progn
-          ;; Формируем строку слоёв через запятую
           (setq layer-name
             (apply 'strcat
               (mapcar '(lambda (x) (strcat x ",")) layers)
@@ -115,8 +82,7 @@
       )
     )
   )
-  
-  ;; Фильтрация по слоям (даже для предварительного выбора)
+
   (if ss
     (progn
       (setq i 0)
@@ -131,7 +97,7 @@
       )
     )
   )
-  
+
   (reverse out)
 )
 
@@ -217,14 +183,7 @@
   )
 )
 
-;; ============================================================
 ;; Получение длины из динамических свойств
-;; ИСПРАВЛЕНО (аудит Этап 3, пункт B4):
-;; Двухступенчатый поиск: сначала точное совпадение, затем подстрока.
-;; Это защищает от ложных срабатываний и находит свойства типа
-;; "Длина_уплотнителя", "Длина в свету" и т.д.
-;; Результат округляется до целого числа (мм).
-;; ============================================================
 (defun su-get-length (obj / dynprops prop pname value result)
   (setq dynprops
     (vl-catch-all-apply
@@ -237,8 +196,6 @@
     nil
     (progn
       (setq result nil)
-
-      ;; Шаг 1: точное совпадение "ДЛИНА"
       (foreach prop dynprops
         (if (null result)
           (progn
@@ -262,40 +219,8 @@
                   )
                 )
                 (if (not (vl-catch-all-error-p value))
-                  (setq result (su-value-to-number value))
-                )
-              )
-            )
-          )
-        )
-      )
-
-      ;; Шаг 2: поиск по подстроке "ДЛИНА" (если точное не найдено)
-      (if (null result)
-        (foreach prop dynprops
-          (if (null result)
-            (progn
-              (setq pname
-                (vl-catch-all-apply
-                  'vla-get-PropertyName
-                  (list prop)
-                )
-              )
-              (if (and
-                    (not (vl-catch-all-error-p pname))
-                    pname
-                    (= (type pname) 'STR)
-                    (vl-string-search "ДЛИНА" (strcase pname))
-                  )
-                (progn
-                  (setq value
-                    (vl-catch-all-apply
-                      'vla-get-Value
-                      (list prop)
-                    )
-                  )
-                  (if (not (vl-catch-all-error-p value))
-                    (setq result (su-value-to-number value))
+                  (setq result
+                    (su-value-to-number value)
                   )
                 )
               )
@@ -303,8 +228,6 @@
           )
         )
       )
-
-      ;; Округление до целого числа (мм) — ожидаемое поведение для Фасонки
       (if (numberp result)
         (atoi (rtos result 2 0))
         nil
@@ -312,6 +235,157 @@
     )
   )
 )
+
+
+;; ============================================================
+;; Извлечение габаритной длины MLINE
+;; ============================================================
+;; vla-Explode для MLINE не поддерживается ActiveX.
+;; Длина считается напрямую по вершинам осевой линии
+;; (DXF-код 11).
+;; ============================================================
+
+(defun su-mline-length (ent / data verts i total p1 p2)
+  (setq data (entget ent))
+  (setq verts '())
+
+  (foreach pair data
+    (if (= (car pair) 11)
+      (setq verts (cons (cdr pair) verts))
+    )
+  )
+
+  (setq verts (reverse verts))
+
+  (setq total 0.0)
+  (setq i 0)
+  (while (< i (1- (length verts)))
+    (setq p1 (nth i verts))
+    (setq p2 (nth (1+ i) verts))
+    (setq total (+ total (distance p1 p2)))
+    (setq i (1+ i))
+  )
+
+  total
+)
+
+
+;; ============================================================
+;; Проверка соответствия слоя списку (с масками)
+;; ============================================================
+
+(defun su-layer-match-any (layer layers / found)
+  (if (or (null layers) (not (listp layers)) (= (length layers) 0))
+    T
+    (progn
+      (setq found nil)
+      (foreach l layers
+        (if (wcmatch (strcase layer) (strcase l))
+          (setq found T)
+        )
+      )
+      found
+    )
+  )
+)
+
+
+;; ============================================================
+;; Типы объектов, допустимые в CUTLINE
+;; ============================================================
+;; Раскрой хлыстов принимает ТОЛЬКО:
+;;   LINE  — отрезок;
+;;   MLINE — мультилиния.
+;; Дуги, эллипсы, сплайны, полилинии — не принимаются.
+;; ============================================================
+
+(setq *su-cutline-types* '("LINE" "MLINE"))
+
+
+;; ============================================================
+;; Ручная фильтрация selection set по типу и слоям
+;; ============================================================
+
+(defun su-filter-ss-cutline (ss types layers / i ent data typ lay new-ss)
+  (if (null ss)
+    nil
+    (progn
+      (setq new-ss (ssadd))
+      (setq i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq data (entget ent))
+        (setq typ (cdr (assoc 0 data)))
+        (setq lay (cdr (assoc 8 data)))
+        (if (and (member typ types)
+                 (su-layer-match-any lay layers))
+          (ssadd ent new-ss)
+        )
+        (setq i (1+ i))
+      )
+      (if (> (sslength new-ss) 0) new-ss nil)
+    )
+  )
+)
+
+
+;; ============================================================
+;; Построение ssget-фильтра для CUTLINE
+;; ============================================================
+
+(defun su-build-cutline-ssfilter (layers / base layer-mask)
+  (setq base
+    (list '(0 . "LINE,MLINE")))
+
+  (if (and layers (listp layers) (> (length layers) 0))
+    (progn
+      (setq layer-mask
+        (apply 'strcat
+          (mapcar '(lambda (x) (strcat x ",")) layers)))
+      (setq layer-mask (substr layer-mask 1 (1- (strlen layer-mask))))
+      (append base (list (cons 8 layer-mask)))
+    )
+    base
+  )
+)
+
+
+;; ============================================================
+;; Извлечение исходного набора объектов для CUTLINE
+;; ============================================================
+;; Приоритет источников:
+;;   1. *extraction-preselected-set*
+;;   2. ssget "_I"
+;;   3. интерактивный ssget
+;; ============================================================
+
+(defun su-select-cutline-objects (layers / ss ssfilter)
+  (setq ss nil)
+  (setq ssfilter (su-build-cutline-ssfilter layers))
+
+  (if (and (boundp '*extraction-preselected-set*)
+           *extraction-preselected-set*)
+    (progn
+      (setq ss
+        (su-filter-ss-cutline
+          *extraction-preselected-set*
+          *su-cutline-types*
+          layers))
+      (setq *extraction-preselected-set* nil)
+    )
+  )
+
+  (if (null ss)
+    (setq ss (ssget "_I" ssfilter))
+  )
+
+  (if (null ss)
+    (setq ss (ssget ssfilter))
+  )
+
+  ss
+)
+
 
 (princ "\nSELECT-UTILS.LSP загружен.")
 (princ)

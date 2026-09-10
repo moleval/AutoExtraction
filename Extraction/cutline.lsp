@@ -1,35 +1,26 @@
 ;;; ============================================================
 ;;; CUTLINE.LSP — модуль линейного раскроя мерного материала
-;;; Команды: CUTLINE, РАСКРОЙХЛЫСТА
-;;; Объекты: LWPOLYLINE, POLYLINE, LINE, ARC, ELLIPSE, SPLINE, MLINE
+;;; Команда: CUTLINE / РАСКРОЙХЛЫСТА
+;;; Объекты: LINE, MLINE
 ;;; Алгоритм: First-Fit Decreasing (FFD)
 ;;
-;;; ФУНКЦИОНАЛЬНОСТЬ:
-;;;   - Извлечение длин из линий, полилиний, мультилиний
-;;;   - Алгоритм FFD (First-Fit Decreasing)
-;;;   - Отбрасывание деталей длиннее хлыста
-;;;   - Раскладка в блок AutoCAD с Undo-группой
-;;;   - Экспорт в XLS (основной) / CSV (резервный)
-;;;   - Блок отчёта с итогами и секцией неразмещённых деталей
-;;;   - Управление через галки диспетчера (флаги)
-;;;
 ;;; ИСПРАВЛЕНИЯ:
-;;;   A4: отбрасывание деталей длиннее хлыста + отображение в отчётах
-;;;   A5: *error* handler + Undo-группа + восстановление CMDECHO
-;;;   B1: расчёт длины MLINE через DXF 71 (число полос)
-;;;   B3: нормальное имя файла + проверка записи
-;;;   + оптимизация cons/reverse в циклах
-;;;   + форматирование длин без разделителей тысяч
-;;;   + блок отчёта в XLS с рамкой по периметру
-;;;   + длина хлыста в блоке отчёта
-;;;   + пустая строка между блоками отчёта и неразмещённых
-;;;   + оформление заголовка НЕРАЗМЕЩЕННЫЕ как у ОТЧЁТ (красный шрифт)
-;;;   + русская команда РАСКРОЙХЛЫСТА
-;;;   + флаги управления из диспетчера
+;;;   1. Надпись "Хлыст N" и "[%]" в столбик, близко к хлысту
+;;;   2. Радиокнопки работают через ручное управление (boxed_column)
+;;;   3. Количество объектов отображается справа от радиокнопок
+;;;   4. Значения из диалога считываются ДО done_dialog
+;;;   5. XLS: итоги и неразмещённые на 3 столбцах (B-D)
+;;;   6. Имя файла: <имя_чертежа> Раскрой хлыстов.xls
 ;;; ============================================================
 (vl-load-com)
 
-;; ================= Настройки =================
+;; ================= Константы =================
+(setq *CUTLINE-MIN-LENGTH*   100.0)
+(setq *CUTLINE-MAX-LENGTH* 500000.0)
+(setq *CUTLINE-DEFAULT-TOL*    1.0)
+(setq *CUTLINE-DEFAULT-STOCK* 6000.0)
+(setq *CUTLINE-DEFAULT-KERF*   0.0)
+
 (setq *NEST-TRANSPARENCY* 70)
 (setq *NEST-PALETTE* '(1 2 3 4 5 6 30 210 140 90))
 (setq *NEST-STYLE-NAME* "Раскрой Italic")
@@ -42,26 +33,40 @@
 (setq *NEST-COLOR-HEADER*  3)
 (setq *NEST-COLOR-VALUE*   7)
 (setq *NEST-COLOR-KPD*     1)
-(setq *NEST-COLOR-SKIP*    1)
-
-;; ============================================================
-;; Флаги управления экспортом (устанавливаются из диспетчера)
-;; По умолчанию — всё включено (для автономного запуска)
-;; ============================================================
-(if (not (boundp '*CUTLINE-CREATE-TABLE*))
-  (setq *CUTLINE-CREATE-TABLE* T)
-)
-(if (not (boundp '*CUTLINE-CREATE-XLS*))
-  (setq *CUTLINE-CREATE-XLS* T)
-)
 ;; =============================================
 
-;; ---------- Прозрачность для DXF 440 ----------
+(if (not (boundp '*n1-tmp-choice*))
+  (setq *n1-tmp-choice* 'BOTH))
+
+(if (not (boundp '*n1-tmp-stock*))   (setq *n1-tmp-stock* *CUTLINE-DEFAULT-STOCK*))
+(if (not (boundp '*n1-tmp-kerf*))    (setq *n1-tmp-kerf*  *CUTLINE-DEFAULT-KERF*))
+(if (not (boundp '*n1-tmp-chk-xls*)) (setq *n1-tmp-chk-xls* T))
+(if (not (boundp '*n1-tmp-chk-acad*)) (setq *n1-tmp-chk-acad* T))
+
+(if (not (boundp '*CUTLINE-LAST-STOCK*)) (setq *CUTLINE-LAST-STOCK* *CUTLINE-DEFAULT-STOCK*))
+(if (not (boundp '*CUTLINE-LAST-KERF*))  (setq *CUTLINE-LAST-KERF*  *CUTLINE-DEFAULT-KERF*))
+(if (not (boundp '*CUTLINE-LAST-XLS*))   (setq *CUTLINE-LAST-XLS*   T))
+(if (not (boundp '*CUTLINE-LAST-ACAD*))  (setq *CUTLINE-LAST-ACAD*  T))
+
+;; ---------- Утилиты ----------
+(defun n1-split-string (str delim / pos result item)
+  (setq result '())
+  (while (setq pos (vl-string-search delim str))
+    (setq item (vl-string-trim " " (substr str 1 pos)))
+    (setq result (cons item result))
+    (setq str (substr str (+ pos 2)))
+  )
+  (setq item (vl-string-trim " " str))
+  (if (> (strlen item) 0)
+    (setq result (cons item result))
+  )
+  (reverse result)
+)
+
 (defun n1-trans-value (percent)
   (fix (* 255.0 (/ (- 100.0 (float percent)) 100.0)))
 )
 
-;; ---------- Создание курсивного стиля на базе Arial ----------
 (defun n1-ensure-italic-style ( / result)
   (if (tblsearch "STYLE" *NEST-STYLE-NAME*)
     (progn
@@ -69,21 +74,10 @@
     )
     (progn
       (setq result
-        (entmake
-          (list
-            (cons 0 "STYLE")
-            (cons 2 *NEST-STYLE-NAME*)
-            (cons 70 0)
-            (cons 40 0.0)
-            (cons 41 1.0)
-            (cons 50 *NEST-ITALIC-ANGLE*)
-            (cons 71 0)
-            (cons 42 2.5)
-            (cons 3 "Arial")
-            (cons 4 "")
-          )
-        )
-      )
+        (entmake (list (cons 0 "STYLE") (cons 2 *NEST-STYLE-NAME*)
+                       (cons 70 0) (cons 40 0.0) (cons 41 1.0)
+                       (cons 50 *NEST-ITALIC-ANGLE*) (cons 71 0)
+                       (cons 42 2.5) (cons 3 "Arial") (cons 4 ""))))
       (if (and result (tblsearch "STYLE" *NEST-STYLE-NAME*))
         (setq *NEST-TEXT-STYLE* *NEST-STYLE-NAME*)
         (setq *NEST-TEXT-STYLE* nil)
@@ -92,38 +86,23 @@
   )
 )
 
-;; ---------- Генерация уникального имени блока ----------
 (defun n1-unique-block-name (base / name n)
-  (setq n 0)
-  (setq name (strcat base " " (itoa n)))
+  (setq n 0 name (strcat base " " (itoa n)))
   (while (tblsearch "BLOCK" name)
-    (setq n (1+ n))
-    (setq name (strcat base " " (itoa n)))
+    (setq n (1+ n) name (strcat base " " (itoa n)))
   )
   name
 )
 
-;; ---------- Вставка блока ----------
 (defun n1-block-insert (name insPt)
-  (entmake
-    (list
-      (cons 0 "INSERT")
-      (cons 100 "AcDbEntity")
-      (cons 100 "AcDbBlockReference")
-      (cons 2 name)
-      (cons 10 (list (car insPt) (cadr insPt) 0.0))
-      (cons 41 1.0)
-      (cons 42 1.0)
-      (cons 43 1.0)
-      (cons 50 0.0)
-    )
-  )
+  (entmake (list (cons 0 "INSERT") (cons 100 "AcDbEntity")
+                 (cons 100 "AcDbBlockReference") (cons 2 name)
+                 (cons 10 (list (car insPt) (cadr insPt) 0.0))
+                 (cons 41 1.0) (cons 42 1.0) (cons 43 1.0) (cons 50 0.0)))
 )
 
-;; ---------- Карта цветов для разных длин ----------
 (defun n1-build-color-map (pieces / palette i map rec)
-  (setq palette *NEST-PALETTE*)
-  (setq i 0 map '())
+  (setq palette *NEST-PALETTE* i 0 map '())
   (foreach rec pieces
     (setq map (cons (cons (car rec) (nth (rem i (length palette)) palette)) map))
     (setq i (1+ i))
@@ -136,100 +115,46 @@
   (if pair (cdr pair) 7)
 )
 
-;; ---------- Текст ----------
 (defun n1-draw-text (pt h str color / style)
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
-                *NEST-TEXT-STYLE*
-                (getvar "TEXTSTYLE")))
-  (entmake
-    (list
-      (cons 0 "TEXT")
-      (cons 62 color)
-      (cons 7 style)
-      (cons 10 (list (car pt) (cadr pt) 0.0))
-      (cons 40 h)
-      (cons 1 str)
-      (cons 50 0.0)
-    )
-  )
+                *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (entmake (list (cons 0 "TEXT") (cons 62 color) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
 
-;; ---------- Линия ----------
 (defun n1-draw-line (p1 p2 color)
-  (entmake
-    (list
-      (cons 0 "LINE")
-      (cons 62 color)
-      (cons 10 (list (car p1) (cadr p1) 0.0))
-      (cons 11 (list (car p2) (cadr p2) 0.0))
-    )
-  )
+  (entmake (list (cons 0 "LINE") (cons 62 color)
+                 (cons 10 (list (car p1) (cadr p1) 0.0))
+                 (cons 11 (list (car p2) (cadr p2) 0.0))))
 )
 
-;; ---------- Прямоугольник ----------
 (defun n1-draw-rect (p1 p2 color / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (entmake
-    (list
-      (cons 0 "LWPOLYLINE")
-      (cons 100 "AcDbEntity")
-      (cons 62 color)
-      (cons 100 "AcDbPolyline")
-      (cons 90 4)
-      (cons 70 1)
-      (cons 10 (list x1 y1))
-      (cons 10 (list x2 y1))
-      (cons 10 (list x2 y2))
-      (cons 10 (list x1 y2))
-    )
-  )
+  (entmake (list (cons 0 "LWPOLYLINE") (cons 100 "AcDbEntity")
+                 (cons 62 color) (cons 100 "AcDbPolyline")
+                 (cons 90 4) (cons 70 1)
+                 (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
+                 (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
 )
 
-;; ---------- Штриховка ----------
 (defun n1-draw-hatch (p1 p2 color trans / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (entmake
-    (list
-      (cons 0 "HATCH")
-      (cons 100 "AcDbEntity")
-      (cons 62 color)
-      (cons 440 trans)
-      (cons 100 "AcDbHatch")
-      (cons 10 (list 0.0 0.0 0.0))
-      (cons 210 (list 0.0 0.0 1.0))
-      (cons 2 "SOLID")
-      (cons 70 1)
-      (cons 71 0)
-      (cons 91 1)
-      (cons 92 2)
-      (cons 72 0)
-      (cons 73 1)
-      (cons 93 4)
-      (cons 10 (list x1 y1))
-      (cons 10 (list x2 y1))
-      (cons 10 (list x2 y2))
-      (cons 10 (list x1 y2))
-      (cons 75 0)
-      (cons 76 1)
-      (cons 47 1.0)
-      (cons 78 0)
-      (cons 98 0)
-    )
-  )
+  (entmake (list (cons 0 "HATCH") (cons 100 "AcDbEntity")
+                 (cons 62 color) (cons 440 trans) (cons 100 "AcDbHatch")
+                 (cons 10 (list 0.0 0.0 0.0)) (cons 210 (list 0.0 0.0 1.0))
+                 (cons 2 "SOLID") (cons 70 1) (cons 71 0) (cons 91 1) (cons 92 2)
+                 (cons 72 0) (cons 73 1) (cons 93 4)
+                 (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
+                 (cons 10 (list x2 y2)) (cons 10 (list x1 y2))
+                 (cons 75 0) (cons 76 1) (cons 47 1.0) (cons 78 0) (cons 98 0)))
 )
 
-;; ============================================================
-;; Оптимизация: разворачивание групп в список (cons/reverse)
-;; ============================================================
 (defun n1-expand (pieces / sorted-groups out rec len cnt i)
-  (setq sorted-groups
-    (vl-sort pieces '(lambda (a b) (> (car a) (car b))))
-  )
+  (setq sorted-groups (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
   (setq out '())
   (foreach rec sorted-groups
-    (setq len (car rec))
-    (setq cnt (fix (cadr rec)))
-    (setq i 0)
+    (setq len (car rec) cnt (fix (cadr rec)) i 0)
     (while (< i cnt)
       (setq out (cons len out))
       (setq i (1+ i))
@@ -238,9 +163,6 @@
   (reverse out)
 )
 
-;; ============================================================
-;; Оптимизация: замена элемента в списке (cons/reverse)
-;; ============================================================
 (defun n1-replace-nth (lst idx new / i out)
   (setq i 0 out '())
   (foreach x lst
@@ -253,10 +175,6 @@
   (reverse out)
 )
 
-;; ============================================================
-;; FFD: First-Fit Decreasing
-;; Деталь длиннее хлыста НЕ размещается (дополнительная защита)
-;; ============================================================
 (defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip)
   (setq bars '())
   (setq skip 0)
@@ -289,36 +207,7 @@
   bars
 )
 
-;; ============================================================
-;; Длина мультилинии: делитель — число полос стиля (DXF 71)
-;; 72 используем как запасной вариант
-;; ============================================================
-(defun n1-mline-length (ent / obj numEl copyObj arr safe sub elen total data)
-  (setq data (entget ent))
-  (setq numEl (cdr (assoc 71 data)))
-  (if (or (null numEl) (< numEl 1))
-    (setq numEl (cdr (assoc 72 data)))
-  )
-  (if (or (null numEl) (< numEl 1)) (setq numEl 1))
-  (setq obj (vlax-ename->vla-object ent))
-  (setq copyObj (vla-Copy obj))
-  (setq arr (vl-catch-all-apply 'vla-Explode (list copyObj)))
-  (if (vl-catch-all-error-p arr)
-    (progn (vl-catch-all-apply 'vla-Delete (list copyObj)) nil)
-    (progn
-      (setq safe (vlax-safearray->list (vlax-variant-value arr)))
-      (setq total 0.0)
-      (foreach sub safe
-        (setq elen (vl-catch-all-apply 'vlax-curve-getDistAtParam
-                    (list (vlax-vla-object->ename sub)
-                          (vlax-curve-getEndParam (vlax-vla-object->ename sub)))))
-        (if (numberp elen) (setq total (+ total elen)))
-        (vl-catch-all-apply 'vla-Delete (list sub))
-      )
-      (/ total (float numEl))
-    )
-  )
-)
+(defun n1-mline-length (ent) (su-mline-length ent))
 
 (defun n1-add-group (groups key / found)
   (setq found (assoc key groups))
@@ -328,11 +217,235 @@
   )
 )
 
-(defun n1-extract-pieces (ss tol / i ent typ len key pieces total measured skipped)
-  (setq pieces '())
-  (setq i 0)
-  (setq total (sslength ss))
-  (setq measured 0 skipped 0)
+(defun n1-count-by-type (ss / i ent typ counts found)
+  (setq counts '(("LINE" . 0) ("MLINE" . 0)) i 0)
+  (repeat (sslength ss)
+    (setq ent (ssname ss i))
+    (setq typ (cdr (assoc 0 (entget ent))))
+    (setq found (assoc typ counts))
+    (if found (setq counts (subst (cons typ (1+ (cdr found))) found counts)))
+    (setq i (1+ i))
+  )
+  counts
+)
+
+(defun n1-print-type-counts (counts / s rec)
+  (setq s "")
+  (foreach rec counts
+    (if (> (cdr rec) 0)
+      (setq s (strcat s (if (= s "") "" ", ")
+                      (itoa (cdr rec)) " "
+                      (cond ((= (car rec) "LINE")  "линий")
+                            ((= (car rec) "MLINE") "мультилиний")
+                            (T (strcat (car rec) " шт")))))
+    )
+  )
+  (if (= s "")
+    (princ "\n  (объектов подходящих типов нет)")
+    (princ (strcat "\n  " s))
+  )
+)
+
+(defun n1-filter-ss-by-type (ss typ / i ent new-ss)
+  (setq new-ss (ssadd) i 0)
+  (repeat (sslength ss)
+    (setq ent (ssname ss i))
+    (if (= (cdr (assoc 0 (entget ent))) typ)
+      (ssadd ent new-ss)
+    )
+    (setq i (1+ i))
+  )
+  new-ss
+)
+
+(defun n1-filter-name-str ( / f1 f2 f3 s)
+  (setq f1 (if (boundp '*EXTRACTION-FILTER-FACADES*) *EXTRACTION-FILTER-FACADES* nil))
+  (setq f2 (if (boundp '*EXTRACTION-FILTER-VITRAZH*) *EXTRACTION-FILTER-VITRAZH* nil))
+  (setq f3 (if (boundp '*EXTRACTION-FILTER-FONAR*) *EXTRACTION-FILTER-FONAR* nil))
+  (setq s "")
+  (if f1 (setq s "Фасады"))
+  (if f2 (setq s (if (= s "") "Витражи" (strcat s ", Витражи"))))
+  (if f3 (setq s (if (= s "") "Фонарь 3D" (strcat s ", Фонарь 3D"))))
+  (if (= s "") nil s)
+)
+
+(defun n1-layer-display-list (layers / fname)
+  (setq fname (n1-filter-name-str))
+  (cond
+    (fname (list (strcat "Групповой фильтр " fname)))
+    ((or (null layers) (not (listp layers)) (= (length layers) 0))
+     (list "Все слои"))
+    (T layers)
+  )
+)
+
+;; Безопасные обёртки
+(defun n1-safe-set-tile (key value)
+  (vl-catch-all-apply 'set_tile (list key value))
+)
+(defun n1-safe-action-tile (key action)
+  (vl-catch-all-apply 'action_tile (list key action))
+)
+(defun n1-safe-mode-tile (key mode)
+  (vl-catch-all-apply 'mode_tile (list key mode))
+)
+(defun n1-safe-get-tile (key / r)
+  (setq r (vl-catch-all-apply 'get_tile (list key)))
+  (if (vl-catch-all-error-p r) nil r)
+)
+
+;; ============================================================
+;; Ручное управление радиокнопками
+;; ============================================================
+(defun n1-select-radio (selected / keys k)
+  (setq keys '("rb_line" "rb_mline" "rb_both"))
+  (foreach k keys
+    (n1-safe-set-tile k (if (= k selected) "1" "0"))
+  )
+  (cond
+    ((= selected "rb_line")  (setq *n1-tmp-choice* 'LINE))
+    ((= selected "rb_mline") (setq *n1-tmp-choice* 'MLINE))
+    ((= selected "rb_both")  (setq *n1-tmp-choice* 'BOTH))
+  )
+)
+
+;; ============================================================
+;; Диалог параметров раскроя
+;; ============================================================
+(defun n1-cutline-dialog (line-cnt mline-cnt
+                          default-tol default-stock default-kerf
+                          layers
+                          default-xls default-acad
+                          / dcl-file dcl-id result
+                            both-cnt base-layers)
+
+  (setq dcl-file (findfile "cutline_filter.dcl"))
+
+  (if (null dcl-file)
+    (progn
+      (princ "\n[cutline] не найден cutline_filter.dcl")
+      nil
+    )
+    (progn
+      (setq dcl-id (load_dialog dcl-file))
+      (if (< dcl-id 0)
+        (progn
+          (princ "\n[cutline] ошибка load_dialog")
+          nil
+        )
+        (progn
+          (setq *n1-tmp-choice* 'BOTH)
+          (setq *n1-tmp-stock* default-stock)
+          (setq *n1-tmp-kerf* default-kerf)
+          (setq *n1-tmp-chk-xls* default-xls)
+          (setq *n1-tmp-chk-acad* default-acad)
+
+          (if (vl-catch-all-error-p
+                (vl-catch-all-apply 'new_dialog (list "cutline_filter_dialog" dcl-id)))
+            (progn
+              (princ "\n[cutline] ошибка new_dialog")
+              (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              nil
+            )
+            (progn
+              (setq both-cnt (+ line-cnt mline-cnt))
+
+              ;; ---- Количество напротив радиокнопок ----
+              (n1-safe-set-tile "txt_line_count"
+                (strcat (itoa line-cnt) " шт."))
+              (n1-safe-set-tile "txt_mline_count"
+                (strcat (itoa mline-cnt) " шт."))
+              (n1-safe-set-tile "txt_both_count"
+                (strcat (itoa both-cnt) " шт."))
+
+              ;; ---- Слои ----
+              (setq base-layers (n1-layer-display-list layers))
+              (vl-catch-all-apply
+                '(lambda ()
+                   (start_list "lst_layers")
+                   (foreach l base-layers (add_list l))
+                   (end_list)))
+
+              ;; ---- Радиокнопки: начальное состояние ----
+              (cond
+                ((and (> line-cnt 0) (> mline-cnt 0))
+                 (n1-safe-set-tile "rb_both" "1")
+                 (setq *n1-tmp-choice* 'BOTH))
+                ((> line-cnt 0)
+                 (n1-safe-set-tile "rb_line" "1")
+                 (setq *n1-tmp-choice* 'LINE))
+                ((> mline-cnt 0)
+                 (n1-safe-set-tile "rb_mline" "1")
+                 (setq *n1-tmp-choice* 'MLINE))
+                (T
+                 (n1-safe-set-tile "rb_both" "1")
+                 (setq *n1-tmp-choice* 'BOTH))
+              )
+
+              (if (<= line-cnt 0)
+                (progn
+                  (n1-safe-mode-tile "rb_line" 1)
+                  (n1-safe-mode-tile "rb_both" 1)))
+              (if (<= mline-cnt 0)
+                (progn
+                  (n1-safe-mode-tile "rb_mline" 1)
+                  (n1-safe-mode-tile "rb_both" 1)))
+
+              ;; ---- Параметры ----
+              (n1-safe-set-tile "edt_stock" (rtos default-stock 2 0))
+              (n1-safe-set-tile "edt_kerf"  (rtos default-kerf 2 0))
+
+              ;; ---- Экспорт ----
+              (n1-safe-set-tile "chk_xls"  (if default-xls  "1" "0"))
+              (n1-safe-set-tile "chk_acad" (if default-acad "1" "0"))
+
+              ;; ---- Обработчики радиокнопок (ручное управление) ----
+              (n1-safe-action-tile "rb_line"  "(n1-select-radio \"rb_line\")")
+              (n1-safe-action-tile "rb_mline" "(n1-select-radio \"rb_mline\")")
+              (n1-safe-action-tile "rb_both"  "(n1-select-radio \"rb_both\")")
+
+              (n1-safe-action-tile "edt_stock"
+                "(setq *n1-tmp-stock* (atof $value))")
+              (n1-safe-action-tile "edt_kerf"
+                "(setq *n1-tmp-kerf* (atof $value))")
+
+              (n1-safe-action-tile "chk_xls"
+                "(setq *n1-tmp-chk-xls* (= $value \"1\"))")
+              (n1-safe-action-tile "chk_acad"
+                "(setq *n1-tmp-chk-acad* (= $value \"1\"))")
+
+              (n1-safe-action-tile "btn_ok"     "(done_dialog 1)")
+              (n1-safe-action-tile "btn_cancel" "(done_dialog 0)")
+
+              (setq result (start_dialog))
+
+              (vl-catch-all-apply 'unload_dialog (list dcl-id))
+
+              (if (= result 1)
+                (list
+                  *n1-tmp-choice*
+                  default-tol
+                  (if (<= *n1-tmp-stock* 0.0) default-stock *n1-tmp-stock*)
+                  (if (< *n1-tmp-kerf* 0.0) default-kerf *n1-tmp-kerf*)
+                  *n1-tmp-chk-xls*
+                  *n1-tmp-chk-acad*
+                )
+                nil
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; ---------- Извлечение длин ----------
+(defun n1-extract-pieces (ss tol min-len max-len /
+                            i ent typ len key pieces total
+                            measured skipped skipped-short skipped-long)
+  (setq pieces '() i 0 total (sslength ss)
+        measured 0 skipped 0 skipped-short 0 skipped-long 0)
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
@@ -341,53 +454,78 @@
       (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
                   (list ent (vlax-curve-getEndParam ent))))
     )
-    (if (and (numberp len) (> len 0.0))
-      (progn
-        (setq measured (1+ measured))
-        (setq key (fix (+ (/ len tol) 0.5)))
-        (setq pieces (n1-add-group pieces key))
-      )
-      (setq skipped (1+ skipped))
+    (cond
+      ((or (null len) (not (numberp len)) (<= len 0.0))
+       (setq skipped (1+ skipped)))
+      ((< len min-len) (setq skipped-short (1+ skipped-short)))
+      ((> len max-len) (setq skipped-long (1+ skipped-long)))
+      (T (setq measured (1+ measured))
+         (setq key (fix (+ (/ len tol) 0.5)))
+         (setq pieces (n1-add-group pieces key)))
     )
     (setq i (1+ i))
   )
-  (princ (strcat "\nИзмерено: " (itoa measured) " из " (itoa total)
-                 (if (> skipped 0) (strcat ", пропущено: " (itoa skipped)) "")))
-  (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x))) (reverse pieces))
+  (princ (strcat "\nИзмерено: " (itoa measured) " из " (itoa total)))
+  (if (> skipped 0)
+    (princ (strcat "\n  Пропущено (нулевые/ошибки): " (itoa skipped))))
+  (if (> skipped-short 0)
+    (princ (strcat "\n  Пропущено (короче " (rtos min-len 2 0) " мм): "
+                   (itoa skipped-short))))
+  (if (> skipped-long 0)
+    (princ (strcat "\n  Пропущено (длиннее " (rtos max-len 2 0) " мм): "
+                   (itoa skipped-long))))
+  (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x)))
+          (reverse pieces))
 )
 
-;; ============================================================
-;; Преобразование списка длин в строку
-;; ВАЖНО: использует (itoa (fix x)) — без разделителей тысяч
-;; ============================================================
+(defun n1-split-by-stock (pieces stock / ok oversized rec)
+  (setq ok '() oversized '())
+  (foreach rec pieces
+    (if (<= (car rec) stock)
+      (setq ok (cons rec ok))
+      (setq oversized (cons rec oversized))
+    )
+  )
+  (list (reverse ok) (reverse oversized))
+)
+
+(defun n1-report-oversized (oversized stock / rec total-cnt)
+  (if oversized
+    (progn
+      (princ "\n")
+      (princ "\n=== НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ ===")
+      (princ (strcat "\n(длина превышает хлыст " (rtos stock 2 0) " мм)"))
+      (setq total-cnt 0)
+      (foreach rec oversized
+        (setq total-cnt (+ total-cnt (cadr rec)))
+        (princ (strcat "\n  Длина " (rtos (car rec) 2 0)
+                       " мм, кол-во " (itoa (cadr rec)) " шт."))
+      )
+      (princ (strcat "\nВсего неразмещенных: " (itoa total-cnt) " шт."))
+    )
+  )
+)
+
 (defun n1-list-to-str (lst / s x)
   (setq s "")
-  (foreach x lst
-    (setq s (strcat s (if (= s "") "" " ") (itoa (fix x))))
-  )
+  (foreach x lst (setq s (strcat s (if (= s "") "" " ") (itoa (fix x)))))
   s
 )
 
-;; ---------- Вывод раскладки (по хлыстам) ----------
+;; ============================================================
+;; Раскладка хлыстов
+;; Надпись "Хлыст N" и "[X%]" в столбик, близко к хлысту,
+;; вертикально по центру изображения хлыста
+;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util
-    curx p halfw str col sp)
-  (setq barHeight (/ stock 30.0))
-  (setq gap (* barHeight 0.7))
-  (setq txtH (* barHeight 0.30))
-  (setq x0 (car insPt))
-  (setq y0 (cadr insPt))
-  (setq maxy (+ y0 barHeight))
-  (setq miny y0)
-  (setq i 0)
+    curx p halfw str col labelX labelY1 labelY2)
+  (setq barHeight (/ stock 30.0) gap (* barHeight 0.7) txtH (* barHeight 0.30))
+  (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
   (foreach bar bars
     (setq i (1+ i))
-    (setq pieces (cdr bar))
-    (setq waste (car bar))
-    (setq used (- stock waste))
-    (setq util (* 100.0 (/ used stock)))
-    (setq miny y0)
-
+    (setq pieces (cdr bar) waste (car bar) used (- stock waste)
+          util (* 100.0 (/ used stock)) miny y0)
     (setq curx x0)
     (foreach p pieces
       (setq col (n1-get-color color-map p))
@@ -395,15 +533,12 @@
                      col (n1-trans-value *NEST-TRANSPARENCY*))
       (setq curx (+ curx p kerf))
     )
-
     (if (> waste 0.0)
       (n1-draw-hatch (list (- (+ x0 stock) waste) y0)
                      (list (+ x0 stock) (+ y0 barHeight))
                      *NEST-COLOR-WASTE* (n1-trans-value *NEST-TRANSPARENCY*))
     )
-
     (n1-draw-rect (list x0 y0) (list (+ x0 stock) (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
-
     (setq curx x0)
     (foreach p pieces
       (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
@@ -411,55 +546,55 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    (setq sp (cond ((< i 10)   "   ")
-                   ((< i 100)  "  ")
-                   (t           " ")))
-    (n1-draw-text (list (- x0 (* barHeight 2.2) 100.0) (+ y0 (* barHeight 0.35))) txtH
-                  (strcat "Хлыст " (itoa i) sp "[" (rtos util 2 1) "%]") *NEST-COLOR-LABEL*)
+    ;; ============================================================
+    ;; Надпись в столбик, близко к хлысту
+    ;; "Хлыст N" на первой строке, "[X%]" на второй
+    ;; Позиция: сразу слева от хлыста, вертикально по центру
+    ;; ============================================================
+    (setq labelX (- x0 (* barHeight 2.25)))
+    (setq labelY1 (+ y0 (* barHeight 0.65)))
+    (setq labelY2 (+ y0 (* barHeight 0.20)))
+    (n1-draw-text (list labelX labelY1) txtH
+                  (strcat "Хлыст " (itoa i))
+                  *NEST-COLOR-LABEL*)
+    (n1-draw-text (list labelX labelY2) txtH
+                  (strcat "[" (rtos util 2 1) "%]")
+                  *NEST-COLOR-LABEL*)
 
     (setq curx x0)
     (foreach p pieces
-      (setq str (itoa (fix p)))
-      (setq halfw (* (strlen str) txtH 0.4))
-      (setq col (n1-get-color color-map p))
-      (n1-draw-text (list (+ curx (* p 0.5) (- halfw)) (+ y0 (* barHeight 0.35))) txtH str col)
+      (setq str (itoa (fix p)) halfw (* (strlen str) txtH 0.4)
+            col (n1-get-color color-map p))
+      (n1-draw-text (list (+ curx (* p 0.5) (- halfw)) (+ y0 (* barHeight 0.35)))
+                    txtH str col)
       (setq curx (+ curx p kerf))
     )
-
     (if (> waste 0.0)
       (progn
-        (setq str (strcat "Отход " (itoa (fix waste))))
-        (setq halfw (* (strlen str) txtH 0.4))
+        (setq str (strcat "Отход " (itoa (fix waste)))
+              halfw (* (strlen str) txtH 0.4))
         (n1-draw-text (list (+ (- (+ x0 stock) waste) (* waste 0.5) (- halfw))
-                            (+ y0 (* barHeight 0.35))) txtH str *NEST-COLOR-WASTE*)
+                            (+ y0 (* barHeight 0.35)))
+                      txtH str *NEST-COLOR-WASTE*)
       )
     )
-
     (setq y0 (- y0 barHeight gap))
   )
-  (list (list (- x0 (* barHeight 3.0) 100.0) miny) (list (+ x0 stock) maxy))
+  ;; Bbox с учётом новой позиции надписи
+  (list (list (- x0 (* barHeight 2.0)) miny) (list (+ x0 stock) maxy))
 )
 
-;; ============================================================
-;; Сводная таблица с секцией неразмещённых деталей
-;; ============================================================
-(defun n1-draw-summary (bars pieces oversized stock insPt color-map /
+(defun n1-draw-summary (bars pieces stock insPt color-map oversized /
     barHeight th rowH pad col1W col2W col3W tableW tableH
     left top x1 x2 x3 y bottom
     num-bars stock-total-mm stock-total-m
-    total-cnt total-product-mm total-product-m kpd rec
-    total-skip-cnt total-skip-mm skip-rows)
-  (setq barHeight (/ stock 30.0))
-  (setq th (* barHeight 0.30))
-  (setq rowH (* barHeight 0.6))
-  (setq pad (* barHeight 0.6))
-  (setq col1W (* barHeight 5.0))
-  (setq col2W (* barHeight 3.5))
-  (setq col3W (* barHeight 4.5))
+    total-cnt total-product-mm total-product-m kpd rec oversized-cnt)
+  (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
+        rowH (* barHeight 0.6) pad (* barHeight 0.6)
+        col1W (* barHeight 5.0) col2W (* barHeight 3.5) col3W (* barHeight 4.5))
   (setq tableW (+ col1W col2W col3W (* pad 2)))
-  (setq num-bars (length bars))
-  (setq stock-total-mm (* num-bars stock))
-  (setq stock-total-m (/ stock-total-mm 1000.0))
+  (setq num-bars (length bars) stock-total-mm (* num-bars stock)
+        stock-total-m (/ stock-total-mm 1000.0))
   (setq total-cnt 0 total-product-mm 0.0)
   (foreach rec pieces
     (setq total-cnt (+ total-cnt (cadr rec)))
@@ -467,25 +602,12 @@
   )
   (setq total-product-m (/ total-product-mm 1000.0))
   (setq kpd (if (> stock-total-mm 0)
-              (* 100.0 (/ (float total-product-mm) (float stock-total-mm)))
-              0.0))
-  (setq total-skip-cnt 0 total-skip-mm 0.0)
-  (if oversized
-    (foreach rec oversized
-      (setq total-skip-cnt (+ total-skip-cnt (cadr rec)))
-      (setq total-skip-mm (+ total-skip-mm (* (car rec) (cadr rec))))
-    )
-  )
-  (setq skip-rows (if oversized (+ 4.0 (length oversized)) 0.0))
-
-  (setq left (car insPt))
-  (setq top (cadr insPt))
+              (* 100.0 (/ (float total-product-mm) (float stock-total-mm))) 0.0))
+  (setq left (car insPt) top (cadr insPt))
   (setq tableH (+ (* pad 2)
-                  (* (+ 11.0 (length pieces) skip-rows) rowH)))
+                  (* (+ 11.0 (length pieces) (if oversized 1 0)) rowH)))
   (setq bottom (- top tableH))
-  (setq x1 (+ left pad))
-  (setq x2 (+ left pad col1W))
-  (setq x3 (+ left pad col1W col2W))
+  (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
   (setq y (- top pad 100.0))
   (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
@@ -507,75 +629,112 @@
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
   (setq y (- y rowH))
   (foreach rec pieces
-    (n1-draw-text (list x1 y) th (itoa (fix (car rec))) (n1-get-color color-map (car rec)))
+    (n1-draw-text (list x1 y) th (itoa (fix (car rec)))
+                  (n1-get-color color-map (car rec)))
     (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
-    (n1-draw-text (list x3 y) th (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-VALUE*)
+    (n1-draw-text (list x3 y) th
+                  (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-VALUE*)
     (setq y (- y rowH))
   )
   (setq y (- y (* rowH 0.5)))
-  (n1-draw-text (list x1 y) th (strcat "Всего изделий: " (itoa total-cnt) " шт") *NEST-COLOR-VALUE*)
+  (n1-draw-text (list x1 y) th (strcat "Всего изделий: " (itoa total-cnt) " шт")
+                *NEST-COLOR-VALUE*)
   (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th (strcat "Суммарная длина: " (rtos total-product-m 2 2) " м.п.") *NEST-COLOR-VALUE*)
+  (n1-draw-text (list x1 y) th
+                (strcat "Суммарная длина: " (rtos total-product-m 2 2) " м.п.")
+                *NEST-COLOR-VALUE*)
   (setq y (- y rowH))
-  (n1-draw-text (list x1 y) (* th 1.2) (strcat "КПД использования: " (rtos kpd 2 1) " %") *NEST-COLOR-KPD*)
-
+  (n1-draw-text (list x1 y) (* th 1.2)
+                (strcat "КПД использования: " (rtos kpd 2 1) " %")
+                *NEST-COLOR-KPD*)
   (if oversized
     (progn
-      (setq y (- y (* rowH 1.5)))
-      (n1-draw-text (list x1 y) (* th 1.2) "НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ (длиннее хлыста)" *NEST-COLOR-SKIP*)
+      (setq oversized-cnt 0)
+      (foreach rec oversized
+        (setq oversized-cnt (+ oversized-cnt (cadr rec)))
+      )
       (setq y (- y rowH))
+      (n1-draw-text (list x1 y) th
+                    (strcat "Неразмещенных: " (itoa oversized-cnt)
+                            " шт (см. таблицу ниже)")
+                    *NEST-COLOR-KPD*)
+    )
+  )
+  (list (list left bottom) (list (+ left tableW) top))
+)
+
+(defun n1-draw-oversized (oversized stock insPt /
+    barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
+    left top x1 x2 x3 y bottom total-cnt rec)
+  (if (null oversized)
+    nil
+    (progn
+      (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
+            rowH (* barHeight 0.6) pad (* barHeight 0.6)
+            pad-bottom (* barHeight 1.4)
+            col1W (* barHeight 5.0) col2W (* barHeight 3.5) col3W (* barHeight 4.5))
+      (setq tableW (+ col1W col2W col3W (* pad 2)))
+      (setq total-cnt 0)
+      (foreach rec oversized (setq total-cnt (+ total-cnt (cadr rec))))
+      (setq left (car insPt) top (cadr insPt))
+      (setq tableH (+ pad pad-bottom (* (+ 4.0 (length oversized)) rowH)))
+      (setq bottom (- top tableH))
+      (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
+      (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
+      (setq y (- top pad 100.0))
+      (n1-draw-text (list x1 y) (* th 1.3) "Неразмещенные детали" *NEST-COLOR-TITLE*)
+      (setq y (- y rowH))
+      (n1-draw-text (list x1 y) th
+                    (strcat "(длина превышает хлыст " (rtos stock 2 0) " мм)")
+                    *NEST-COLOR-VALUE*)
+      (setq y (- y rowH) y (- y (* rowH 0.5)))
       (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
       (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
       (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
       (setq y (- y rowH))
       (foreach rec oversized
-        (n1-draw-text (list x1 y) th (itoa (fix (car rec))) *NEST-COLOR-SKIP*)
-        (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-SKIP*)
-        (n1-draw-text (list x3 y) th (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-SKIP*)
+        (n1-draw-text (list x1 y) th (itoa (fix (car rec))) *NEST-COLOR-VALUE*)
+        (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
+        (n1-draw-text (list x3 y) th
+                      (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2)
+                      *NEST-COLOR-VALUE*)
         (setq y (- y rowH))
       )
       (setq y (- y (* rowH 0.5)))
-      (n1-draw-text (list x1 y) th (strcat "Всего неразмещенных: " (itoa total-skip-cnt) " шт, "
-                                           (rtos (/ total-skip-mm 1000.0) 2 2) " м.п.") *NEST-COLOR-SKIP*)
+      (n1-draw-text (list x1 y) th (strcat "Всего: " (itoa total-cnt) " шт")
+                    *NEST-COLOR-KPD*)
+      (list (list left bottom) (list (+ left tableW) top))
     )
   )
-
-  (list (list left bottom) (list (+ left tableW) top))
 )
 
 (defun n1-combine-bbox (b1 b2)
-  (list
-    (list (min (car (car b1)) (car (car b2)))
-          (min (cadr (car b1)) (cadr (car b2))))
-    (list (max (car (cadr b1)) (car (cadr b2)))
-          (max (cadr (cadr b1)) (cadr (cadr b2))))
-  )
-)
+  (list (list (min (car (car b1)) (car (car b2)))
+              (min (cadr (car b1)) (cadr (car b2))))
+        (list (max (car (cadr b1)) (car (cadr b2)))
+              (max (cadr (cadr b1)) (cadr (cadr b2))))))
 
 (defun n1-report (bars stock kerf / i bar pieces waste used util)
   (princ (strcat "\nКоличество хлыстов: " (itoa (length bars))))
   (setq i 0)
   (foreach bar bars
     (setq i (1+ i))
-    (setq pieces (cdr bar))
-    (setq waste (car bar))
-    (setq used (- stock waste))
-    (setq util (* 100.0 (/ used stock)))
+    (setq pieces (cdr bar) waste (car bar) used (- stock waste)
+          util (* 100.0 (/ used stock)))
     (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces)
-                   " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1) " | " (rtos util 2 1) "%"))
+                   " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1)
+                   " | " (rtos util 2 1) "%"))
   )
   (princ)
 )
 
 ;; ============================================================
-;; Экспорт в XLS (XML Spreadsheet) с блоком отчёта
-;; Имя файла: <название файла> Раскрой хлыстов.xls
+;; XLS-экспорт (XML Spreadsheet)
 ;; ============================================================
-(defun n1-write-xls (bars pieces oversized stock kerf /
-                     fname f i bar pieces-bar waste used util rec
-                     total-cnt total-product-mm num-bars stock-total-mm
-                     stock-total-m total-product-m kpd
-                     total-skip-cnt total-skip-mm)
+(defun n1-write-xls (bars stock kerf oversized
+                     num-bars stock-total-mm product-total-mm kpd /
+                     fname f i bar pieces waste used util rec
+                     total-cnt-unplaced total-sum-unplaced)
   (setq fname (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
                       " Раскрой хлыстов.xls"))
@@ -583,28 +742,15 @@
   (if (null f)
     nil
     (progn
-      ;; Подсчёт итогов для блока отчёта
-      (setq num-bars (length bars))
-      (setq stock-total-mm (* num-bars stock))
-      (setq stock-total-m (/ stock-total-mm 1000.0))
-      (setq total-cnt 0 total-product-mm 0.0)
-      (foreach rec pieces
-        (setq total-cnt (+ total-cnt (cadr rec)))
-        (setq total-product-mm (+ total-product-mm (* (car rec) (cadr rec))))
-      )
-      (setq total-product-m (/ total-product-mm 1000.0))
-      (setq kpd (if (> stock-total-mm 0)
-                  (* 100.0 (/ (float total-product-mm) (float stock-total-mm)))
-                  0.0))
-      (setq total-skip-cnt 0 total-skip-mm 0.0)
+      (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
       (if oversized
         (foreach rec oversized
-          (setq total-skip-cnt (+ total-skip-cnt (cadr rec)))
-          (setq total-skip-mm (+ total-skip-mm (* (car rec) (cadr rec))))
+          (setq total-cnt-unplaced (+ total-cnt-unplaced (cadr rec)))
+          (setq total-sum-unplaced (+ total-sum-unplaced
+                                      (/ (* (car rec) (cadr rec)) 1000.0)))
         )
       )
 
-      ;; XML заголовок и стили
       (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
       (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
       (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
@@ -619,6 +765,7 @@
       (write-line "  </Style>" f)
 
       (write-line "  <Style ss:ID=\"Data\">" f)
+      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -639,7 +786,23 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Заголовок блока отчёта (жирный, подчёркнутый, серый фон, толстая рамка)
+      (write-line "  <Style ss:ID=\"Bold\">" f)
+      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
+      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+
+      (write-line "  <Style ss:ID=\"Label\">" f)
+      (write-line "   <Font ss:Bold=\"1\"/>" f)
+      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
+      (write-line "  </Style>" f)
+
       (write-line "  <Style ss:ID=\"ReportTitle\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
@@ -652,7 +815,6 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Метка блока отчёта (толстая граница слева — периметр)
       (write-line "  <Style ss:ID=\"ReportLabel\">" f)
       (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
@@ -663,29 +825,8 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Значение блока отчёта
-      (write-line "  <Style ss:ID=\"ReportValue\">" f)
-      (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
-      (write-line "   <Borders>" f)
-      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "   </Borders>" f)
-      (write-line "  </Style>" f)
-
-      ;; Пустая ячейка значения (тонкие границы внутри блока)
-      (write-line "  <Style ss:ID=\"ReportValueEmpty\">" f)
-      (write-line "   <Borders>" f)
-      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "   </Borders>" f)
-      (write-line "  </Style>" f)
-
-      ;; Последняя ячейка значения (толстая граница справа — периметр)
       (write-line "  <Style ss:ID=\"ReportValueRight\">" f)
+      (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -694,31 +835,20 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; КПД (жирный, красный)
+      (write-line "  <Style ss:ID=\"ReportKpdLabel\">" f)
+      (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
+      (write-line "   <Borders>" f)
+      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
+      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
+      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
+      (write-line "   </Borders>" f)
+      (write-line "  </Style>" f)
+
       (write-line "  <Style ss:ID=\"ReportKpd\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Color=\"#FF0000\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
-      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "   </Borders>" f)
-      (write-line "  </Style>" f)
-
-      ;; Пустая ячейка КПД (толстая граница снизу — периметр)
-      (write-line "  <Style ss:ID=\"ReportKpdEmpty\">" f)
-      (write-line "   <Borders>" f)
-      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
-      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "   </Borders>" f)
-      (write-line "  </Style>" f)
-
-      ;; Последняя ячейка КПД (толстые границы снизу и справа — периметр)
-      (write-line "  <Style ss:ID=\"ReportKpdRight\">" f)
-      (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
@@ -726,8 +856,7 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Заголовок секции неразмещённых (как у ОТЧЁТ, но красный шрифт)
-      (write-line "  <Style ss:ID=\"SkipTitle\">" f)
+      (write-line "  <Style ss:ID=\"SectionTitle\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\" ss:Color=\"#FF0000\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
@@ -739,8 +868,7 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Шапка секции неразмещённых
-      (write-line "  <Style ss:ID=\"SkipHeader\">" f)
+      (write-line "  <Style ss:ID=\"SkipHeaderLeft\">" f)
       (write-line "   <Font ss:Bold=\"1\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
@@ -752,9 +880,10 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Пустая ячейка шапки неразмещённых
-      (write-line "  <Style ss:ID=\"SkipHeaderEmpty\">" f)
+      (write-line "  <Style ss:ID=\"SkipHeaderMid\">" f)
+      (write-line "   <Font ss:Bold=\"1\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -763,9 +892,10 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Последняя ячейка шапки неразмещённых (толстая граница справа)
       (write-line "  <Style ss:ID=\"SkipHeaderRight\">" f)
+      (write-line "   <Font ss:Bold=\"1\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -774,9 +904,9 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Данные неразмещённых (красный)
-      (write-line "  <Style ss:ID=\"SkipData\">" f)
+      (write-line "  <Style ss:ID=\"SkipDataLeft\">" f)
       (write-line "   <Font ss:Color=\"#FF0000\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"2\"/>" f)
@@ -785,8 +915,9 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Пустая ячейка данных неразмещённых
-      (write-line "  <Style ss:ID=\"SkipDataEmpty\">" f)
+      (write-line "  <Style ss:ID=\"SkipDataMid\">" f)
+      (write-line "   <Font ss:Color=\"#FF0000\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -795,8 +926,9 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Последняя ячейка данных неразмещённых (толстая граница справа)
       (write-line "  <Style ss:ID=\"SkipDataRight\">" f)
+      (write-line "   <Font ss:Color=\"#FF0000\"/>" f)
+      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
       (write-line "   <Borders>" f)
       (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
       (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
@@ -805,7 +937,6 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      ;; Итог секции неразмещённых (красный, жирный, толстая рамка снизу)
       (write-line "  <Style ss:ID=\"SkipTotal\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Color=\"#FF0000\"/>" f)
       (write-line "   <Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" f)
@@ -819,16 +950,19 @@
 
       (write-line " </Styles>" f)
 
-      ;; Таблица
+      ;; ============================================
+      ;; ЛИСТ — Раскрой
+      ;; ============================================
       (write-line " <Worksheet ss:Name=\"Раскрой\">" f)
       (write-line "  <Table>" f)
-      (write-line "   <Column ss:Width=\"60\"/>" f)
-      (write-line "   <Column ss:Width=\"200\"/>" f)
-      (write-line "   <Column ss:Width=\"100\"/>" f)
-      (write-line "   <Column ss:Width=\"80\"/>" f)
-      (write-line "   <Column ss:Width=\"100\"/>" f)
 
-      ;; Заголовок таблицы
+      (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"60\"/>" f)
+      (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"1\" ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
+      (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"100\"/>" f)
+      (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
+
+      ;; Заголовок
       (write-line "   <Row ss:Height=\"20\">" f)
       (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">Раскрой хлыстов</Data></Cell>" f)
       (write-line "   </Row>" f)
@@ -846,125 +980,96 @@
       (setq i 0)
       (foreach bar bars
         (setq i (1+ i))
-        (setq pieces-bar (cdr bar))
-        (setq waste (car bar))
-        (setq used (- stock waste))
-        (setq util (* 100.0 (/ used stock)))
+        (setq pieces (cdr bar) waste (car bar) used (- stock waste)
+              util (* 100.0 (/ used stock)))
         (write-line "   <Row>" f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces-bar) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos used 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos waste 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos util 2 1) "</Data></Cell>") f)
         (write-line "   </Row>" f)
       )
 
-      ;; Пропуск одной строки
+      ;; Пустая строка
       (write-line "   <Row>" f)
       (write-line "    <Cell><Data ss:Type=\"String\"></Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; ================================================
-      ;; Блок отчёта
-      ;; ================================================
+      ;; ============================================
+      ;; Блок отчёта (столбцы B-D)
+      ;; ============================================
 
-      ;; Заголовок блока отчёта
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">ОТЧЁТ</Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">ОТЧЁТ</Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; Длина хлыста (заготовка для раскроя)
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Длина хлыста (заготовка):</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportValue\"><Data ss:Type=\"String\">" (itoa (fix stock)) " мм</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Длина хлыста (заготовка):</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportValueRight\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (itoa (fix stock)) " мм</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Всего изделий
+      (setq total-cnt 0 total-product-mm 0.0)
+      (foreach bar bars
+        (foreach p (cdr bar)
+          (setq total-cnt (1+ total-cnt))
+          (setq total-product-mm (+ total-product-mm p))
+        )
+      )
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Всего изделий:</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportValue\"><Data ss:Type=\"String\">" (itoa total-cnt) " шт</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Всего изделий:</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportValueRight\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (itoa total-cnt) " шт</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Суммарная длина
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Суммарная длина:</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportValue\"><Data ss:Type=\"String\">" (rtos total-product-m 2 2) " м.п.</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Суммарная длина:</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportValueRight\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos (/ product-total-mm 1000.0) 2 2) " м.п.</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Хлыстов
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Хлыстов:</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportValue\"><Data ss:Type=\"String\">" (itoa num-bars) " шт</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Хлыстов:</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportValueRight\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (itoa num-bars) " шт</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Общая длина хлыстов
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Общая длина хлыстов:</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportValue\"><Data ss:Type=\"String\">" (rtos stock-total-m 2 2) " м.п.</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportValueRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">Общая длина хлыстов:</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportValueRight\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos (/ stock-total-mm 1000.0) 2 2) " м.п.</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; КПД использования
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportLabel\"><Data ss:Type=\"String\">КПД использования:</Data></Cell>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"ReportKpd\"><Data ss:Type=\"String\">" (rtos kpd 2 1) " %</Data></Cell>") f)
-      (write-line "    <Cell ss:StyleID=\"ReportKpdEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportKpdEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"ReportKpdRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportKpdLabel\"><Data ss:Type=\"String\">КПД использования:</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"ReportKpd\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos kpd 2 1) " %</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; ================================================
-      ;; Секция неразмещённых деталей (если есть)
-      ;; ================================================
+      ;; ============================================
+      ;; Секция неразмещённых (столбцы B-D)
+      ;; ============================================
       (if oversized
         (progn
-          ;; Пустая строка между блоком отчёта и секцией неразмещённых
           (write-line "   <Row>" f)
           (write-line "    <Cell><Data ss:Type=\"String\"></Data></Cell>" f)
           (write-line "   </Row>" f)
 
-          ;; Заголовок секции неразмещённых
           (write-line "   <Row>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipTitle\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ (длиннее хлыста)</Data></Cell>" f)
+          (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"SectionTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ (длиннее хлыста)</Data></Cell>" f)
           (write-line "   </Row>" f)
 
-          ;; Шапка секции
           (write-line "   <Row>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipHeader\"><Data ss:Type=\"String\">Длина, мм</Data></Cell>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipHeader\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipHeader\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipHeaderEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-          (write-line "    <Cell ss:StyleID=\"SkipHeaderRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+          (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"SkipHeaderLeft\"><Data ss:Type=\"String\">Длина, мм</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"SkipHeaderMid\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"SkipHeaderRight\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
           (write-line "   </Row>" f)
 
-          ;; Данные неразмещённых
           (foreach rec oversized
             (write-line "   <Row>" f)
-            (write-line (strcat "    <Cell ss:StyleID=\"SkipData\"><Data ss:Type=\"Number\">" (itoa (fix (car rec))) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"SkipData\"><Data ss:Type=\"Number\">" (itoa (cadr rec)) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"SkipData\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
-            (write-line "    <Cell ss:StyleID=\"SkipDataEmpty\"><Data ss:Type=\"String\"></Data></Cell>" f)
-            (write-line "    <Cell ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"String\"></Data></Cell>" f)
+            (write-line (strcat "    <Cell ss:Index=\"2\" ss:StyleID=\"SkipDataLeft\"><Data ss:Type=\"Number\">" (itoa (fix (car rec))) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"SkipDataMid\"><Data ss:Type=\"Number\">" (itoa (cadr rec)) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
             (write-line "   </Row>" f)
           )
 
-          ;; Итог секции неразмещённых
           (write-line "   <Row>" f)
-          (write-line (strcat "    <Cell ss:StyleID=\"SkipTotal\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">Всего неразмещенных: " (itoa total-skip-cnt) " шт, " (rtos (/ total-skip-mm 1000.0) 2 2) " м.п.</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:Index=\"2\" ss:StyleID=\"SkipTotal\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">Всего неразмещенных: " (itoa total-cnt-unplaced) " шт, " (rtos total-sum-unplaced 2 2) " м.п.</Data></Cell>") f)
           (write-line "   </Row>" f)
         )
       )
@@ -979,10 +1084,10 @@
   )
 )
 
-;; ============================================================
-;; Экспорт в CSV (резервный вариант)
-;; ============================================================
-(defun n1-write-csv (bars pieces oversized stock kerf / fname f i bar pieces-bar waste used util rec)
+;; ---------- CSV-экспорт (fallback) ----------
+(defun n1-write-csv (bars stock kerf oversized /
+                       fname f i bar pieces waste used util rec
+                       total-cnt-unplaced total-sum-unplaced)
   (setq fname (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
                       " Раскрой хлыстов.csv"))
@@ -993,251 +1098,325 @@
       (setq i 0)
       (foreach bar bars
         (setq i (1+ i))
-        (setq pieces-bar (cdr bar))
-        (setq waste (car bar))
-        (setq used (- stock waste))
-        (setq util (* 100.0 (/ used stock)))
-        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces-bar) ";" (rtos used 2 1) ";"
-                            (rtos waste 2 1) ";" (rtos util 2 1)) f)
+        (setq pieces (cdr bar) waste (car bar) used (- stock waste)
+              util (* 100.0 (/ used stock)))
+        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces) ";"
+                            (rtos used 2 1) ";" (rtos waste 2 1) ";"
+                            (rtos util 2 1)) f)
       )
-
       (if oversized
         (progn
+          (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
+          (foreach rec oversized
+            (setq total-cnt-unplaced (+ total-cnt-unplaced (cadr rec)))
+            (setq total-sum-unplaced (+ total-sum-unplaced
+                                        (/ (* (car rec) (cadr rec)) 1000.0)))
+          )
           (write-line "" f)
           (write-line "НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ (длиннее хлыста)" f)
           (write-line "Длина, мм;Кол-во, шт;Сумма, м.п." f)
           (foreach rec oversized
-            (write-line (strcat (itoa (fix (car rec))) ";"
-                                (itoa (cadr rec)) ";"
-                                (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2)) f)
+            (write-line
+              (strcat (itoa (fix (car rec))) ";" (itoa (cadr rec)) ";"
+                      (vl-string-translate "." ","
+                        (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2))) f)
           )
+          (write-line (strcat "Всего;" (itoa total-cnt-unplaced) ";"
+                              (vl-string-translate "." ","
+                                (rtos total-sum-unplaced 2 2))) f)
         )
       )
-
       (close f)
       (princ (strcat "\nCSV сохранен: " fname))
+      T
     )
-    (princ (strcat "\nОШИБКА: не удалось создать файл " fname))
+    nil
   )
 )
 
 ;; ============================================================
-;; Экспорт с переключением: XLS ? CSV (если файл открыт)
+;; Главная функция
 ;; ============================================================
-(defun n1-export-report (bars pieces oversized stock kerf)
-  (if (n1-write-xls bars pieces oversized stock kerf)
-    T
-    (progn
-      (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
-      (n1-write-csv bars pieces oversized stock kerf)
-    )
-  )
-)
-
-;; ============================================================
-;; Главная команда
-;; ============================================================
-(defun c:cutline ( / *error*
-                    ss tol stock kerf insPt pieces sorted bars
-                    bbox1 bbox2 bbox p1 p2 color-map
-                    barHeight sumInsPt num-bars stock-total-mm
-                    total-cnt total-product-mm kpd rec blockName baseName
-                    lastEnt ssNew ent oldEcho doc uMark
-                    oversized valid-pieces)
-  ;; Обработчик ошибок
-  (defun *error* (msg)
-    (if oldEcho (setvar "CMDECHO" oldEcho))
-    (if (and uMark doc)
-      (vl-catch-all-apply 'vla-EndUndoMark (list doc))
-    )
-    (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
-      (princ (strcat "\nОшибка: " msg))
-    )
-    (princ)
-  )
+(defun cutline-main (layers-from-caller / ss tol stock kerf insPt
+                       pieces pieces-ok pieces-oversized split
+                       sorted bars
+                       bbox1 bbox2 bbox3 bbox p1 p2 color-map
+                       barHeight sumInsPt num-bars stock-total-mm
+                       total-cnt total-product-mm kpd rec blockName baseName
+                       lastEnt ssNew ent oldEcho doc uMark
+                       layers layers-str total-input type-counts
+                       user-filter line-cnt mline-cnt
+                       export-xls export-acad
+                       default-xls default-acad
+                       default-stock default-kerf
+                       dialog-result r xls-ok)
 
   (princ "\n=== Линейный раскрой мерного материала ===")
-  (princ "\nВыберите полилинии/линии - исходные детали:")
-  (setq ss (ssget '((0 . "LWPOLYLINE,POLYLINE,LINE,ARC,ELLIPSE,SPLINE,MLINE"))))
-  (if (null ss) (progn (princ "\nНичего не выбрано.") (princ) (exit)))
-  (princ (strcat "\nВыбрано объектов: " (itoa (sslength ss))))
-  (setq tol (getreal "\nДопуск округления длины (мм) <1>: "))
-  (if (or (null tol) (<= tol 0.0)) (setq tol 1.0))
-  (setq stock (getreal "\nДлина хлыста (мм) <6000>: "))
-  (if (null stock) (setq stock 6000.0))
-  (setq kerf (getreal "\nШирина реза (мм) <0>: "))
-  (if (null kerf) (setq kerf 0.0))
 
-  (setq pieces (n1-extract-pieces ss tol))
-  (if (null pieces) (progn (princ "\nНе удалось извлечь длины.") (princ) (exit)))
-
-  ;; Отбрасывание деталей длиннее хлыста
-  (setq oversized '()
-        valid-pieces '())
-  (foreach rec pieces
-    (if (> (car rec) stock)
-      (setq oversized (append oversized (list rec)))
-      (setq valid-pieces (append valid-pieces (list rec)))
-    )
-  )
-  (setq pieces valid-pieces)
-
-  ;; Вывод предупреждения о неразмещённых деталях
-  (if oversized
+  ;; 1. Слои
+  (if (eq layers-from-caller 'ASK)
     (progn
-      (princ (strcat "\nВНИМАНИЕ: " (itoa (length oversized))
-                     " типов деталей длиннее хлыста НЕ размещены:"))
-      (foreach rec oversized
-        (princ (strcat "\n  Длина " (itoa (fix (car rec))) " мм, кол-во "
-                       (itoa (cadr rec)) " шт."))
+      (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
+      (if (/= layers-str "")
+        (setq layers (mapcar '(lambda (x) (vl-string-trim " " x))
+                             (n1-split-string layers-str ",")))
+        (setq layers nil)
       )
     )
+    (setq layers layers-from-caller)
   )
 
-  ;; Проверка, что остались детали для раскроя
-  (if (null pieces)
+  (princ (strcat "\n" (car (n1-layer-display-list layers))))
+
+  ;; 2. Выбор объектов
+  (princ "\nВыберите отрезки и/или мультилинии — исходные детали:")
+  (princ "\n(принимаются ТОЛЬКО LINE и MLINE)")
+  (princ "\n(если объекты уже выделены — Enter)")
+
+  (setq ss (su-select-cutline-objects layers))
+  (if (null ss)
+    (progn (princ "\nНичего не выбрано.") (princ) (exit)))
+
+  (setq total-input (sslength ss))
+  (princ (strcat "\nВыбрано объектов: " (itoa total-input)))
+
+  (setq type-counts (n1-count-by-type ss))
+  (n1-print-type-counts type-counts)
+
+  (setq line-cnt  (cdr (assoc "LINE"  type-counts)))
+  (setq mline-cnt (cdr (assoc "MLINE" type-counts)))
+
+  (if (and (= line-cnt 0) (= mline-cnt 0))
     (progn
-      (princ "\nВсе детали длиннее хлыста. Раскрой невозможен.")
-      (princ)
-      (exit)
+      (princ "\nНет объектов подходящих типов (LINE, MLINE).")
+      (princ) (exit)
     )
   )
 
-  ;; Подсчёт общего количества деталей
+  ;; 2б. Диалог
+  (setq default-stock *CUTLINE-LAST-STOCK*)
+  (setq default-kerf  *CUTLINE-LAST-KERF*)
+  (setq default-xls   *CUTLINE-LAST-XLS*)
+  (setq default-acad  *CUTLINE-LAST-ACAD*)
+
+  (if (not (eq layers-from-caller 'ASK))
+    (progn
+      (if (boundp '*CUTLINE-CREATE-XLS*)
+        (setq default-xls *CUTLINE-CREATE-XLS*))
+      (if (boundp '*CUTLINE-CREATE-TABLE*)
+        (setq default-acad *CUTLINE-CREATE-TABLE*))
+    )
+  )
+
+  (setq tol *CUTLINE-DEFAULT-TOL*)
+
+  (setq r (vl-catch-all-apply
+            'n1-cutline-dialog
+            (list line-cnt mline-cnt *CUTLINE-DEFAULT-TOL*
+                  default-stock default-kerf layers default-xls default-acad)))
+
+  (cond
+    ((vl-catch-all-error-p r)
+     (princ (strcat "\nОшибка диалога: " (vl-catch-all-error-message r)))
+     (princ "\nРаскрой отменён.")
+     (princ) (exit)
+    )
+    ((null r)
+     (princ "\nРаскрой отменен пользователем.")
+     (princ) (exit)
+    )
+    (T (setq dialog-result r))
+  )
+
+  (setq user-filter  (car dialog-result)
+        tol          (cadr dialog-result)
+        stock        (caddr dialog-result)
+        kerf         (cadddr dialog-result)
+        export-xls   (nth 4 dialog-result)
+        export-acad  (nth 5 dialog-result))
+
+  (setq *CUTLINE-LAST-STOCK* stock
+        *CUTLINE-LAST-KERF*  kerf
+        *CUTLINE-LAST-XLS*   export-xls
+        *CUTLINE-LAST-ACAD*  export-acad)
+
+  (princ "\nПараметры приняты из окна диалога.")
+
+  ;; 2в. Фильтрация
+  (cond
+    ((eq user-filter 'LINE)
+     (setq ss (n1-filter-ss-by-type ss "LINE"))
+     (princ "\nОставлены только линии (LINE)."))
+    ((eq user-filter 'MLINE)
+     (setq ss (n1-filter-ss-by-type ss "MLINE"))
+     (princ "\nОставлены только мультилинии (MLINE)."))
+    (T (princ "\nОставлены линии и мультилинии."))
+  )
+
+  (if (= (sslength ss) 0)
+    (progn (princ "\nПосле фильтрации не осталось объектов.") (princ) (exit)))
+
+  (setq type-counts (n1-count-by-type ss))
+  (n1-print-type-counts type-counts)
+
+  (princ (strcat "\nПараметры: допуск " (rtos tol 2 2)
+                 " мм, хлыст " (rtos stock 2 0)
+                 " мм, рез " (rtos kerf 2 0) " мм."))
+  (princ (strcat "\nЭкспорт: "
+                 (if export-xls  ".xls" "без .xls") ", "
+                 (if export-acad "таблица AutoCAD" "без таблицы")))
+
+  ;; 3. Извлечение
+  (setq pieces (n1-extract-pieces ss tol
+                                  *CUTLINE-MIN-LENGTH* *CUTLINE-MAX-LENGTH*))
+  (if (null pieces)
+    (progn (princ "\nНе удалось извлечь длины.") (princ) (exit)))
+
   (setq total-cnt 0)
   (foreach rec pieces (setq total-cnt (+ total-cnt (cadr rec))))
-  (princ (strcat "\nВсего типов деталей: " (itoa (length pieces))
+  (princ (strcat "\nВсего деталей: " (itoa (length pieces))
                  ", общее количество: " (itoa total-cnt)))
 
-  (setq sorted (n1-expand pieces))
-  (princ (strcat "\nРазвернуто элементов: " (itoa (length sorted))))
+  ;; 4. Разделение
+  (setq split (n1-split-by-stock pieces stock))
+  (setq pieces-ok (car split) pieces-oversized (cadr split))
+
+  (n1-report-oversized pieces-oversized stock)
+
+  (if (null pieces-ok)
+    (progn
+      (princ "\nВсе детали превышают длину хлыста. Раскрой невозможен.")
+      (princ) (exit)
+    )
+  )
+
+  ;; 5. Раскрой
+  (setq sorted (n1-expand pieces-ok))
   (setq bars (n1-ffd sorted stock kerf))
-  (princ (strcat "\nПолучено хлыстов: " (itoa (length bars))))
   (n1-report bars stock kerf)
 
+  ;; 6. Сводка
   (setq num-bars (length bars))
   (setq stock-total-mm (* num-bars stock))
   (setq total-cnt 0 total-product-mm 0.0)
-  (foreach rec pieces
+  (foreach rec pieces-ok
     (setq total-cnt (+ total-cnt (cadr rec)))
     (setq total-product-mm (+ total-product-mm (* (car rec) (cadr rec))))
   )
   (setq kpd (if (> stock-total-mm 0)
-              (* 100.0 (/ total-product-mm stock-total-mm))
-              0.0))
-  (princ (strcat "\nВсего изделий: " (itoa total-cnt) " шт, суммарная длина "
+              (* 100.0 (/ total-product-mm stock-total-mm)) 0.0))
+  (princ (strcat "\nВсего изделий: " (itoa total-cnt)
+                 " шт, суммарная длина "
                  (rtos (/ total-product-mm 1000.0) 2 2) " м.п."))
-  (princ (strcat "\nХлыстов: " (itoa num-bars) " шт, общая длина "
+  (princ (strcat "\nХлыстов: " (itoa num-bars)
+                 " шт, общая длина "
                  (rtos (/ stock-total-mm 1000.0) 2 2) " м.п."))
   (princ (strcat "\nКПД использования: " (rtos kpd 2 1) " %"))
 
-  (setq color-map (n1-build-color-map pieces))
-
-  ;; ============================================================
-  ;; Экспорт с переключением XLS ? CSV (если включён в диспетчере)
-  ;; ============================================================
-  (if *CUTLINE-CREATE-XLS*
-    (n1-export-report bars pieces oversized stock kerf)
-    (princ "\nЭкспорт в XLS/CSV отключён.")
+  ;; 7. Экспорт файла
+  (if export-xls
+    (progn
+      (setq xls-ok
+        (n1-write-xls bars stock kerf pieces-oversized
+                      num-bars stock-total-mm total-product-mm kpd))
+      (if (not xls-ok)
+        (progn
+          (princ "\nНе удалось создать XLS. Сохраняю CSV...")
+          (n1-write-csv bars stock kerf pieces-oversized)
+        )
+      )
+    )
+    (princ "\nГалочка .xls снята — файл не создаётся.")
   )
 
-  ;; ============================================================
-  ;; Раскладка в автокад (если включена в диспетчере)
-  ;; ============================================================
-  (setq insPt (if *CUTLINE-CREATE-TABLE*
-                (getpoint "\nУкажите точку вставки раскладки: ")
-                nil))
-  (if insPt
+  ;; 8. Раскладка AutoCAD
+  (if export-acad
     (progn
-      (n1-ensure-italic-style)
-
-      (setq baseName (vl-filename-base (getvar "DWGNAME")))
-      (setq blockName (n1-unique-block-name (strcat "Раскрой " baseName)))
-
-      ;; Undo-группа для атомарности
-      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument
-                                    (list (vlax-get-acad-object))))
-      (if (and (not (vl-catch-all-error-p doc)) doc)
+      (setq insPt (getpoint "\nУкажите точку вставки раскладки: "))
+      (if insPt
         (progn
-          (vla-StartUndoMark doc)
-          (setq uMark T)
-        )
-      )
+          (n1-ensure-italic-style)
+          (setq color-map (n1-build-color-map pieces-ok))
+          (setq baseName (vl-filename-base (getvar "DWGNAME")))
+          (setq blockName (n1-unique-block-name (strcat "Раскрой " baseName)))
 
-      (setq lastEnt (entlast))
-
-      ;; Рисуем раскладку и сводку
-      (setq bbox1 (n1-draw-layout bars stock kerf insPt color-map))
-      (setq barHeight (/ stock 30.0))
-      (setq sumInsPt (list (+ (car (cadr bbox1)) (* barHeight 2.0))
-                           (cadr (cadr bbox1))))
-      (setq bbox2 (n1-draw-summary bars pieces oversized stock sumInsPt color-map))
-
-      ;; Собираем созданные объекты в набор
-      (setq ssNew (ssadd))
-      (if lastEnt
-        (setq ent (entnext lastEnt))
-        (setq ent (entnext))
-      )
-      (while ent
-        (ssadd ent ssNew)
-        (setq ent (entnext ent))
-      )
-
-      ;; Создаём блок
-      (if (> (sslength ssNew) 0)
-        (progn
-          (setq oldEcho (getvar "CMDECHO"))
-          (setvar "CMDECHO" 0)
-          (command "._-BLOCK" blockName insPt ssNew "")
-          (setvar "CMDECHO" oldEcho)
-          (setq oldEcho nil)
-          (if (tblsearch "BLOCK" blockName)
+          (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument
+                                        (list (vlax-get-acad-object))))
+          (if (and (not (vl-catch-all-error-p doc)) doc)
             (progn
-              (n1-block-insert blockName insPt)
-              (princ (strcat "\nСоздан блок с раскладкой: " blockName))
+              (vla-StartUndoMark doc)
+              (setq uMark T)
             )
-            (princ "\nНе удалось создать блок.")
+          )
+
+          (setq lastEnt (entlast))
+
+          (setq bbox1 (n1-draw-layout bars stock kerf insPt color-map))
+          (setq barHeight (/ stock 30.0))
+          (setq sumInsPt (list (+ (car (cadr bbox1)) (* barHeight 2.0))
+                               (cadr (cadr bbox1))))
+          (setq bbox2 (n1-draw-summary bars pieces-ok stock sumInsPt color-map
+                                        pieces-oversized))
+          (setq bbox3
+            (if pieces-oversized
+              (n1-draw-oversized pieces-oversized stock
+                (list (car (car bbox2))
+                      (- (cadr (car bbox2)) (* barHeight 2.0))))
+              nil))
+
+          (setq ssNew (ssadd))
+          (if lastEnt
+            (setq ent (entnext lastEnt))
+            (setq ent (entnext)))
+          (while ent
+            (ssadd ent ssNew)
+            (setq ent (entnext ent)))
+
+          (if (> (sslength ssNew) 0)
+            (progn
+              (setq oldEcho (getvar "CMDECHO"))
+              (setvar "CMDECHO" 0)
+              (command "._-BLOCK" blockName insPt ssNew "")
+              (setvar "CMDECHO" oldEcho)
+              (if (tblsearch "BLOCK" blockName)
+                (progn (n1-block-insert blockName insPt)
+                       (princ (strcat "\nСоздан блок с раскладкой: " blockName)))
+                (princ "\nНе удалось создать блок."))
+            )
+            (princ "\nНет объектов для создания блока.")
+          )
+
+          (setq bbox (n1-combine-bbox bbox1
+                        (if bbox3 (n1-combine-bbox bbox2 bbox3) bbox2)))
+          (setq p1 (vlax-3d-point (list (car (car bbox)) (cadr (car bbox)) 0.0)))
+          (setq p2 (vlax-3d-point (list (car (cadr bbox)) (cadr (cadr bbox)) 0.0)))
+          (vl-catch-all-apply 'vla-ZoomWindow (list (vlax-get-acad-object) p1 p2))
+
+          (if (and uMark doc)
+            (progn
+              (vla-EndUndoMark doc)
+              (setq uMark nil)
+            )
           )
         )
-        (princ "\nНет объектов для создания блока.")
-      )
-
-      ;; Область на экране
-      (setq bbox (n1-combine-bbox bbox1 bbox2))
-      (setq p1 (vlax-3d-point (list (car (car bbox)) (cadr (car bbox)) 0.0)))
-      (setq p2 (vlax-3d-point (list (car (cadr bbox)) (cadr (cadr bbox)) 0.0)))
-      (vl-catch-all-apply 'vla-ZoomWindow (list (vlax-get-acad-object) p1 p2))
-
-      ;; Закрываем undo-группу
-      (if (and uMark doc)
-        (progn
-          (vla-EndUndoMark doc)
-          (setq uMark nil)
-        )
+        (princ "\nРаскладка пропущена.")
       )
     )
-    (if (not *CUTLINE-CREATE-TABLE*)
-      (princ "\nРаскладка в автокад отключена.")
-      (princ "\nРаскладка пропущена.")
-    )
+    (princ "\nГалочка Таблица AutoCAD снята — раскладка не строится.")
   )
 
   (princ)
 )
 
 ;; ============================================================
-;; Обёртка для запуска из диспетчера
+;; Автономные команды
 ;; ============================================================
-(defun cutline-main ()
-  (c:cutline)
-)
+(defun c:cutline () (cutline-main 'ASK))
+(defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
 
-;; ============================================================
-;; Русская команда-обёртка
-;; ============================================================
-(defun c:раскройхлыста ()
-  (c:cutline)
+(defun c:CUTSHEET ()
+  (princ "\nCUTSHEET: модуль в разработке.")
+  (princ)
 )
 
 (princ "\nCUTLINE.LSP загружен. Команды: CUTLINE, РАСКРОЙХЛЫСТА")

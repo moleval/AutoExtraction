@@ -1304,11 +1304,11 @@
                 ;; ------------------------------------------------
 
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
-                 (setq r
-                   (vl-catch-all-apply 'cutline-main '()))
-
-                 (if (vl-catch-all-error-p r)
-                   (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
+                  (setq r
+                    (vl-catch-all-apply 'cutline-main
+                      (list *EXTRACTION-SELECTED-LAYERS*)))
+                  (if (vl-catch-all-error-p r)
+                    (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
                 )
 
                 ;; ------------------------------------------------
