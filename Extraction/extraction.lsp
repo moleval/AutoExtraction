@@ -20,10 +20,18 @@
 ;;;   (ранее все задачи, кроме Подсистемы, сохраняли слои в
 ;;;   переменную Фасонки).
 ;;;
-;;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв для
-;;;   кнопок "Раскрой хлыста" и "Раскрой листа".
-;;;   Ранее *EXTRACTION-SELECTED-LAYERS* оставался пустым,
-;;;   т.к. не вызывалась функция формирования списка слоёв.
+;;; ИСПРАВЛЕНО (Этап Р1 — Ремонт кода):
+;;;   Р1.4: заглушки для cladding-main и vitrazh-main с полным
+;;;         списком аргументов для совместимости с диспетчером
+;;;   Р1.5: формирование списка слоёв для кнопок раскроя
+;;;   Р1.6: приоритет групповых фильтров над слоями задачи
+;;;   Р1.7: исключение служебных слоёв 0 и Defpoints при
+;;;         автоматическом выборе из групповых фильтров
+;;;
+;;; ИСПРАВЛЕНО (Этап Р2 — Ремонт кода):
+;;;   Р2.3: различение штатного выхода и ошибки. Если модуль
+;;;         вызывает (exit) — это штатный выход, а не ошибка.
+;;;         Пользователь видит сообщение об отмене, а не о поломке.
 ;;;
 ;;; Маски с * поддерживаются через wcmatch.
 ;;;
@@ -188,14 +196,15 @@
   (reverse out)
 )
 
+
 ;; ============================================================
 ;; ОЧИСТКА СПИСКА СЛОЁВ ДЛЯ РАСКРОЯ
-;; ДОБАВЛЕНО (Р1): при автоматическом выборе слоёв из
+;; ДОБАВЛЕНО (Р1.7): при автоматическом выборе слоёв из
 ;; групповых фильтров исключаем служебные слои.
 ;;
 ;; Важно:
-;; - применяется только для автоматического fallback-выбора
-;;   из групповых фильтров;
+;; - применяется только для автоматического выбора из
+;;   групповых фильтров;
 ;; - если пользователь явно выбрал слой 0 руками, он не
 ;;   удаляется этой функцией автоматически.
 ;; ============================================================
@@ -220,6 +229,43 @@
 
   (extraction-unique-ci (reverse out))
 )
+
+
+;; ============================================================
+;; ОБРАБОТКА РЕЗУЛЬТАТА ВЫЗОВА МОДУЛЯ
+;; ИСПРАВЛЕНО (Р2.3): добавлены русские варианты сообщений
+;; об ошибке от (exit): "завершить", "прервать", "выйти"
+;; ============================================================
+(defun extraction-handle-module-result (r module-name / errMsg errMsgUp)
+  (if (vl-catch-all-error-p r)
+    (progn
+      (setq errMsg (vl-catch-all-error-message r))
+      (setq errMsgUp (strcase errMsg))
+
+      ;; Проверяем, является ли ошибка штатным выходом через (exit)
+      ;; В русской локали (exit) генерирует сообщение вида:
+      ;; "завершить / выйти прервать"
+      (if (or
+            ;; Английские варианты
+            (vl-string-search "QUIT" errMsgUp)
+            (vl-string-search "CANCEL" errMsgUp)
+            ;; Русские варианты
+            (vl-string-search "ОТМЕН" errMsgUp)
+            (vl-string-search "ЗАВЕРШИТЬ" errMsgUp)
+            (vl-string-search "ПРЕРВАТЬ" errMsgUp)
+            (vl-string-search "ВЫЙТИ" errMsgUp))
+        ;; Штатный выход — не выводим сообщение об ошибке
+        ;; (модуль уже вывел своё сообщение)
+        nil
+        ;; Реальная ошибка
+        (princ (strcat "\nМодуль " module-name
+                       " не загружен или ошибка выполнения: "
+                       errMsg))
+      )
+    )
+  )
+)
+
 
 ;; ============================================================
 ;; ПОЛУЧЕНИЕ ВСЕХ СЛОЁВ ЧЕРТЕЖА
@@ -973,6 +1019,7 @@
 ;; ============================================================
 ;; ЗАПУСК ЗАДАЧИ
 ;; ОБНОВЛЕНО: сохранение выбранных слоёв после выполнения
+;; ОБНОВЛЕНО (Р2.3): использование extraction-handle-module-result
 ;; ============================================================
 (defun run-task
        (task-id layers report-mode export-excel export-txt
@@ -993,14 +1040,14 @@
   )
 
   ;; Запускаем задачу
+  ;; ОБНОВЛЕНО (Р2.3): использование extraction-handle-module-result
   (cond
     ((eq task-id 'FASONKA)
      (setq r
        (vl-catch-all-apply 'fasonka-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-     (if (vl-catch-all-error-p r)
-       (princ "\nМодуль Фасонка не загружен или ошибка выполнения."))
+     (extraction-handle-module-result r "Фасонка")
     )
 
     ((eq task-id 'SUBSYSTEM)
@@ -1008,8 +1055,7 @@
        (vl-catch-all-apply 'subsystem-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-     (if (vl-catch-all-error-p r)
-       (princ "\nМодуль Подсистема не загружен или ошибка выполнения."))
+     (extraction-handle-module-result r "Подсистема")
     )
 
     ((eq task-id 'CLADDING)
@@ -1017,8 +1063,7 @@
        (vl-catch-all-apply 'cladding-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-     (if (vl-catch-all-error-p r)
-       (princ "\nМодуль Облицовка не загружен или ошибка выполнения."))
+     (extraction-handle-module-result r "Облицовка")
     )
 
     ((eq task-id 'VITRAZH)
@@ -1026,8 +1071,7 @@
        (vl-catch-all-apply 'vitrazh-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-     (if (vl-catch-all-error-p r)
-       (princ "\nМодуль Витраж не загружен или ошибка выполнения."))
+     (extraction-handle-module-result r "Витраж")
     )
 
     ((eq task-id 'ZAPOLNENIE)
@@ -1035,8 +1079,7 @@
        (vl-catch-all-apply 'zapolnenie-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-     (if (vl-catch-all-error-p r)
-       (princ "\nМодуль Заполнение не загружен или ошибка выполнения."))
+     (extraction-handle-module-result r "Заполнение")
     )
 
     (T
@@ -1107,36 +1150,45 @@
 
 ;; ============================================================
 ;; КНОПКА "РАСКРОЙ ХЛЫСТА"
-;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв
-;; ОБНОВЛЕНО: приоритет групповых фильтров над слоями задачи
+;; ИСПРАВЛЕНО: 
+;; 1. Приоритет ручного выбора над автоматическим.
+;; 2. Жёсткая сортировка слоёв от А до Я.
 ;; ============================================================
+(defun extraction-cutline ( / selected manual-selected)
+  (setq *CUTLINE-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
+  (setq *CUTLINE-CREATE-XLS*  (= (get_tile "chk_xls") "1"))
 
-(defun extraction-cutline ( / selected)
-  (setq *CUTLINE-CREATE-TABLE*
-    (= (get_tile "chk_acad") "1"))
+  (setq *CUTLINE-IS-AUTO-FILTER* nil)
 
-  (setq *CUTLINE-CREATE-XLS*
-    (= (get_tile "chk_xls") "1"))
+  ;; 1. Сначала проверяем, выбрал ли пользователь слои вручную в списке
+  (setq manual-selected (extraction-selected-names))
 
-  ;; Для раскроя приоритет имеют групповые фильтры.
-  ;; Если они выбраны — используем их, игнорируя выбранные слои.
-  (if (or *EXTRACTION-FILTER-FACADES*
-          *EXTRACTION-FILTER-VITRAZH*
-          *EXTRACTION-FILTER-FONAR*)
+  (if (and manual-selected (> (length manual-selected) 0))
+    ;; Пользователь выбрал слои вручную — используем их (приоритет)
+    (setq selected manual-selected)
+    
+    ;; Пользователь ничего не выбрал вручную
     (progn
-      ;; Используем видимые слои из групповых фильтров,
-      ;; исключая служебные слои 0 и Defpoints
-      (setq selected
-        (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
-    )
-    (progn
-      ;; Групповые фильтры не выбраны — используем выбранные слои
-      (setq selected (extraction-selected-names))
+      (if (or *EXTRACTION-FILTER-FACADES*
+              *EXTRACTION-FILTER-VITRAZH*
+              *EXTRACTION-FILTER-FONAR*)
+        ;; Включены групповые фильтры — используем их (автоматически)
+        (progn
+          (setq selected (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
+          (setq *CUTLINE-IS-AUTO-FILTER* T)
+        )
+        ;; Ничего не выбрано и фильтры выключены
+        (setq selected nil)
+      )
     )
   )
 
-  (setq *EXTRACTION-SELECTED-LAYERS* selected)
+  ;; ИСПРАВЛЕНО: Жёсткая сортировка слоёв от А до Я (А-Я)
+  (if selected
+    (setq selected (vl-sort selected '(lambda (a b) (< (strcase a) (strcase b)))))
+  )
 
+  (setq *EXTRACTION-SELECTED-LAYERS* selected)
   (setq *EXTRACTION-ACTION* 'CUTLINE)
   (done_dialog 1)
 )
@@ -1147,7 +1199,6 @@
 ;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв
 ;; ОБНОВЛЕНО: приоритет групповых фильтров над слоями задачи
 ;; ============================================================
-
 (defun extraction-cutsheet ( / selected)
   (setq *CUTSHEET-CREATE-TABLE*
     (= (get_tile "chk_acad") "1"))
@@ -1507,6 +1558,8 @@
 
               ;; =================================================
               ;; ОБРАБОТКА ДЕЙСТВИЙ ПОСЛЕ ЗАКРЫТИЯ
+              ;; ОБНОВЛЕНО (Р2.3): использование
+              ;; extraction-handle-module-result
               ;; =================================================
 
               (cond
@@ -1552,6 +1605,8 @@
 
                 ;; ------------------------------------------------
                 ;; CUTLINE
+                ;; ОБНОВЛЕНО (Р2.3): использование
+                ;; extraction-handle-module-result
                 ;; ------------------------------------------------
 
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
@@ -1559,12 +1614,13 @@
                    (vl-catch-all-apply 'cutline-main
                      (list *EXTRACTION-SELECTED-LAYERS*)))
 
-                 (if (vl-catch-all-error-p r)
-                   (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
+                 (extraction-handle-module-result r "CUTLINE")
                 )
 
                 ;; ------------------------------------------------
                 ;; CUTSHEET
+                ;; ОБНОВЛЕНО (Р2.3): использование
+                ;; extraction-handle-module-result
                 ;; ------------------------------------------------
 
                 ((eq *EXTRACTION-ACTION* 'CUTSHEET)
@@ -1572,8 +1628,7 @@
                    (vl-catch-all-apply 'cutsheet-main
                      (list *EXTRACTION-SELECTED-LAYERS*)))
 
-                 (if (vl-catch-all-error-p r)
-                   (princ "\nМодуль CUTSHEET не загружен или ошибка выполнения."))
+                 (extraction-handle-module-result r "CUTSHEET")
                 )
               )
 

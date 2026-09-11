@@ -26,21 +26,19 @@
 ;;;   Р1.3: исправлена проверка размещения детали с учётом реза
 ;;;         (было (> p stock), стало (> (+ p kerf) stock))
 ;;
+;;; ИСПРАВЛЕНИЯ (Этап Р2 — Ремонт кода):
+;;;   Р2.1: параметр разделителя в n1-list-to-str.
+;;;         Для CSV используется ";" вместо пробела, чтобы
+;;;         Excel не интерпретировал "2000 2000" как число.
+;;;   Р2.4: обработка десятичной запятой в полях ввода.
+;;;         В русской локали пользователь вводит "3,5",
+;;;         а atof ожидает "3.5".
+;;
 ;;; ТИПЫ РАСКРОЯ (диалог):
 ;;;   Только линии
 ;;;   Только мультилинии
 ;;;   Динамические блоки
 ;;;   Все типы
-;;
-;;; ИСПРАВЛЕНО (аудит):
-;;;   - Этап 3.1: функции получения имени типа блока вынесены
-;;;                в common/select-utils.lsp для унификации
-;;;                с Подсистемой (su-get-dynblock-type-name,
-;;;                su-collect-dynblock-types)
-;;;   - Этап 3.2: динамическое обновление количества блоков
-;;;                при выборе типа из выпадающего списка
-;;;   - Этап 3.2: сортировка неразмещённых деталей по убыванию
-;;;                длины в консоли, таблице и экспорте
 ;;; ============================================================
 (vl-load-com)
 
@@ -229,20 +227,12 @@
 ;; ============================================================
 ;; Алгоритм раскроя First-Fit Decreasing (FFD)
 ;; ИСПРАВЛЕНО (Р1.3): проверка размещения детали с учётом реза
-;;
-;; Было: (> p stock) — не учитывался рез
-;; Стало: (> (+ p kerf) stock) — учитывается рез
-;;
-;; Это предотвращает отрицательный отход при длине детали,
-;; равной длине хлыста, и ненулевом резе.
 ;; ============================================================
 (defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip)
   (setq bars '())
   (setq skip 0)
   (foreach p sorted-pieces
     ;; ИСПРАВЛЕНО (Р1.3): проверяем с учётом реза
-    ;; Рез нужен между деталями, поэтому деталь должна помещаться
-    ;; с запасом на рез (кроме случая, когда деталь одна на хлысте)
     (if (> (+ p kerf) stock)
       (setq skip (1+ skip))
       (progn
@@ -365,9 +355,6 @@
 ;; ============================================================
 ;; Фильтрация набора по типу И имени типа блока
 ;; ДОБАВЛЕНО (Этап 3.1)
-;;
-;; Если type-name пустой или "Все типы блоков" — берём все
-;; подходящие блоки. Иначе — только с совпадающим именем типа.
 ;; ============================================================
 (defun n1-filter-ss-by-type-and-name (ss typ type-name
                                       / i ent new-ss ent-typ obj block-type-name)
@@ -391,7 +378,6 @@
                        (= type-name "Все типы блоков"))
                  (ssadd ent new-ss)
                  (progn
-                   ;; Используем общую функцию из common/select-utils.lsp
                    (setq block-type-name (su-get-dynblock-type-name ent))
                    (if (= block-type-name type-name)
                      (ssadd ent new-ss)
@@ -414,11 +400,7 @@
 
 ;; ============================================================
 ;; Подсчёт динамических блоков конкретного типа
-;; ДОБАВЛЕНО (Этап 3.2): для динамического обновления количества
-;; в диалоге при выборе типа из выпадающего списка
-;;
-;; Если type-name пустой или "Все типы блоков" — считаем все
-;; подходящие блоки. Иначе — только с совпадающим именем типа.
+;; ДОБАВЛЕНО (Этап 3.2)
 ;; ============================================================
 (defun n1-count-dynblock-by-type (ss type-name
                                   / i ent typ obj count block-type-name)
@@ -468,12 +450,34 @@
   (if (= s "") nil s)
 )
 
-(defun n1-layer-display-list (layers / fname)
+;; ============================================================
+;; Отображение списка слоёв в диалоге и консоли
+;; ИСПРАВЛЕНО: Корректная логика отображения.
+;; Текст "Групповой фильтр..." показывается ТОЛЬКО если
+;; сработал автоматический выбор (пользователь не выбирал
+;; слои вручную в списке).
+;; ============================================================
+(defun n1-layer-display-list (layers / fname suffix)
   (setq fname (n1-filter-name-str))
+  (setq suffix "")
+
   (cond
-    (fname (list (strcat "Групповой фильтр " fname)))
+    ;; 1. Если сработал автоматический выбор по групповым фильтрам
+    ;; (пользователь не выделял слои руками в списке)
+    ((and (boundp '*CUTLINE-IS-AUTO-FILTER*) 
+          *CUTLINE-IS-AUTO-FILTER* 
+          fname)
+     (setq suffix " (за исключением слоя 0)")
+     (list (strcat "Групповой фильтр " fname suffix))
+    )
+    
+    ;; 2. Если слои не выбраны вообще
     ((or (null layers) (not (listp layers)) (= (length layers) 0))
-     (list "Все слои"))
+     (list "Все слои")
+    )
+    
+    ;; 3. Если пользователь выбрал слои вручную 
+    ;; (показываем сам список слоёв, даже если галки на фильтрах стоят)
     (T layers)
   )
 )
@@ -495,7 +499,6 @@
 
 ;; ============================================================
 ;; Ручное управление радиокнопками
-;; ОБНОВЛЕНО (Этап 3.1): блокировка выпадающего списка
 ;; ============================================================
 (defun n1-select-radio (selected / keys k)
   (setq keys '("rb_line" "rb_mline" "rb_dynblock" "rb_both"))
@@ -509,40 +512,33 @@
     ((= selected "rb_both")     (setq *n1-tmp-choice* 'ALL))
   )
 
-  ;; Блокируем/разблокируем выпадающий список в зависимости от выбранного типа
   (if (= selected "rb_dynblock")
-    (n1-safe-mode-tile "popup_dynblock_type" 0)  ; разблокировать
+    (n1-safe-mode-tile "popup_dynblock_type" 0)
     (progn
-      (n1-safe-mode-tile "popup_dynblock_type" 1)  ; заблокировать
-      (setq *n1-tmp-dynblock-type* "")              ; сбросить выбор
+      (n1-safe-mode-tile "popup_dynblock_type" 1)
+      (setq *n1-tmp-dynblock-type* "")
     )
   )
 )
 
 ;; ============================================================
 ;; Обработчик выбора типа динамического блока
-;; ОБНОВЛЕНО (Этап 3.2): динамическое обновление количества блоков
 ;; ============================================================
 (defun n1-on-dynblock-type-changed (value / idx type-name new-count)
   (setq idx (atoi value))
   (if (= idx 0)
-    ;; "Все типы блоков" — сброс
     (progn
       (setq *n1-tmp-dynblock-type* "")
-      ;; Пересчитываем общее количество динамических блоков
       (setq new-count (n1-count-dynblock-by-type *n1-cutline-ss* ""))
       (n1-safe-set-tile "txt_dynblock_count"
         (strcat (itoa new-count) " шт."))
     )
     (progn
-      ;; Конкретный тип
       (setq type-name (nth (1- idx) *n1-dynblock-types-list*))
       (setq *n1-tmp-dynblock-type* type-name)
-      ;; Пересчитываем количество блоков этого типа
       (setq new-count (n1-count-dynblock-by-type *n1-cutline-ss* type-name))
       (n1-safe-set-tile "txt_dynblock_count"
         (strcat (itoa new-count) " шт."))
-      ;; Автопереключение на "Динамические блоки"
       (n1-select-radio "rb_dynblock")
     )
   )
@@ -550,9 +546,9 @@
 
 ;; ============================================================
 ;; Диалог параметров раскроя
-;; ОБНОВЛЕНО (Этап 3.1): добавлен выпадающий список типов блоков
-;; ОБНОВЛЕНО (Этап 3.2): сохранение набора для пересчёта
-;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент в vl-catch-all-apply
+;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент в
+;; vl-catch-all-apply для заполнения списка слоёв
+;; ИСПРАВЛЕНО (Р2.4): обработка десятичной запятой
 ;; ============================================================
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           ss-for-types
@@ -593,7 +589,6 @@
             (progn
               (setq all-cnt (+ line-cnt mline-cnt dynblock-cnt))
 
-              ;; ---- Количество напротив радиокнопок ----
               (n1-safe-set-tile "txt_line_count"
                 (strcat (itoa line-cnt) " шт."))
               (n1-safe-set-tile "txt_mline_count"
@@ -603,13 +598,8 @@
               (n1-safe-set-tile "txt_both_count"
                 (strcat (itoa all-cnt) " шт."))
 
-              ;; ДОБАВЛЕНО (Этап 3.2): сохраняем набор для пересчёта
-              ;; при выборе типа из выпадающего списка
               (setq *n1-cutline-ss* ss-for-types)
 
-              ;; ---- Заполнение выпадающего списка типов блоков ----
-              ;; ДОБАВЛЕНО (Этап 3.1): используем общую функцию из
-              ;; common/select-utils.lsp для унификации с Подсистемой
               (setq *n1-tmp-dynblock-type* "")
               (setq *n1-dynblock-types-list*
                 (su-collect-dynblock-types ss-for-types 'su-is-valid-stock-block))
@@ -622,8 +612,6 @@
               (end_list)
               (set_tile "popup_dynblock_type" "0")
 
-              ;; Блокируем выпадающий список, если выбран не "Динамические блоки"
-              ;; или если динамических блоков нет
               (if (or (<= dynblock-cnt 0)
                       (and (not (eq *n1-tmp-choice* 'DYNBLOCK))
                            (not (eq *n1-tmp-choice* 'ALL))))
@@ -632,8 +620,7 @@
 
               ;; ---- Слои ----
               (setq base-layers (n1-layer-display-list layers))
-              ;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент в
-              ;; vl-catch-all-apply (список аргументов, хотя бы пустой)
+              ;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент
               (vl-catch-all-apply
                 '(lambda ()
                    (start_list "lst_layers")
@@ -666,7 +653,6 @@
                  (setq *n1-tmp-choice* 'ALL))
               )
 
-              ;; Блокируем кнопки для отсутствующих типов
               (if (<= line-cnt 0)     (n1-safe-mode-tile "rb_line" 1))
               (if (<= mline-cnt 0)    (n1-safe-mode-tile "rb_mline" 1))
               (if (<= dynblock-cnt 0) (n1-safe-mode-tile "rb_dynblock" 1))
@@ -680,21 +666,23 @@
               (n1-safe-set-tile "chk_xls"  (if default-xls  "1" "0"))
               (n1-safe-set-tile "chk_acad" (if default-acad "1" "0"))
 
-              ;; ---- Обработчики радиокнопок (ручное управление) ----
+              ;; ---- Обработчики радиокнопок ----
               (n1-safe-action-tile "rb_line"     "(n1-select-radio \"rb_line\")")
               (n1-safe-action-tile "rb_mline"    "(n1-select-radio \"rb_mline\")")
               (n1-safe-action-tile "rb_dynblock" "(n1-select-radio \"rb_dynblock\")")
               (n1-safe-action-tile "rb_both"     "(n1-select-radio \"rb_both\")")
 
               ;; ---- Обработчик выпадающего списка типов блоков ----
-              ;; ДОБАВЛЕНО (Этап 3.1)
               (n1-safe-action-tile "popup_dynblock_type"
                 "(n1-on-dynblock-type-changed $value)")
 
+              ;; ИСПРАВЛЕНО (Р2.4): обработка десятичной запятой
+              ;; В русской локали пользователь вводит "3,5",
+              ;; а atof ожидает "3.5"
               (n1-safe-action-tile "edt_stock"
-                "(setq *n1-tmp-stock* (atof $value))")
+                "(setq *n1-tmp-stock* (atof (vl-string-translate \",\" \".\" $value)))")
               (n1-safe-action-tile "edt_kerf"
-                "(setq *n1-tmp-kerf* (atof $value))")
+                "(setq *n1-tmp-kerf* (atof (vl-string-translate \",\" \".\" $value)))")
 
               (n1-safe-action-tile "chk_xls"
                 "(setq *n1-tmp-chk-xls* (= $value \"1\"))")
@@ -708,7 +696,6 @@
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
 
-              ;; ОБНОВЛЕНО (Этап 3.1): добавлен 7-й элемент — выбранный тип
               (if (= result 1)
                 (list
                   *n1-tmp-choice*
@@ -797,7 +784,6 @@
 
 ;; ============================================================
 ;; Вывод неразмещённых деталей в консоль
-;; ОБНОВЛЕНО (Этап 3.2): сортировка по убыванию длины
 ;; ============================================================
 (defun n1-report-oversized (oversized stock / rec total-cnt sorted)
   (if oversized
@@ -806,8 +792,6 @@
       (princ "\n=== НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ ===")
       (princ (strcat "\n(длина превышает хлыст " (rtos stock 2 0) " мм)"))
 
-      ;; Сортировка по убыванию длины
-      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
       (setq sorted (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
 
       (setq total-cnt 0)
@@ -821,15 +805,26 @@
   )
 )
 
-(defun n1-list-to-str (lst / s x)
+;; ============================================================
+;; Преобразование списка длин в строку
+;; ИСПРАВЛЕНО (Р2.1): добавлен параметр разделителя
+;;
+;; Использование:
+;;   (n1-list-to-str pieces " ")  — для консоли и таблицы
+;;   (n1-list-to-str pieces ";")  — для CSV
+;;   (n1-list-to-str pieces ", ") — для XLS
+;; ============================================================
+(defun n1-list-to-str (lst sep / s x)
+  (if (null sep) (setq sep " "))
   (setq s "")
-  (foreach x lst (setq s (strcat s (if (= s "") "" " ") (itoa (fix x)))))
+  (foreach x lst
+    (setq s (strcat s (if (= s "") "" sep) (itoa (fix x))))
+  )
   s
 )
 
 ;; ============================================================
 ;; Раскладка хлыстов
-;; ИСПРАВЛЕНО (Этап 3.3): коэффициент смещения надписи 2.25 ? 2.75
 ;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util
@@ -860,7 +855,6 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    ;; ИСПРАВЛЕНО (Этап 3.3): смещение надписи левее
     (setq labelX (- x0 (* barHeight 2.75)))
     (setq labelY1 (+ y0 (* barHeight 0.65)))
     (setq labelY2 (+ y0 (* barHeight 0.20)))
@@ -917,14 +911,11 @@
   (setq kpd (if (> stock-total-mm 0)
               (* 100.0 (/ (float total-product-mm) (float stock-total-mm))) 0.0))
 
-  ;; Сортировка длин изделий от большего к меньшему
   (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
   (setq num-piece-rows (length pieces))
 
   (setq left (car insPt) top (cadr insPt))
 
-  ;; Высота: pad сверху + pad снизу + 11 базовых строк + N строк изделий
-  ;; + 1 строка "Неразмещенные" (если oversized)
   (setq tableH (+ (* pad 2)
                   (* (+ 11.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
 
@@ -933,7 +924,6 @@
 
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
-  ;; Без магического 100.0
   (setq y (- top pad rowH))
 
   (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
@@ -1000,7 +990,6 @@
 
 ;; ============================================================
 ;; Таблица неразмещённых деталей
-;; ОБНОВЛЕНО (Этап 3.2): сортировка по убыванию длины
 ;; ============================================================
 (defun n1-draw-oversized (oversized stock insPt /
     barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
@@ -1017,14 +1006,12 @@
       (foreach rec oversized (setq total-cnt (+ total-cnt (cadr rec))))
       (setq left (car insPt) top (cadr insPt))
 
-      ;; 4 базовые строки + N строк данных
       (setq tableH (+ pad pad-bottom (* (+ 4.0 (length oversized)) rowH)))
       (setq bottom (- top tableH))
       (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
 
       (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
-      ;; Без магического 100.0
       (setq y (- top pad rowH))
 
       (n1-draw-text (list x1 y) (* th 1.3) "Неразмещенные детали" *NEST-COLOR-TITLE*)
@@ -1034,8 +1021,6 @@
                     (strcat "(длина превышает хлыст " (rtos stock 2 0) " мм)")
                     *NEST-COLOR-VALUE*)
 
-      ;; Сортировка по убыванию длины
-      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
       (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
 
       (setq y (- y rowH))
@@ -1068,6 +1053,10 @@
         (list (max (car (cadr b1)) (car (cadr b2)))
               (max (cadr (cadr b1)) (cadr (cadr b2))))))
 
+;; ============================================================
+;; Консольный отчёт по хлыстам
+;; ИСПРАВЛЕНО (Р2.1): параметр разделителя
+;; ============================================================
 (defun n1-report (bars stock kerf / i bar pieces waste used util)
   (princ (strcat "\nКоличество хлыстов: " (itoa (length bars))))
   (setq i 0)
@@ -1075,7 +1064,8 @@
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)))
-    (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces)
+    ;; ИСПРАВЛЕНО (Р2.1): разделитель " " для консоли
+    (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces " ")
                    " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1)
                    " | " (rtos util 2 1) "%"))
   )
@@ -1084,7 +1074,7 @@
 
 ;; ============================================================
 ;; XLS-экспорт
-;; ОБНОВЛЕНО (Этап 3.2): сортировка неразмещённых по убыванию
+;; ИСПРАВЛЕНО (Р2.1): параметр разделителя
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
                      num-bars stock-total-mm product-total-mm kpd /
@@ -1099,8 +1089,6 @@
     (progn
       (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
 
-      ;; Сортировка по убыванию длины
-      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
       (if oversized
         (progn
           (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
@@ -1336,6 +1324,7 @@
       (write-line "   </Row>" f)
 
       ;; Данные по хлыстам
+      ;; ИСПРАВЛЕНО (Р2.1): разделитель " " для XLS
       (setq i 0)
       (foreach bar bars
         (setq i (1+ i))
@@ -1343,7 +1332,7 @@
               util (* 100.0 (/ used stock)))
         (write-line "   <Row>" f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces " ") "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos used 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos waste 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos util 2 1) "</Data></Cell>") f)
@@ -1398,7 +1387,6 @@
       (write-line "   </Row>" f)
 
       ;; Секция неразмещённых (столбцы B-D)
-      ;; oversized уже отсортирован по убыванию выше
       (if oversized
         (progn
           (write-line "   <Row>" f)
@@ -1440,7 +1428,7 @@
 )
 
 ;; ---------- CSV-экспорт (fallback) ----------
-;; ОБНОВЛЕНО (Этап 3.2): сортировка неразмещённых по убыванию
+;; ИСПРАВЛЕНО (Р2.1): разделитель ";" для CSV
 (defun n1-write-csv (bars stock kerf oversized /
                        fname f i bar pieces waste used util rec
                        total-cnt-unplaced total-sum-unplaced)
@@ -1456,14 +1444,15 @@
         (setq i (1+ i))
         (setq pieces (cdr bar) waste (car bar) used (- stock waste)
               util (* 100.0 (/ used stock)))
-        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces) ";"
+                ;; ИСПРАВЛЕНО (Р2.1): пробел как разделитель деталей,
+        ;; ИСПРАВЛЕНО: запятая как разделитель деталей внутри колонки.
+        ;; Без кавычек. Корректно обрабатывается Excel при разделителе ";"
+        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces ", ") ";"
                             (rtos used 2 1) ";" (rtos waste 2 1) ";"
                             (rtos util 2 1)) f)
       )
       (if oversized
         (progn
-          ;; Сортировка по убыванию длины
-          ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
           (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
 
           (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
@@ -1496,7 +1485,6 @@
 
 ;; ============================================================
 ;; Главная функция
-;; ОБНОВЛЕНО (Этап 3.1): фильтрация по типу блока
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
@@ -1527,6 +1515,8 @@
     (setq layers layers-from-caller)
   )
 
+  ;; ОБНОВЛЕНО: передаём T для отображения суффикса
+  ;; "(за исключением слоя 0)"
   (princ (strcat "\n" (car (n1-layer-display-list layers))))
 
   ;; 2. Выбор объектов
@@ -1576,7 +1566,6 @@
 
   (setq tol *CUTLINE-DEFAULT-TOL*)
 
-  ;; ОБНОВЛЕНО (Этап 3.1): передача набора для сбора типов блоков
   (setq r (vl-catch-all-apply
             'n1-cutline-dialog
             (list line-cnt mline-cnt dynblock-cnt ss *CUTLINE-DEFAULT-TOL*
@@ -1595,7 +1584,6 @@
     (T (setq dialog-result r))
   )
 
-  ;; ОБНОВЛЕНО (Этап 3.1): извлечение выбранного типа блока
   (setq user-filter   (car dialog-result)
         tol           (cadr dialog-result)
         stock         (caddr dialog-result)
@@ -1612,7 +1600,6 @@
   (princ "\nПараметры приняты из окна диалога.")
 
   ;; 2в. Фильтрация
-  ;; ОБНОВЛЕНО (Этап 3.1): фильтрация DYNBLOCK по типу блока
   (cond
     ((eq user-filter 'LINE)
      (setq ss (n1-filter-ss-by-type ss "LINE"))
@@ -1635,9 +1622,10 @@
   (setq type-counts (n1-count-by-type ss))
   (n1-print-type-counts type-counts)
 
+  ;; ОБНОВЛЕНО: показываем дробную часть для реза
   (princ (strcat "\nПараметры: допуск " (rtos tol 2 2)
                  " мм, хлыст " (rtos stock 2 0)
-                 " мм, рез " (rtos kerf 2 0) " мм."))
+                 " мм, рез " (rtos kerf 2 2) " мм."))
   (princ (strcat "\nЭкспорт: "
                  (if export-xls  ".xls" "без .xls") ", "
                  (if export-acad "таблица AutoCAD" "без таблицы")))

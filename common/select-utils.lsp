@@ -22,6 +22,12 @@
 ;;;   su-get-dynblock-type-name  — имя типа блока (Видимость или имя)
 ;;;   su-collect-dynblock-types  — сбор уникальных типов
 ;;
+;;; ИСПРАВЛЕНО (Этап Р2 — Ремонт кода):
+;;;   Р2.2: обнуление *extraction-preselected-set* перенесено
+;;;         после проверки результата. Если фильтрация вернула
+;;;         пустой результат, предварительный выбор сохраняется
+;;;         для повторной попытки.
+;;
 ;;; ПРАВИЛА ОТСЕИВАНИЯ (зафиксированы):
 ;;;   Блок принимается в раскрой хлыстов, если:
 ;;;     ? Есть свойство "ДЛИНА" (точное совпадение)
@@ -31,7 +37,9 @@
 ;;; ============================================================
 (vl-load-com)
 
+;; ============================================================
 ;; Проверка, принадлежит ли слой выбранному списку
+;; ============================================================
 (defun su-layer-selected-p (layer layers / x)
   (if (null layers)
     T
@@ -47,7 +55,9 @@
   )
 )
 
+;; ============================================================
 ;; Преобразование значения в число
+;; ============================================================
 (defun su-value-to-number (value / x s)
   (cond
     ((numberp value)
@@ -81,14 +91,17 @@
   )
 )
 
+;; ============================================================
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
+;; ============================================================
 (defun su-select-inserts (layers / ss i ent data layer out layer-name)
   (setq out '())
 
   (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
     (progn
       (setq ss *extraction-preselected-set*)
-      (setq *extraction-preselected-set* nil)
+      ;; ИСПРАВЛЕНО (Р2.2): обнуляем только если результат непустой
+      ;; (см. проверку после фильтрации ниже)
     )
     (setq ss (ssget "_I"))
   )
@@ -125,10 +138,21 @@
     )
   )
 
+  ;; ИСПРАВЛЕНО (Р2.2): обнуляем предварительный выбор
+  ;; только если результат непустой
+  (if (and (boundp '*extraction-preselected-set*)
+           *extraction-preselected-set*)
+    (if out
+      (setq *extraction-preselected-set* nil)
+    )
+  )
+
   (reverse out)
 )
 
+;; ============================================================
 ;; Защищённое получение EffectiveName
+;; ============================================================
 (defun su-get-effective-name (obj / r name)
   (setq r
     (vl-catch-all-apply
@@ -153,7 +177,9 @@
   )
 )
 
+;; ============================================================
 ;; Получение строкового значения видимости
+;; ============================================================
 (defun su-get-visibility (obj / dynprops prop pname val result s)
   (setq dynprops
     (vl-catch-all-apply
@@ -343,8 +369,11 @@
 ;; ============================================================
 (defun su-is-valid-stock-block (obj)
   (and
+    ;; Есть точное свойство "ДЛИНА"
     (su-has-length-property obj)
+    ;; НЕТ "ШИРИНА"
     (not (su-has-width-property obj))
+    ;; НЕТ "ВЫСОТА"
     (not (su-has-height-property obj))
   )
 )
@@ -679,17 +708,12 @@
   )
 )
 
-
 ;; ============================================================
 ;; Извлечение исходного набора объектов для CUTLINE
-;; ОБНОВЛЕНО (Этап 2.2): пояснение о результатах пост-фильтрации
-;;
-;; Приоритет источников:
-;;   1. *extraction-preselected-set* (предварительный выбор)
-;;   2. Интерактивный выбор рамкой через ssget
-;;   3. Пост-фильтрация динамических блоков
+;; ИСПРАВЛЕНО (Р2.2): предвыбор НЕ обнуляется при пустом
+;; результате фильтрации — сохраняется для повторной попытки
 ;; ============================================================
-(defun su-select-cutline-objects (layers / ss ssfilter raw-count)
+(defun su-select-cutline-objects (layers / ss ssfilter raw-count pre-ss)
   (setq ss nil)
   (setq ssfilter (su-build-cutline-ssfilter layers))
 
@@ -697,39 +721,37 @@
   (if (and (boundp '*extraction-preselected-set*)
            *extraction-preselected-set*)
     (progn
-      (setq ss
-        (su-filter-ss-cutline
-          *extraction-preselected-set*
-          *su-cutline-types*
-          layers))
-      (setq *extraction-preselected-set* nil)
+      (setq pre-ss *extraction-preselected-set*)
+      (setq ss (su-filter-ss-cutline pre-ss *su-cutline-types* layers))
+
+      (if (and ss (> (sslength ss) 0))
+        ;; Успех — обнуляем предвыбор
+        (setq *extraction-preselected-set* nil)
+        ;; Пустой результат — сохраняем предвыбор для повторной попытки
+        (setq ss nil)
+      )
     )
   )
 
-  ;; Шаг 2: Если нет предварительного выбора — пробуем _I
+  ;; Шаг 2: Если предвыбор не дал результата — текущий выбор в чертеже
   (if (null ss)
     (setq ss (ssget "_I" ssfilter))
   )
 
-  ;; Шаг 3: Если ничего не выбрано — интерактивный выбор рамкой
+  ;; Шаг 3: Интерактивный выбор рамкой
   (if (null ss)
     (setq ss (ssget ssfilter))
   )
 
   ;; Шаг 4: Пост-фильтрация динамических блоков
-  ;; ДОБАВЛЕНО: сохранение количества до фильтрации для пояснения
   (if ss
     (progn
       (setq raw-count (sslength ss))
       (setq ss (su-filter-dynblocks ss))
-      
-      ;; Пояснение о пост-фильтрации
-      (if (and ss raw-count)
-        (if (< (sslength ss) raw-count)
-          (princ (strcat "\n  После пост-фильтрации отсеяно: "
-                         (itoa (- raw-count (sslength ss)))
-                         " непригодных объектов (динамические блоки без свойства 'Длина' или с 'Ширина'/'Высота')"))
-        )
+      (if (and ss raw-count (< (sslength ss) raw-count))
+        (princ (strcat "\n  После пост-фильтрации отсеяно: "
+                       (itoa (- raw-count (sslength ss)))
+                       " непригодных объектов (динамические блоки без свойства 'Длина' или с 'Ширина'/'Высота')"))
       )
     )
   )
