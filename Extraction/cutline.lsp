@@ -590,7 +590,7 @@
 
 (defun n1-list-to-str (lst / s x)
   (setq s "")
-  (foreach x lst (setq s (strcat s (if (= s "") "" " ") (itoa (fix x)))))
+  (foreach x lst (setq s (strcat s (if (= s "") "" " + ") (itoa (fix x)))))
   s
 )
 
