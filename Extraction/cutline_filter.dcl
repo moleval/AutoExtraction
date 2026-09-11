@@ -1,5 +1,6 @@
 // ============================================================
 // cutline_filter.dcl — Параметры раскроя хлыстов CUTLINE
+// ОБНОВЛЕНО (Этап 2.4): добавлена радиокнопка "Динамические блоки"
 // ============================================================
 
 cutline_filter_dialog : dialog {
@@ -7,6 +8,7 @@ cutline_filter_dialog : dialog {
 
   // ----------------------------------------------------------
   // ТИПЫ ДЛЯ РАСКРОЯ (с количеством справа, прижатым к краю)
+  // ОБНОВЛЕНО (Этап 2.4): 4 радиокнопки вместо 3
   // ----------------------------------------------------------
   : boxed_column {
     label = "Какие детали раскроить";
@@ -16,9 +18,7 @@ cutline_filter_dialog : dialog {
         key = "rb_line";
         label = "Только линии";
       }
-      : spacer {
-       width = 11;
-      }
+      : spacer { }
       : text {
         key = "txt_line_count";
         label = "";
@@ -31,9 +31,7 @@ cutline_filter_dialog : dialog {
         key = "rb_mline";
         label = "Только мультилинии";
       }
-      : spacer {
-       width = 2;
-      }
+      : spacer { }
       : text {
         key = "txt_mline_count";
         label = "";
@@ -43,12 +41,23 @@ cutline_filter_dialog : dialog {
 
     : row {
       : radio_button {
-        key = "rb_both";
-        label = "Линии + мультилинии";
+        key = "rb_dynblock";
+        label = "Динамические блоки";
       }
-      : spacer {
-       width = 0;
-      }     
+      : spacer { }
+      : text {
+        key = "txt_dynblock_count";
+        label = "";
+        alignment = right;
+      }
+    }
+
+    : row {
+      : radio_button {
+        key = "rb_both";
+        label = "Все типы";
+      }
+      : spacer { }
       : text {
         key = "txt_both_count";
         label = "";

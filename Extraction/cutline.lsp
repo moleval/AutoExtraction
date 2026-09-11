@@ -3,18 +3,31 @@
 ;;; Команда: CUTLINE / РАСКРОЙХЛЫСТА
 ;;; Объекты: LINE, MLINE, динамические блоки с свойством "Длина"
 ;;; Алгоритм: First-Fit Decreasing (FFD)
-;;
+;;;
 ;;; ПОДДЕРЖИВАЕМЫЕ ТИПЫ:
 ;;;   LINE      — обычные линии
 ;;;   MLINE     — мультилинии (длина по осевой трассе)
 ;;;   DYNBLOCK  — динамические блоки со свойством "Длина"
 ;;;               (блоки со свойством "Ширина" или "Высота" отсеиваются)
-;;
+;;;
 ;;; ЭТАПЫ ВНЕДРЕНИЯ ДИНАМИЧЕСКИХ БЛОКОВ:
 ;;;   Этап 2.1: Функции анализа блоков (в select-utils.lsp)
 ;;;   Этап 2.2: Выбор блоков (в select-utils.lsp)
-;;;   Этап 2.3: Обработка блоков в алгоритме раскроя (этот файл)
-;;;   Этап 2.4: Диалог с 4 радиокнопками (следующий этап)
+;;;   Этап 2.3: Обработка блоков в алгоритме раскроя
+;;;   Этап 2.4: Диалог с 4 радиокнопками
+;;;
+;;; ТИПЫ РАСКРОЯ (диалог):
+;;;   Только линии
+;;;   Только мультилинии
+;;;   Динамические блоки
+;;;   Все типы
+;;;
+;;; ИСПРАВЛЕНО (аудит):
+;;;   - n1-draw-text: защита от nil-цвета
+;;;   - n1-draw-summary: убрано магическое 100.0, точный расчёт tableH
+;;;   - n1-draw-oversized: исправлена опечатка *NEСТ-COLOR-HEADER*
+;;;                        (латиница) ? *NEST-COLOR-HEADER*
+;;;   - n1-draw-oversized: убрано магическое 100.0
 ;;; ============================================================
 (vl-load-com)
 
@@ -40,7 +53,7 @@
 ;; =============================================
 
 (if (not (boundp '*n1-tmp-choice*))
-  (setq *n1-tmp-choice* 'BOTH))
+  (setq *n1-tmp-choice* 'ALL))
 
 (if (not (boundp '*n1-tmp-stock*))   (setq *n1-tmp-stock* *CUTLINE-DEFAULT-STOCK*))
 (if (not (boundp '*n1-tmp-kerf*))    (setq *n1-tmp-kerf*  *CUTLINE-DEFAULT-KERF*))
@@ -119,10 +132,15 @@
   (if pair (cdr pair) 7)
 )
 
-(defun n1-draw-text (pt h str color / style)
+;; ============================================================
+;; ИСПРАВЛЕНО: защита от nil-цвета
+;; ============================================================
+(defun n1-draw-text (pt h str color / style c)
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
-  (entmake (list (cons 0 "TEXT") (cons 62 color) (cons 7 style)
+  ;; ЗАЩИТА: если color nil или не число — используем 7
+  (setq c (if (and color (numberp color)) color 7))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
@@ -223,7 +241,6 @@
 
 ;; ============================================================
 ;; Подсчёт объектов по типам
-;; ОБНОВЛЕНО (Этап 2.3): добавлен подсчёт пригодных динамических блоков
 ;; ============================================================
 (defun n1-count-by-type (ss / i ent typ counts found obj len)
   (setq counts '(("LINE" . 0) ("MLINE" . 0) ("DYNBLOCK" . 0)) i 0)
@@ -231,12 +248,10 @@
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
     (cond
-      ;; LINE и MLINE — считаем напрямую
       ((or (= typ "LINE") (= typ "MLINE"))
        (setq found (assoc typ counts))
        (if found (setq counts (subst (cons typ (1+ (cdr found))) found counts)))
       )
-      ;; INSERT — проверяем пригодность через su-is-valid-stock-block
       ((= typ "INSERT")
        (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
        (if (and
@@ -254,10 +269,6 @@
   counts
 )
 
-;; ============================================================
-;; Вывод количества объектов по типам
-;; ОБНОВЛЕНО (Этап 2.3): добавлен вывод "дин. блоков"
-;; ============================================================
 (defun n1-print-type-counts (counts / s rec)
   (setq s "")
   (foreach rec counts
@@ -276,21 +287,15 @@
   )
 )
 
-;; ============================================================
-;; Фильтрация набора по типу
-;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка DYNBLOCK
-;; ============================================================
 (defun n1-filter-ss-by-type (ss typ / i ent new-ss ent-typ obj)
   (setq new-ss (ssadd) i 0)
   (repeat (sslength ss)
     (setq ent (ssname ss i))
     (setq ent-typ (cdr (assoc 0 (entget ent))))
     (cond
-      ;; LINE и MLINE — простая проверка типа
       ((or (= typ "LINE") (= typ "MLINE"))
        (if (= ent-typ typ) (ssadd ent new-ss))
       )
-      ;; DYNBLOCK — проверка пригодности через su-is-valid-stock-block
       ((= typ "DYNBLOCK")
        (if (= ent-typ "INSERT")
          (progn
@@ -303,7 +308,6 @@
          )
        )
       )
-      ;; ALL — все типы уже отфильтрованы на этапе выбора
       ((= typ "ALL")
        (ssadd ent new-ss)
       )
@@ -353,26 +357,27 @@
 ;; Ручное управление радиокнопками
 ;; ============================================================
 (defun n1-select-radio (selected / keys k)
-  (setq keys '("rb_line" "rb_mline" "rb_both"))
+  (setq keys '("rb_line" "rb_mline" "rb_dynblock" "rb_both"))
   (foreach k keys
     (n1-safe-set-tile k (if (= k selected) "1" "0"))
   )
   (cond
-    ((= selected "rb_line")  (setq *n1-tmp-choice* 'LINE))
-    ((= selected "rb_mline") (setq *n1-tmp-choice* 'MLINE))
-    ((= selected "rb_both")  (setq *n1-tmp-choice* 'BOTH))
+    ((= selected "rb_line")     (setq *n1-tmp-choice* 'LINE))
+    ((= selected "rb_mline")    (setq *n1-tmp-choice* 'MLINE))
+    ((= selected "rb_dynblock") (setq *n1-tmp-choice* 'DYNBLOCK))
+    ((= selected "rb_both")     (setq *n1-tmp-choice* 'ALL))
   )
 )
 
 ;; ============================================================
 ;; Диалог параметров раскроя
 ;; ============================================================
-(defun n1-cutline-dialog (line-cnt mline-cnt
+(defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           default-tol default-stock default-kerf
                           layers
                           default-xls default-acad
                           / dcl-file dcl-id result
-                            both-cnt base-layers)
+                            all-cnt base-layers)
 
   (setq dcl-file (findfile "cutline_filter.dcl"))
 
@@ -389,7 +394,7 @@
           nil
         )
         (progn
-          (setq *n1-tmp-choice* 'BOTH)
+          (setq *n1-tmp-choice* 'ALL)
           (setq *n1-tmp-stock* default-stock)
           (setq *n1-tmp-kerf* default-kerf)
           (setq *n1-tmp-chk-xls* default-xls)
@@ -403,17 +408,17 @@
               nil
             )
             (progn
-              (setq both-cnt (+ line-cnt mline-cnt))
+              (setq all-cnt (+ line-cnt mline-cnt dynblock-cnt))
 
-              ;; ---- Количество напротив радиокнопок ----
               (n1-safe-set-tile "txt_line_count"
                 (strcat (itoa line-cnt) " шт."))
               (n1-safe-set-tile "txt_mline_count"
                 (strcat (itoa mline-cnt) " шт."))
+              (n1-safe-set-tile "txt_dynblock_count"
+                (strcat (itoa dynblock-cnt) " шт."))
               (n1-safe-set-tile "txt_both_count"
-                (strcat (itoa both-cnt) " шт."))
+                (strcat (itoa all-cnt) " шт."))
 
-              ;; ---- Слои ----
               (setq base-layers (n1-layer-display-list layers))
               (vl-catch-all-apply
                 '(lambda ()
@@ -421,43 +426,45 @@
                    (foreach l base-layers (add_list l))
                    (end_list)))
 
-              ;; ---- Радиокнопки: начальное состояние ----
               (cond
                 ((and (> line-cnt 0) (> mline-cnt 0))
                  (n1-safe-set-tile "rb_both" "1")
-                 (setq *n1-tmp-choice* 'BOTH))
+                 (setq *n1-tmp-choice* 'ALL))
+                ((and (> line-cnt 0) (> dynblock-cnt 0))
+                 (n1-safe-set-tile "rb_both" "1")
+                 (setq *n1-tmp-choice* 'ALL))
+                ((and (> mline-cnt 0) (> dynblock-cnt 0))
+                 (n1-safe-set-tile "rb_both" "1")
+                 (setq *n1-tmp-choice* 'ALL))
                 ((> line-cnt 0)
                  (n1-safe-set-tile "rb_line" "1")
                  (setq *n1-tmp-choice* 'LINE))
                 ((> mline-cnt 0)
                  (n1-safe-set-tile "rb_mline" "1")
                  (setq *n1-tmp-choice* 'MLINE))
+                ((> dynblock-cnt 0)
+                 (n1-safe-set-tile "rb_dynblock" "1")
+                 (setq *n1-tmp-choice* 'DYNBLOCK))
                 (T
                  (n1-safe-set-tile "rb_both" "1")
-                 (setq *n1-tmp-choice* 'BOTH))
+                 (setq *n1-tmp-choice* 'ALL))
               )
 
-              (if (<= line-cnt 0)
-                (progn
-                  (n1-safe-mode-tile "rb_line" 1)
-                  (n1-safe-mode-tile "rb_both" 1)))
-              (if (<= mline-cnt 0)
-                (progn
-                  (n1-safe-mode-tile "rb_mline" 1)
-                  (n1-safe-mode-tile "rb_both" 1)))
+              (if (<= line-cnt 0)     (n1-safe-mode-tile "rb_line" 1))
+              (if (<= mline-cnt 0)    (n1-safe-mode-tile "rb_mline" 1))
+              (if (<= dynblock-cnt 0) (n1-safe-mode-tile "rb_dynblock" 1))
+              (if (<= all-cnt 0)      (n1-safe-mode-tile "rb_both" 1))
 
-              ;; ---- Параметры ----
               (n1-safe-set-tile "edt_stock" (rtos default-stock 2 0))
               (n1-safe-set-tile "edt_kerf"  (rtos default-kerf 2 0))
 
-              ;; ---- Экспорт ----
               (n1-safe-set-tile "chk_xls"  (if default-xls  "1" "0"))
               (n1-safe-set-tile "chk_acad" (if default-acad "1" "0"))
 
-              ;; ---- Обработчики радиокнопок (ручное управление) ----
-              (n1-safe-action-tile "rb_line"  "(n1-select-radio \"rb_line\")")
-              (n1-safe-action-tile "rb_mline" "(n1-select-radio \"rb_mline\")")
-              (n1-safe-action-tile "rb_both"  "(n1-select-radio \"rb_both\")")
+              (n1-safe-action-tile "rb_line"     "(n1-select-radio \"rb_line\")")
+              (n1-safe-action-tile "rb_mline"    "(n1-select-radio \"rb_mline\")")
+              (n1-safe-action-tile "rb_dynblock" "(n1-select-radio \"rb_dynblock\")")
+              (n1-safe-action-tile "rb_both"     "(n1-select-radio \"rb_both\")")
 
               (n1-safe-action-tile "edt_stock"
                 "(setq *n1-tmp-stock* (atof $value))")
@@ -497,7 +504,6 @@
 
 ;; ============================================================
 ;; Извлечение длин
-;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка динамических блоков
 ;; ============================================================
 (defun n1-extract-pieces (ss tol min-len max-len /
                             i ent typ len key pieces total
@@ -508,20 +514,15 @@
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
 
-    ;; Извлечение длины в зависимости от типа объекта
     (cond
-      ;; MLINE — длина по осевой трассе
       ((= typ "MLINE")
        (setq len (n1-mline-length ent))
       )
-      ;; LINE — длина через vlax-curve
       ((= typ "LINE")
        (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
                    (list ent (vlax-curve-getEndParam ent))))
        (if (vl-catch-all-error-p len) (setq len nil))
       )
-      ;; INSERT (динамический блок) — длина из свойства "Длина"
-      ;; ДОБАВЛЕНО (Этап 2.3)
       ((= typ "INSERT")
        (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
        (if (not (vl-catch-all-error-p obj))
@@ -529,11 +530,9 @@
          (setq len nil)
        )
       )
-      ;; Неизвестный тип
       (T (setq len nil))
     )
 
-    ;; Обработка извлечённой длины
     (cond
       ((or (null len) (not (numberp len)) (<= len 0.0))
        (setq skipped (1+ skipped)))
@@ -594,8 +593,6 @@
 
 ;; ============================================================
 ;; Раскладка хлыстов
-;; Надпись "Хлыст N" и "[X%]" в столбик, близко к хлысту,
-;; вертикально по центру изображения хлыста
 ;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util
@@ -626,7 +623,6 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    ;; Надпись в столбик, близко к хлысту
     (setq labelX (- x0 (* barHeight 2.25)))
     (setq labelY1 (+ y0 (* barHeight 0.65)))
     (setq labelY2 (+ y0 (* barHeight 0.20)))
@@ -656,18 +652,21 @@
     )
     (setq y0 (- y0 barHeight gap))
   )
-  ;; Bbox с учётом новой позиции надписи
   (list (list (- x0 (* barHeight 2.0)) miny) (list (+ x0 stock) maxy))
 )
 
 ;; ============================================================
 ;; Сводная таблица раскроя
+;; ИСПРАВЛЕНО:
+;;   - убрано магическое 100.0, y привязан к pad и rowH
+;;   - точный расчёт tableH
 ;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
     barHeight th rowH pad col1W col2W col3W tableW tableH
     left top x1 x2 x3 y bottom
     num-bars stock-total-mm stock-total-m
-    total-cnt total-product-mm total-product-m kpd rec oversized-cnt)
+    total-cnt total-product-mm total-product-m kpd rec oversized-cnt
+    num-piece-rows)
   (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
         rowH (* barHeight 0.6) pad (* barHeight 0.6)
         col1W (* barHeight 5.0) col2W (* barHeight 3.5) col3W (* barHeight 4.5))
@@ -682,33 +681,48 @@
   (setq total-product-m (/ total-product-mm 1000.0))
   (setq kpd (if (> stock-total-mm 0)
               (* 100.0 (/ (float total-product-mm) (float stock-total-mm))) 0.0))
+
+  ;; Сортировка длин изделий от большего к меньшему
+  (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
+  (setq num-piece-rows (length pieces))
+
   (setq left (car insPt) top (cadr insPt))
+
+  ;; Высота: pad сверху + pad снизу + 11 базовых строк + N строк изделий
+  ;; + 1 строка "Неразмещенные" (если oversized)
   (setq tableH (+ (* pad 2)
-                  (* (+ 11.0 (length pieces) (if oversized 1 0)) rowH)))
+                  (* (+ 11.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
+
   (setq bottom (- top tableH))
   (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
+
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
-  (setq y (- top pad 100.0))
+
+  ;; ИСПРАВЛЕНО: без магического 100.0
+  (setq y (- top pad rowH))
+
   (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
-  (setq y (- y rowH) y (- y (* rowH 0.5)))
+
+  (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Длина" *NEST-COLOR-HEADER*)
+
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Хлыст, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
+
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th (itoa (fix stock)) *NEST-COLOR-VALUE*)
   (n1-draw-text (list x2 y) th (itoa num-bars) *NEST-COLOR-VALUE*)
   (n1-draw-text (list x3 y) th (rtos stock-total-m 2 2) *NEST-COLOR-VALUE*)
-  (setq y (- y rowH) y (- y (* rowH 0.5)))
+
+  (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Изделия" *NEST-COLOR-HEADER*)
+
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
-  ;; Сортировка длин изделий от большего к меньшему
-  ;; ДОБАВЛЕНО: по запросу пользователя
-  (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
 
   (setq y (- y rowH))
   (foreach rec pieces
@@ -719,6 +733,7 @@
                   (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-VALUE*)
     (setq y (- y rowH))
   )
+
   (setq y (- y (* rowH 0.5)))
   (n1-draw-text (list x1 y) th (strcat "Всего изделий: " (itoa total-cnt) " шт")
                 *NEST-COLOR-VALUE*)
@@ -730,6 +745,7 @@
   (n1-draw-text (list x1 y) (* th 1.2)
                 (strcat "КПД использования: " (rtos kpd 2 1) " %")
                 *NEST-COLOR-KPD*)
+
   (if oversized
     (progn
       (setq oversized-cnt 0)
@@ -743,11 +759,15 @@
                     *NEST-COLOR-KPD*)
     )
   )
+
   (list (list left bottom) (list (+ left tableW) top))
 )
 
 ;; ============================================================
 ;; Таблица неразмещённых деталей
+;; ИСПРАВЛЕНО:
+;;   - *NEСТ-COLOR-HEADER* ? *NEST-COLOR-HEADER*
+;;   - убрано магическое 100.0
 ;; ============================================================
 (defun n1-draw-oversized (oversized stock insPt /
     barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
@@ -763,20 +783,30 @@
       (setq total-cnt 0)
       (foreach rec oversized (setq total-cnt (+ total-cnt (cadr rec))))
       (setq left (car insPt) top (cadr insPt))
+
+      ;; 4 базовые строки + N строк данных
       (setq tableH (+ pad pad-bottom (* (+ 4.0 (length oversized)) rowH)))
       (setq bottom (- top tableH))
       (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
+
       (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
-      (setq y (- top pad 100.0))
+
+      ;; ИСПРАВЛЕНО: без магического 100.0
+      (setq y (- top pad rowH))
+
       (n1-draw-text (list x1 y) (* th 1.3) "Неразмещенные детали" *NEST-COLOR-TITLE*)
+
       (setq y (- y rowH))
       (n1-draw-text (list x1 y) th
                     (strcat "(длина превышает хлыст " (rtos stock 2 0) " мм)")
                     *NEST-COLOR-VALUE*)
-      (setq y (- y rowH) y (- y (* rowH 0.5)))
+
+      (setq y (- y rowH))
       (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
       (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
+      ;; ИСПРАВЛЕНО: было *NEСТ-COLOR-HEADER* (латиница) — приводило к nil-цвету
       (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
+
       (setq y (- y rowH))
       (foreach rec oversized
         (n1-draw-text (list x1 y) th (itoa (fix (car rec))) *NEST-COLOR-VALUE*)
@@ -786,9 +816,11 @@
                       *NEST-COLOR-VALUE*)
         (setq y (- y rowH))
       )
+
       (setq y (- y (* rowH 0.5)))
       (n1-draw-text (list x1 y) th (strcat "Всего: " (itoa total-cnt) " шт")
                     *NEST-COLOR-KPD*)
+
       (list (list left bottom) (list (+ left tableW) top))
     )
   )
@@ -815,7 +847,7 @@
 )
 
 ;; ============================================================
-;; XLS-экспорт (столбцы: таблица раскроя + отчёт на B-D)
+;; XLS-экспорт
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
                      num-bars stock-total-mm product-total-mm kpd /
@@ -1215,10 +1247,6 @@
 
 ;; ============================================================
 ;; Главная функция
-;; ОБНОВЛЕНО (Этап 2.3):
-;;   - Сообщение о выборе объектов
-;;   - Снятие визуального выделения после пост-фильтрации
-;;   - Поддержка DYNBLOCK в фильтрации
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
@@ -1228,7 +1256,7 @@
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
                        layers layers-str total-input type-counts
-                       user-filter line-cnt mline-cnt
+                       user-filter line-cnt mline-cnt dynblock-cnt
                        export-xls export-acad
                        default-xls default-acad
                        default-stock default-kerf
@@ -1252,13 +1280,9 @@
   (princ (strcat "\n" (car (n1-layer-display-list layers))))
 
   ;; 2. Выбор объектов
-  ;; ОБНОВЛЕНО (Этап 2.3): актуальное сообщение о типах объектов
   (princ "\nВыберите объекты — исходные детали:")
   (princ "\n(принимаются LINE, MLINE и динамические блоки с длиной)")
   (princ "\n(если объекты уже выделены — Enter)")
-
-  ;; ОБНОВЛЕНО (Этап 2.3): снимаем визуальное выделение,
-  ;; т.к. пост-фильтрация могла убрать часть объектов из набора
 
   (setq ss (su-select-cutline-objects layers))
 
@@ -1271,10 +1295,14 @@
   (setq type-counts (n1-count-by-type ss))
   (n1-print-type-counts type-counts)
 
-  (setq line-cnt  (cdr (assoc "LINE"  type-counts)))
-  (setq mline-cnt (cdr (assoc "MLINE" type-counts)))
+  (setq line-cnt     (cdr (assoc "LINE" type-counts)))
+  (setq mline-cnt    (cdr (assoc "MLINE" type-counts)))
+  (setq dynblock-cnt (cdr (assoc "DYNBLOCK" type-counts)))
+  (if (null line-cnt)     (setq line-cnt 0))
+  (if (null mline-cnt)    (setq mline-cnt 0))
+  (if (null dynblock-cnt) (setq dynblock-cnt 0))
 
-  (if (and (= line-cnt 0) (= mline-cnt 0))
+  (if (and (= line-cnt 0) (= mline-cnt 0) (= dynblock-cnt 0))
     (progn
       (princ "\nНет объектов подходящих типов.")
       (princ) (exit)
@@ -1300,7 +1328,7 @@
 
   (setq r (vl-catch-all-apply
             'n1-cutline-dialog
-            (list line-cnt mline-cnt *CUTLINE-DEFAULT-TOL*
+            (list line-cnt mline-cnt dynblock-cnt *CUTLINE-DEFAULT-TOL*
                   default-stock default-kerf layers default-xls default-acad)))
 
   (cond
@@ -1331,7 +1359,6 @@
   (princ "\nПараметры приняты из окна диалога.")
 
   ;; 2в. Фильтрация
-  ;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка DYNBLOCK
   (cond
     ((eq user-filter 'LINE)
      (setq ss (n1-filter-ss-by-type ss "LINE"))
