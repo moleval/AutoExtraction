@@ -6,39 +6,28 @@
 ;;
 ;;; ПОДДЕРЖИВАЕМЫЕ ТИПЫ:
 ;;;   LINE      — обычные линии
-;;;   MLINE     — мультилинии (длина по осевой трассе)
+;;;   MLINE     — мультилинии (только прямые горизонтальные/
+;;;               вертикальные; тип = имя MLINESTYLE)
 ;;;   DYNBLOCK  — динамические блоки со свойством "Длина"
-;;;               (блоки со свойством "Ширина" или "Высота" отсеиваются)
 ;;
-;;; ЭТАПЫ ВНЕДРЕНИЯ ДИНАМИЧЕСКИХ БЛОКОВ:
-;;;   Этап 2.1: Функции анализа блоков (в select-utils.lsp)
-;;;   Этап 2.2: Выбор блоков (в select-utils.lsp)
-;;;   Этап 2.3: Обработка блоков в алгоритме раскроя
-;;;   Этап 2.4: Диалог с 4 радиокнопками
-;;;   Этап 3.1: Выпадающий список типов блоков
-;;;   Этап 3.2: Динамическое обновление количества блоков
-;;;             и сортировка неразмещённых деталей
-;;;   Этап 3.3: Косметические исправления
+;;; ЭТАПЫ:
+;;;   2.1-2.4: динамические блоки (анализ, выбор, раскрой, диалог)
+;;;   3.1-3.3: список типов блоков, пересчёт счётчика, косметика
+;;;   Р1-Р4:   ремонт кода (см. историю коммитов)
+;;;   M1:      типы мультилиний (имя MLINESTYLE) в select-utils
+;;;   M2:      диалог: список "Тип мультилинии", фильтр набора,
+;;;            длина MLINE по координатам, допуск осевости
 ;;
-;;; ИСПРАВЛЕНИЯ (Этап Р1 — Ремонт кода):
-;;;   Р1.2: добавлен третий аргумент в vl-catch-all-apply
-;;;         для заполнения списка слоёв в диалоге
-;;;   Р1.3: исправлена проверка размещения детали с учётом реза
-;;;         (было (> p stock), стало (> (+ p kerf) stock))
-;;
-;;; ИСПРАВЛЕНИЯ (Этап Р2 — Ремонт кода):
-;;;   Р2.1: параметр разделителя в n1-list-to-str.
-;;;         Для CSV используется ";" вместо пробела, чтобы
-;;;         Excel не интерпретировал "2000 2000" как число.
-;;;   Р2.4: обработка десятичной запятой в полях ввода.
-;;;         В русской локали пользователь вводит "3,5",
-;;;         а atof ожидает "3.5".
+;;; ПРАВИЛА ДЛЯ MLINE (редакция 2):
+;;;   - тип = имя MLINESTYLE (DXF 2)
+;;;   - длина по координатам (Coordinates)
+;;;   - кроются только прямые (2 вершины) горизонтальные/
+;;;     вертикальные; ломаные и диагональные отсеиваются
+;;;     со счётчиками в консоль
 ;;
 ;;; ТИПЫ РАСКРОЯ (диалог):
-;;;   Только линии
-;;;   Только мультилинии
-;;;   Динамические блоки
-;;;   Все типы
+;;;   Только линии / Только мультилинии /
+;;;   Динамические блоки / Все типы
 ;;; ============================================================
 (vl-load-com)
 
@@ -71,18 +60,28 @@
 (if (not (boundp '*n1-tmp-chk-xls*)) (setq *n1-tmp-chk-xls* T))
 (if (not (boundp '*n1-tmp-chk-acad*)) (setq *n1-tmp-chk-acad* T))
 
-;; ДОБАВЛЕНО (Этап 3.1): выбранный тип динамического блока
-;; "" означает "Все типы блоков"
+;; Выбранный тип динамического блока ("" = все типы)
 (if (not (boundp '*n1-tmp-dynblock-type*))
   (setq *n1-tmp-dynblock-type* "")
 )
 
-;; ДОБАВЛЕНО (Этап 3.1): список уникальных типов динамических блоков
+;; Список уникальных типов динамических блоков
 (if (not (boundp '*n1-dynblock-types-list*))
   (setq *n1-dynblock-types-list* '())
 )
 
-;; ДОБАВЛЕНО (Этап 3.2): сохранение набора для пересчёта при выборе типа
+;; ДОБАВЛЕНО (Этап M2): выбранный тип мультилинии (имя MLINESTYLE)
+;; "" означает "Все типы мультилиний"
+(if (not (boundp '*n1-tmp-mline-type*))
+  (setq *n1-tmp-mline-type* "")
+)
+
+;; ДОБАВЛЕНО (Этап M2): список уникальных типов мультилиний
+(if (not (boundp '*n1-mline-types-list*))
+  (setq *n1-mline-types-list* '())
+)
+
+;; Набор для пересчёта счётчиков при выборе типа
 (if (not (boundp '*n1-cutline-ss*))
   (setq *n1-cutline-ss* nil)
 )
@@ -159,13 +158,9 @@
   (if pair (cdr pair) 7)
 )
 
-;; ============================================================
-;; ИСПРАВЛЕНО: защита от nil-цвета
-;; ============================================================
 (defun n1-draw-text (pt h str color / style c)
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
-  ;; ЗАЩИТА: если color nil или не число — используем 7
   (setq c (if (and color (numberp color)) color 7))
   (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
@@ -225,37 +220,22 @@
 )
 
 ;; ============================================================
-;; Алгоритм раскроя First-Fit Decreasing (FFD)
-;; ИСПРАВЛЕНО (Р1.3, хот-фикс): корректная модель реза
-;;
-;; Соглашение (зафиксировано):
-;;   - рез (kerf) — ширина пропила МЕЖДУ двумя соседними
-;;     деталями на хлысте;
-;;   - при открытии НОВОГО хлыста рез НЕ вычитается:
-;;       остаток = stock - p
-;;   - при добавлении в СУЩЕСТВУЮЩИЙ хлыст:
-;;       требуется остаток >= kerf + p
-;;       новый остаток = остаток - kerf - p
-;;   - отход (остаток после последней детали) резом не
-;;     облагается;
-;;   - критерий неразмещаемости: p > stock (деталь длиннее
-;;     хлыста). Деталь длиной ровно в хлыст размещается
-;;     одной на хлысте с нулевым отходом.
-;;
-;; НЕ МЕНЯТЬ: сортировку, группировку, вывод, блок раскладки,
-;; экспорт — правится только арифметика остатка.
+;; Алгоритм раскроя FFD
+;; МОДЕЛЬ РЕЗА (хот-фикс Р1.3):
+;;   керф — пропил МЕЖДУ соседними деталями;
+;;   новый хлыст: остаток = stock - p (рез не вычитается);
+;;   существующий: требуется остаток >= kerf + p,
+;;                 новый остаток = остаток - kerf - p;
+;;   неразмещаемая: p > stock.
 ;; ============================================================
 (defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip)
   (setq bars '())
   (setq skip 0)
   (foreach p sorted-pieces
-    ;; Неразмещаемая деталь: длиннее самого хлыста
     (if (> p stock)
       (setq skip (1+ skip))
       (progn
         (setq placed nil j 0)
-        ;; Пытаемся разместить в существующий хлыст:
-        ;; нужен пропил между последней деталью и этой
         (while (and (not placed) (< j (length bars)))
           (setq bar (nth j bars))
           (if (>= (car bar) (+ kerf p))
@@ -268,8 +248,6 @@
           )
           (setq j (1+ j))
         )
-        ;; Не поместилась никуда — открываем новый хлыст:
-        ;; рез перед первой деталью НЕ вычитается
         (if (not placed)
           (setq bars (append bars (list (list (- stock p) p))))
         )
@@ -375,7 +353,6 @@
 
 ;; ============================================================
 ;; Фильтрация набора по типу И имени типа блока
-;; ДОБАВЛЕНО (Этап 3.1)
 ;; ============================================================
 (defun n1-filter-ss-by-type-and-name (ss typ type-name
                                       / i ent new-ss ent-typ obj block-type-name)
@@ -420,8 +397,27 @@
 )
 
 ;; ============================================================
+;; Фильтрация набора по типу мультилинии
+;; ДОБАВЛЕНО (Этап M2): зеркально n1-filter-ss-by-type-and-name
+;; type-name nil/"" — оставить все MLINE; иные типы отбросить
+;; ============================================================
+(defun n1-filter-ss-by-mline-type (ss type-name / i ent new-ss)
+  (setq new-ss (ssadd) i 0)
+  (repeat (sslength ss)
+    (setq ent (ssname ss i))
+    (if (= (cdr (assoc 0 (entget ent))) "MLINE")
+      (if (or (null type-name) (= type-name "")
+              (= (su-mline-type-name ent) type-name))
+        (ssadd ent new-ss)
+      )
+    )
+    (setq i (1+ i))
+  )
+  new-ss
+)
+
+;; ============================================================
 ;; Подсчёт динамических блоков конкретного типа
-;; ДОБАВЛЕНО (Этап 3.2)
 ;; ============================================================
 (defun n1-count-dynblock-by-type (ss type-name
                                   / i ent typ obj count block-type-name)
@@ -472,33 +468,23 @@
 )
 
 ;; ============================================================
-;; Отображение списка слоёв в диалоге и консоли
-;; ИСПРАВЛЕНО: Корректная логика отображения.
-;; Текст "Групповой фильтр..." показывается ТОЛЬКО если
-;; сработал автоматический выбор (пользователь не выбирал
-;; слои вручную в списке).
+;; Отображение списка слоёв
+;; Текст "Групповой фильтр..." только при автоматическом выборе
 ;; ============================================================
 (defun n1-layer-display-list (layers / fname suffix)
   (setq fname (n1-filter-name-str))
   (setq suffix "")
 
   (cond
-    ;; 1. Если сработал автоматический выбор по групповым фильтрам
-    ;; (пользователь не выделял слои руками в списке)
-    ((and (boundp '*CUTLINE-IS-AUTO-FILTER*) 
-          *CUTLINE-IS-AUTO-FILTER* 
+    ((and (boundp '*CUTLINE-IS-AUTO-FILTER*)
+          *CUTLINE-IS-AUTO-FILTER*
           fname)
      (setq suffix " (за исключением слоя 0)")
      (list (strcat "Групповой фильтр " fname suffix))
     )
-    
-    ;; 2. Если слои не выбраны вообще
     ((or (null layers) (not (listp layers)) (= (length layers) 0))
      (list "Все слои")
     )
-    
-    ;; 3. Если пользователь выбрал слои вручную 
-    ;; (показываем сам список слоёв, даже если галки на фильтрах стоят)
     (T layers)
   )
 )
@@ -520,6 +506,7 @@
 
 ;; ============================================================
 ;; Ручное управление радиокнопками
+;; ОБНОВЛЕНО (Этап M2): блокировка/разблокировка двух списков
 ;; ============================================================
 (defun n1-select-radio (selected / keys k)
   (setq keys '("rb_line" "rb_mline" "rb_dynblock" "rb_both"))
@@ -533,11 +520,21 @@
     ((= selected "rb_both")     (setq *n1-tmp-choice* 'ALL))
   )
 
+  ;; Список типов блоков: активен только при "Динамические блоки"
   (if (= selected "rb_dynblock")
     (n1-safe-mode-tile "popup_dynblock_type" 0)
     (progn
       (n1-safe-mode-tile "popup_dynblock_type" 1)
       (setq *n1-tmp-dynblock-type* "")
+    )
+  )
+
+  ;; Список типов мультилиний: активен только при "Только мультилинии"
+  (if (= selected "rb_mline")
+    (n1-safe-mode-tile "popup_mline_type" 0)
+    (progn
+      (n1-safe-mode-tile "popup_mline_type" 1)
+      (setq *n1-tmp-mline-type* "")
     )
   )
 )
@@ -566,10 +563,33 @@
 )
 
 ;; ============================================================
+;; Обработчик выбора типа мультилинии
+;; ДОБАВЛЕНО (Этап M2): зеркально n1-on-dynblock-type-changed
+;; ============================================================
+(defun n1-on-mline-type-changed (value / idx type-name new-count)
+  (setq idx (atoi value))
+  (if (= idx 0)
+    (progn
+      (setq *n1-tmp-mline-type* "")
+      (setq new-count (su-count-mline-by-type *n1-cutline-ss* ""))
+      (n1-safe-set-tile "txt_mline_count"
+        (strcat (itoa new-count) " шт."))
+    )
+    (progn
+      (setq type-name (nth (1- idx) *n1-mline-types-list*))
+      (setq *n1-tmp-mline-type* type-name)
+      (setq new-count (su-count-mline-by-type *n1-cutline-ss* type-name))
+      (n1-safe-set-tile "txt_mline_count"
+        (strcat (itoa new-count) " шт."))
+      (n1-select-radio "rb_mline")
+    )
+  )
+)
+
+;; ============================================================
 ;; Диалог параметров раскроя
-;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент в
-;; vl-catch-all-apply для заполнения списка слоёв
-;; ИСПРАВЛЕНО (Р2.4): обработка десятичной запятой
+;; ОБНОВЛЕНО (Этап M2): список типов мультилиний,
+;; результат из 8 элементов
 ;; ============================================================
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           ss-for-types
@@ -621,6 +641,7 @@
 
               (setq *n1-cutline-ss* ss-for-types)
 
+              ;; ---- Заполнение списка типов блоков ----
               (setq *n1-tmp-dynblock-type* "")
               (setq *n1-dynblock-types-list*
                 (su-collect-dynblock-types ss-for-types 'su-is-valid-stock-block))
@@ -639,9 +660,28 @@
                 (n1-safe-mode-tile "popup_dynblock_type" 1)
               )
 
+              ;; ---- Заполнение списка типов мультилиний ----
+              ;; ДОБАВЛЕНО (Этап M2)
+              (setq *n1-tmp-mline-type* "")
+              (setq *n1-mline-types-list*
+                (su-collect-mline-types ss-for-types))
+
+              (start_list "popup_mline_type")
+              (add_list "Все типы мультилиний")
+              (foreach tn *n1-mline-types-list*
+                (add_list tn)
+              )
+              (end_list)
+              (set_tile "popup_mline_type" "0")
+
+              (if (or (<= mline-cnt 0)
+                      (and (not (eq *n1-tmp-choice* 'MLINE))
+                           (not (eq *n1-tmp-choice* 'ALL))))
+                (n1-safe-mode-tile "popup_mline_type" 1)
+              )
+
               ;; ---- Слои ----
               (setq base-layers (n1-layer-display-list layers))
-              ;; ИСПРАВЛЕНО (Р1.2): добавлен третий аргумент
               (vl-catch-all-apply
                 '(lambda ()
                    (start_list "lst_layers")
@@ -693,13 +733,13 @@
               (n1-safe-action-tile "rb_dynblock" "(n1-select-radio \"rb_dynblock\")")
               (n1-safe-action-tile "rb_both"     "(n1-select-radio \"rb_both\")")
 
-              ;; ---- Обработчик выпадающего списка типов блоков ----
+              ;; ---- Обработчики списков типов ----
               (n1-safe-action-tile "popup_dynblock_type"
                 "(n1-on-dynblock-type-changed $value)")
+              (n1-safe-action-tile "popup_mline_type"
+                "(n1-on-mline-type-changed $value)")
 
-              ;; ИСПРАВЛЕНО (Р2.4): обработка десятичной запятой
-              ;; В русской локали пользователь вводит "3,5",
-              ;; а atof ожидает "3.5"
+              ;; ---- Обработка десятичной запятой (Р2.4) ----
               (n1-safe-action-tile "edt_stock"
                 "(setq *n1-tmp-stock* (atof (vl-string-translate \",\" \".\" $value)))")
               (n1-safe-action-tile "edt_kerf"
@@ -717,6 +757,7 @@
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
 
+              ;; Результат: 8 элементов (M2: добавлен тип мультилинии)
               (if (= result 1)
                 (list
                   *n1-tmp-choice*
@@ -726,6 +767,7 @@
                   *n1-tmp-chk-xls*
                   *n1-tmp-chk-acad*
                   *n1-tmp-dynblock-type*
+                  *n1-tmp-mline-type*
                 )
                 nil
               )
@@ -739,19 +781,35 @@
 
 ;; ============================================================
 ;; Извлечение длин
+;; ОБНОВЛЕНО (Этап M2, редакция 2): MLINE — длина по координатам,
+;; допуск только прямые горизонталь/вертикаль; ломаные и
+;; диагональные отсеиваются со счётчиками
 ;; ============================================================
 (defun n1-extract-pieces (ss tol min-len max-len /
-                            i ent typ len key pieces total
-                            measured skipped skipped-short skipped-long obj)
+                            i ent typ len key pieces total geom
+                            measured skipped skipped-short skipped-long
+                            skipped-broken skipped-diag obj)
   (setq pieces '() i 0 total (sslength ss)
-        measured 0 skipped 0 skipped-short 0 skipped-long 0)
+        measured 0 skipped 0 skipped-short 0 skipped-long 0
+        skipped-broken 0 skipped-diag 0)
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
 
     (cond
+      ;; MLINE: геометрия по координатам (M2, редакция 2)
       ((= typ "MLINE")
-       (setq len (n1-mline-length ent))
+       (setq geom (su-mline-cut-geom ent))
+       (if geom
+         (setq len (car geom))
+         (progn
+           (setq len nil)
+           (if (> (su-mline-vertex-count ent) 2)
+             (setq skipped-broken (1+ skipped-broken))
+             (setq skipped-diag (1+ skipped-diag))
+           )
+         )
+       )
       )
       ((= typ "LINE")
        (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
@@ -788,6 +846,14 @@
   (if (> skipped-long 0)
     (princ (strcat "\n  Пропущено (длиннее " (rtos max-len 2 0) " мм): "
                    (itoa skipped-long))))
+  (if (> skipped-broken 0)
+    (princ (strcat "\n  Пропущено (ломаные MLINE, >2 вершин): "
+                   (itoa skipped-broken)))
+  )
+  (if (> skipped-diag 0)
+    (princ (strcat "\n  Пропущено (диагональные MLINE): "
+                   (itoa skipped-diag)))
+  )
   (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x)))
           (reverse pieces))
 )
@@ -804,7 +870,7 @@
 )
 
 ;; ============================================================
-;; Вывод неразмещённых деталей в консоль
+;; Вывод неразмещённых деталей (сортировка по убыванию)
 ;; ============================================================
 (defun n1-report-oversized (oversized stock / rec total-cnt sorted)
   (if oversized
@@ -827,13 +893,7 @@
 )
 
 ;; ============================================================
-;; Преобразование списка длин в строку
-;; ИСПРАВЛЕНО (Р2.1): добавлен параметр разделителя
-;;
-;; Использование:
-;;   (n1-list-to-str pieces " ")  — для консоли и таблицы
-;;   (n1-list-to-str pieces ";")  — для CSV
-;;   (n1-list-to-str pieces ", ") — для XLS
+;; Преобразование списка длин в строку (Р2.1: параметр sep)
 ;; ============================================================
 (defun n1-list-to-str (lst sep / s x)
   (if (null sep) (setq sep " "))
@@ -1076,7 +1136,6 @@
 
 ;; ============================================================
 ;; Консольный отчёт по хлыстам
-;; ИСПРАВЛЕНО (Р2.1): параметр разделителя
 ;; ============================================================
 (defun n1-report (bars stock kerf / i bar pieces waste used util)
   (princ (strcat "\nКоличество хлыстов: " (itoa (length bars))))
@@ -1085,7 +1144,6 @@
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)))
-    ;; ИСПРАВЛЕНО (Р2.1): разделитель " " для консоли
     (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces " ")
                    " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1)
                    " | " (rtos util 2 1) "%"))
@@ -1095,7 +1153,6 @@
 
 ;; ============================================================
 ;; XLS-экспорт
-;; ИСПРАВЛЕНО (Р2.1): параметр разделителя
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
                      num-bars stock-total-mm product-total-mm kpd /
@@ -1320,7 +1377,6 @@
 
       (write-line " </Styles>" f)
 
-      ;; ЛИСТ — Раскрой
       (write-line " <Worksheet ss:Name=\"Раскрой\">" f)
       (write-line "  <Table>" f)
 
@@ -1330,12 +1386,10 @@
       (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"100\"/>" f)
       (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
 
-      ;; Заголовок
       (write-line "   <Row ss:Height=\"20\">" f)
       (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">Раскрой хлыстов</Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; Шапка колонок
       (write-line "   <Row>" f)
       (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Хлыст</Data></Cell>" f)
       (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Детали</Data></Cell>" f)
@@ -1344,8 +1398,6 @@
       (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Использование_%</Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; Данные по хлыстам
-      ;; ИСПРАВЛЕНО (Р2.1): разделитель " " для XLS
       (setq i 0)
       (foreach bar bars
         (setq i (1+ i))
@@ -1360,12 +1412,10 @@
         (write-line "   </Row>" f)
       )
 
-      ;; Пустая строка
       (write-line "   <Row>" f)
       (write-line "    <Cell><Data ss:Type=\"String\"></Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; Блок отчёта (столбцы B-D)
       (write-line "   <Row>" f)
       (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">ОТЧЕТ</Data></Cell>" f)
       (write-line "   </Row>" f)
@@ -1407,7 +1457,6 @@
       (write-line (strcat "    <Cell ss:StyleID=\"ReportKpd\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos kpd 2 1) " %</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Секция неразмещённых (столбцы B-D)
       (if oversized
         (progn
           (write-line "   <Row>" f)
@@ -1449,7 +1498,6 @@
 )
 
 ;; ---------- CSV-экспорт (fallback) ----------
-;; ИСПРАВЛЕНО (Р2.1): разделитель ";" для CSV
 (defun n1-write-csv (bars stock kerf oversized /
                        fname f i bar pieces waste used util rec
                        total-cnt-unplaced total-sum-unplaced)
@@ -1465,9 +1513,6 @@
         (setq i (1+ i))
         (setq pieces (cdr bar) waste (car bar) used (- stock waste)
               util (* 100.0 (/ used stock)))
-                ;; ИСПРАВЛЕНО (Р2.1): пробел как разделитель деталей,
-        ;; ИСПРАВЛЕНО: запятая как разделитель деталей внутри колонки.
-        ;; Без кавычек. Корректно обрабатывается Excel при разделителе ";"
         (write-line (strcat (itoa i) ";" (n1-list-to-str pieces ", ") ";"
                             (rtos used 2 1) ";" (rtos waste 2 1) ";"
                             (rtos util 2 1)) f)
@@ -1506,6 +1551,7 @@
 
 ;; ============================================================
 ;; Главная функция
+;; ОБНОВЛЕНО (Этап M2): тип мультилинии в фильтре
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
@@ -1515,7 +1561,8 @@
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
                        layers layers-str total-input type-counts
-                       user-filter line-cnt mline-cnt dynblock-cnt dynblock-type
+                       user-filter line-cnt mline-cnt dynblock-cnt
+                       dynblock-type mline-type
                        export-xls export-acad
                        default-xls default-acad
                        default-stock default-kerf
@@ -1536,8 +1583,6 @@
     (setq layers layers-from-caller)
   )
 
-  ;; ОБНОВЛЕНО: передаём T для отображения суффикса
-  ;; "(за исключением слоя 0)"
   (princ (strcat "\n" (car (n1-layer-display-list layers))))
 
   ;; 2. Выбор объектов
@@ -1595,7 +1640,7 @@
   (cond
     ((vl-catch-all-error-p r)
      (princ (strcat "\nОшибка диалога: " (vl-catch-all-error-message r)))
-     (princ "\nРаскрой отменён.")
+     (princ "\nРаскрой отменен.")
      (princ) (exit)
     )
     ((null r)
@@ -1605,13 +1650,15 @@
     (T (setq dialog-result r))
   )
 
+  ;; Результат диалога: 8 элементов (M2: тип мультилинии)
   (setq user-filter   (car dialog-result)
         tol           (cadr dialog-result)
         stock         (caddr dialog-result)
         kerf          (cadddr dialog-result)
         export-xls    (nth 4 dialog-result)
         export-acad   (nth 5 dialog-result)
-        dynblock-type (nth 6 dialog-result))
+        dynblock-type (nth 6 dialog-result)
+        mline-type    (nth 7 dialog-result))
 
   (setq *CUTLINE-LAST-STOCK* stock
         *CUTLINE-LAST-KERF*  kerf
@@ -1626,8 +1673,11 @@
      (setq ss (n1-filter-ss-by-type ss "LINE"))
      (princ "\nОставлены только линии (LINE)."))
     ((eq user-filter 'MLINE)
-     (setq ss (n1-filter-ss-by-type ss "MLINE"))
-     (princ "\nОставлены только мультилинии (MLINE)."))
+     (setq ss (n1-filter-ss-by-mline-type ss mline-type))
+     (if (and mline-type (/= mline-type ""))
+       (princ (strcat "\nОставлены мультилинии стиля: " mline-type))
+       (princ "\nОставлены все мультилинии."))
+    )
     ((eq user-filter 'DYNBLOCK)
      (setq ss (n1-filter-ss-by-type-and-name ss "DYNBLOCK" dynblock-type))
      (if (and dynblock-type (/= dynblock-type "") (/= dynblock-type "Все типы блоков"))
@@ -1643,7 +1693,6 @@
   (setq type-counts (n1-count-by-type ss))
   (n1-print-type-counts type-counts)
 
-  ;; ОБНОВЛЕНО: показываем дробную часть для реза
   (princ (strcat "\nПараметры: допуск " (rtos tol 2 2)
                  " мм, хлыст " (rtos stock 2 0)
                  " мм, рез " (rtos kerf 2 2) " мм."))
@@ -1711,7 +1760,7 @@
         )
       )
     )
-    (princ "\nГалочка .xls снята — файл не создаётся.")
+    (princ "\nГалочка .xls снята — файл не создается.")
   )
 
   ;; 8. Раскладка AutoCAD
