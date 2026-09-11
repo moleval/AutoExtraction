@@ -1,16 +1,20 @@
 ;;; ============================================================
 ;;; CUTLINE.LSP — модуль линейного раскроя мерного материала
 ;;; Команда: CUTLINE / РАСКРОЙХЛЫСТА
-;;; Объекты: LINE, MLINE
+;;; Объекты: LINE, MLINE, динамические блоки с свойством "Длина"
 ;;; Алгоритм: First-Fit Decreasing (FFD)
 ;;
-;;; ИСПРАВЛЕНИЯ:
-;;;   1. Надпись "Хлыст N" и "[%]" в столбик, близко к хлысту
-;;;   2. Радиокнопки работают через ручное управление (boxed_column)
-;;;   3. Количество объектов отображается справа от радиокнопок
-;;;   4. Значения из диалога считываются ДО done_dialog
-;;;   5. XLS: итоги и неразмещённые на 3 столбцах (B-D)
-;;;   6. Имя файла: <имя_чертежа> Раскрой хлыстов.xls
+;;; ПОДДЕРЖИВАЕМЫЕ ТИПЫ:
+;;;   LINE      — обычные линии
+;;;   MLINE     — мультилинии (длина по осевой трассе)
+;;;   DYNBLOCK  — динамические блоки со свойством "Длина"
+;;;               (блоки со свойством "Ширина" или "Высота" отсеиваются)
+;;
+;;; ЭТАПЫ ВНЕДРЕНИЯ ДИНАМИЧЕСКИХ БЛОКОВ:
+;;;   Этап 2.1: Функции анализа блоков (в select-utils.lsp)
+;;;   Этап 2.2: Выбор блоков (в select-utils.lsp)
+;;;   Этап 2.3: Обработка блоков в алгоритме раскроя (этот файл)
+;;;   Этап 2.4: Диалог с 4 радиокнопками (следующий этап)
 ;;; ============================================================
 (vl-load-com)
 
@@ -217,26 +221,52 @@
   )
 )
 
-(defun n1-count-by-type (ss / i ent typ counts found)
-  (setq counts '(("LINE" . 0) ("MLINE" . 0)) i 0)
+;; ============================================================
+;; Подсчёт объектов по типам
+;; ОБНОВЛЕНО (Этап 2.3): добавлен подсчёт пригодных динамических блоков
+;; ============================================================
+(defun n1-count-by-type (ss / i ent typ counts found obj len)
+  (setq counts '(("LINE" . 0) ("MLINE" . 0) ("DYNBLOCK" . 0)) i 0)
   (repeat (sslength ss)
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
-    (setq found (assoc typ counts))
-    (if found (setq counts (subst (cons typ (1+ (cdr found))) found counts)))
+    (cond
+      ;; LINE и MLINE — считаем напрямую
+      ((or (= typ "LINE") (= typ "MLINE"))
+       (setq found (assoc typ counts))
+       (if found (setq counts (subst (cons typ (1+ (cdr found))) found counts)))
+      )
+      ;; INSERT — проверяем пригодность через su-is-valid-stock-block
+      ((= typ "INSERT")
+       (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+       (if (and
+             (not (vl-catch-all-error-p obj))
+             (su-is-valid-stock-block obj))
+         (progn
+           (setq found (assoc "DYNBLOCK" counts))
+           (if found (setq counts (subst (cons "DYNBLOCK" (1+ (cdr found))) found counts)))
+         )
+       )
+      )
+    )
     (setq i (1+ i))
   )
   counts
 )
 
+;; ============================================================
+;; Вывод количества объектов по типам
+;; ОБНОВЛЕНО (Этап 2.3): добавлен вывод "дин. блоков"
+;; ============================================================
 (defun n1-print-type-counts (counts / s rec)
   (setq s "")
   (foreach rec counts
     (if (> (cdr rec) 0)
       (setq s (strcat s (if (= s "") "" ", ")
                       (itoa (cdr rec)) " "
-                      (cond ((= (car rec) "LINE")  "линий")
-                            ((= (car rec) "MLINE") "мультилиний")
+                      (cond ((= (car rec) "LINE")      "линий")
+                            ((= (car rec) "MLINE")     "мультилиний")
+                            ((= (car rec) "DYNBLOCK")  "дин. блоков")
                             (T (strcat (car rec) " шт")))))
     )
   )
@@ -246,12 +276,37 @@
   )
 )
 
-(defun n1-filter-ss-by-type (ss typ / i ent new-ss)
+;; ============================================================
+;; Фильтрация набора по типу
+;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка DYNBLOCK
+;; ============================================================
+(defun n1-filter-ss-by-type (ss typ / i ent new-ss ent-typ obj)
   (setq new-ss (ssadd) i 0)
   (repeat (sslength ss)
     (setq ent (ssname ss i))
-    (if (= (cdr (assoc 0 (entget ent))) typ)
-      (ssadd ent new-ss)
+    (setq ent-typ (cdr (assoc 0 (entget ent))))
+    (cond
+      ;; LINE и MLINE — простая проверка типа
+      ((or (= typ "LINE") (= typ "MLINE"))
+       (if (= ent-typ typ) (ssadd ent new-ss))
+      )
+      ;; DYNBLOCK — проверка пригодности через su-is-valid-stock-block
+      ((= typ "DYNBLOCK")
+       (if (= ent-typ "INSERT")
+         (progn
+           (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+           (if (and
+                 (not (vl-catch-all-error-p obj))
+                 (su-is-valid-stock-block obj))
+             (ssadd ent new-ss)
+           )
+         )
+       )
+      )
+      ;; ALL — все типы уже отфильтрованы на этапе выбора
+      ((= typ "ALL")
+       (ssadd ent new-ss)
+      )
     )
     (setq i (1+ i))
   )
@@ -440,20 +495,45 @@
   )
 )
 
-;; ---------- Извлечение длин ----------
+;; ============================================================
+;; Извлечение длин
+;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка динамических блоков
+;; ============================================================
 (defun n1-extract-pieces (ss tol min-len max-len /
                             i ent typ len key pieces total
-                            measured skipped skipped-short skipped-long)
+                            measured skipped skipped-short skipped-long obj)
   (setq pieces '() i 0 total (sslength ss)
         measured 0 skipped 0 skipped-short 0 skipped-long 0)
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
-    (if (= typ "MLINE")
-      (setq len (n1-mline-length ent))
-      (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
-                  (list ent (vlax-curve-getEndParam ent))))
+
+    ;; Извлечение длины в зависимости от типа объекта
+    (cond
+      ;; MLINE — длина по осевой трассе
+      ((= typ "MLINE")
+       (setq len (n1-mline-length ent))
+      )
+      ;; LINE — длина через vlax-curve
+      ((= typ "LINE")
+       (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
+                   (list ent (vlax-curve-getEndParam ent))))
+       (if (vl-catch-all-error-p len) (setq len nil))
+      )
+      ;; INSERT (динамический блок) — длина из свойства "Длина"
+      ;; ДОБАВЛЕНО (Этап 2.3)
+      ((= typ "INSERT")
+       (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+       (if (not (vl-catch-all-error-p obj))
+         (setq len (su-get-length obj))
+         (setq len nil)
+       )
+      )
+      ;; Неизвестный тип
+      (T (setq len nil))
     )
+
+    ;; Обработка извлечённой длины
     (cond
       ((or (null len) (not (numberp len)) (<= len 0.0))
        (setq skipped (1+ skipped)))
@@ -546,11 +626,7 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    ;; ============================================================
     ;; Надпись в столбик, близко к хлысту
-    ;; "Хлыст N" на первой строке, "[X%]" на второй
-    ;; Позиция: сразу слева от хлыста, вертикально по центру
-    ;; ============================================================
     (setq labelX (- x0 (* barHeight 2.25)))
     (setq labelY1 (+ y0 (* barHeight 0.65)))
     (setq labelY2 (+ y0 (* barHeight 0.20)))
@@ -584,6 +660,9 @@
   (list (list (- x0 (* barHeight 2.0)) miny) (list (+ x0 stock) maxy))
 )
 
+;; ============================================================
+;; Сводная таблица раскроя
+;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
     barHeight th rowH pad col1W col2W col3W tableW tableH
     left top x1 x2 x3 y bottom
@@ -627,6 +706,10 @@
   (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
+  ;; Сортировка длин изделий от большего к меньшему
+  ;; ДОБАВЛЕНО: по запросу пользователя
+  (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
+
   (setq y (- y rowH))
   (foreach rec pieces
     (n1-draw-text (list x1 y) th (itoa (fix (car rec)))
@@ -663,6 +746,9 @@
   (list (list left bottom) (list (+ left tableW) top))
 )
 
+;; ============================================================
+;; Таблица неразмещённых деталей
+;; ============================================================
 (defun n1-draw-oversized (oversized stock insPt /
     barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
     left top x1 x2 x3 y bottom total-cnt rec)
@@ -729,7 +815,7 @@
 )
 
 ;; ============================================================
-;; XLS-экспорт (XML Spreadsheet)
+;; XLS-экспорт (столбцы: таблица раскроя + отчёт на B-D)
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
                      num-bars stock-total-mm product-total-mm kpd /
@@ -950,9 +1036,7 @@
 
       (write-line " </Styles>" f)
 
-      ;; ============================================
       ;; ЛИСТ — Раскрой
-      ;; ============================================
       (write-line " <Worksheet ss:Name=\"Раскрой\">" f)
       (write-line "  <Table>" f)
 
@@ -996,10 +1080,7 @@
       (write-line "    <Cell><Data ss:Type=\"String\"></Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; ============================================
       ;; Блок отчёта (столбцы B-D)
-      ;; ============================================
-
       (write-line "   <Row>" f)
       (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">ОТЧЁТ</Data></Cell>" f)
       (write-line "   </Row>" f)
@@ -1041,9 +1122,7 @@
       (write-line (strcat "    <Cell ss:StyleID=\"ReportKpd\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos kpd 2 1) " %</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; ============================================
       ;; Секция неразмещённых (столбцы B-D)
-      ;; ============================================
       (if oversized
         (progn
           (write-line "   <Row>" f)
@@ -1136,6 +1215,10 @@
 
 ;; ============================================================
 ;; Главная функция
+;; ОБНОВЛЕНО (Этап 2.3):
+;;   - Сообщение о выборе объектов
+;;   - Снятие визуального выделения после пост-фильтрации
+;;   - Поддержка DYNBLOCK в фильтрации
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
@@ -1166,22 +1249,19 @@
     (setq layers layers-from-caller)
   )
 
-    ;; Отображаем все выбранные слои через запятую
-  (princ (strcat "\n"
-    (if (or (null layers) (= (length layers) 0))
-      "Все слои"
-      (apply 'strcat
-        (mapcar '(lambda (x) (strcat x ", ")) layers)
-      )
-    )
-  ))
+  (princ (strcat "\n" (car (n1-layer-display-list layers))))
 
   ;; 2. Выбор объектов
-  (princ "\nВыберите отрезки и/или мультилинии — исходные детали:")
-  (princ "\n(принимаются ТОЛЬКО LINE и MLINE)")
+  ;; ОБНОВЛЕНО (Этап 2.3): актуальное сообщение о типах объектов
+  (princ "\nВыберите объекты — исходные детали:")
+  (princ "\n(принимаются LINE, MLINE и динамические блоки с длиной)")
   (princ "\n(если объекты уже выделены — Enter)")
 
+  ;; ОБНОВЛЕНО (Этап 2.3): снимаем визуальное выделение,
+  ;; т.к. пост-фильтрация могла убрать часть объектов из набора
+
   (setq ss (su-select-cutline-objects layers))
+
   (if (null ss)
     (progn (princ "\nНичего не выбрано.") (princ) (exit)))
 
@@ -1196,7 +1276,7 @@
 
   (if (and (= line-cnt 0) (= mline-cnt 0))
     (progn
-      (princ "\nНет объектов подходящих типов (LINE, MLINE).")
+      (princ "\nНет объектов подходящих типов.")
       (princ) (exit)
     )
   )
@@ -1251,6 +1331,7 @@
   (princ "\nПараметры приняты из окна диалога.")
 
   ;; 2в. Фильтрация
+  ;; ОБНОВЛЕНО (Этап 2.3): добавлена поддержка DYNBLOCK
   (cond
     ((eq user-filter 'LINE)
      (setq ss (n1-filter-ss-by-type ss "LINE"))
@@ -1258,7 +1339,10 @@
     ((eq user-filter 'MLINE)
      (setq ss (n1-filter-ss-by-type ss "MLINE"))
      (princ "\nОставлены только мультилинии (MLINE)."))
-    (T (princ "\nОставлены линии и мультилинии."))
+    ((eq user-filter 'DYNBLOCK)
+     (setq ss (n1-filter-ss-by-type ss "DYNBLOCK"))
+     (princ "\nОставлены только динамические блоки."))
+    (T (princ "\nОставлены линии, мультилинии и динамические блоки."))
   )
 
   (if (= (sslength ss) 0)
