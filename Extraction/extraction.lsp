@@ -20,6 +20,11 @@
 ;;;   (ранее все задачи, кроме Подсистемы, сохраняли слои в
 ;;;   переменную Фасонки).
 ;;;
+;;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв для
+;;;   кнопок "Раскрой хлыста" и "Раскрой листа".
+;;;   Ранее *EXTRACTION-SELECTED-LAYERS* оставался пустым,
+;;;   т.к. не вызывалась функция формирования списка слоёв.
+;;;
 ;;; Маски с * поддерживаются через wcmatch.
 ;;;
 ;;; Переименование блоков — только по кнопке "Переименовать".
@@ -183,6 +188,38 @@
   (reverse out)
 )
 
+;; ============================================================
+;; ОЧИСТКА СПИСКА СЛОЁВ ДЛЯ РАСКРОЯ
+;; ДОБАВЛЕНО (Р1): при автоматическом выборе слоёв из
+;; групповых фильтров исключаем служебные слои.
+;;
+;; Важно:
+;; - применяется только для автоматического fallback-выбора
+;;   из групповых фильтров;
+;; - если пользователь явно выбрал слой 0 руками, он не
+;;   удаляется этой функцией автоматически.
+;; ============================================================
+
+(defun extraction-cut-clean-filter-layers (layers / out x sx)
+  (setq out '())
+
+  (if (listp layers)
+    (foreach x layers
+      (if (= (type x) 'STR)
+        (progn
+          (setq sx (strcase x))
+          (if (and
+                (/= sx "0")
+                (/= sx "DEFPOINTS"))
+            (setq out (cons x out))
+          )
+        )
+      )
+    )
+  )
+
+  (extraction-unique-ci (reverse out))
+)
 
 ;; ============================================================
 ;; ПОЛУЧЕНИЕ ВСЕХ СЛОЁВ ЧЕРТЕЖА
@@ -1068,24 +1105,74 @@
 )
 
 
-(defun extraction-cutline ()
+;; ============================================================
+;; КНОПКА "РАСКРОЙ ХЛЫСТА"
+;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв
+;; ОБНОВЛЕНО: приоритет групповых фильтров над слоями задачи
+;; ============================================================
+
+(defun extraction-cutline ( / selected)
   (setq *CUTLINE-CREATE-TABLE*
     (= (get_tile "chk_acad") "1"))
 
   (setq *CUTLINE-CREATE-XLS*
     (= (get_tile "chk_xls") "1"))
 
+  ;; Для раскроя приоритет имеют групповые фильтры.
+  ;; Если они выбраны — используем их, игнорируя выбранные слои.
+  (if (or *EXTRACTION-FILTER-FACADES*
+          *EXTRACTION-FILTER-VITRAZH*
+          *EXTRACTION-FILTER-FONAR*)
+    (progn
+      ;; Используем видимые слои из групповых фильтров,
+      ;; исключая служебные слои 0 и Defpoints
+      (setq selected
+        (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
+    )
+    (progn
+      ;; Групповые фильтры не выбраны — используем выбранные слои
+      (setq selected (extraction-selected-names))
+    )
+  )
+
+  (setq *EXTRACTION-SELECTED-LAYERS* selected)
+
   (setq *EXTRACTION-ACTION* 'CUTLINE)
   (done_dialog 1)
 )
 
 
-(defun extraction-cutsheet ()
+;; ============================================================
+;; КНОПКА "РАСКРОЙ ЛИСТА"
+;; ИСПРАВЛЕНО (Этап Р1): формирование списка слоёв
+;; ОБНОВЛЕНО: приоритет групповых фильтров над слоями задачи
+;; ============================================================
+
+(defun extraction-cutsheet ( / selected)
   (setq *CUTSHEET-CREATE-TABLE*
     (= (get_tile "chk_acad") "1"))
 
   (setq *CUTSHEET-CREATE-XLS*
     (= (get_tile "chk_xls") "1"))
+
+  ;; Для раскроя приоритет имеют групповые фильтры.
+  ;; Если они выбраны — используем их, игнорируя выбранные слои.
+  (if (or *EXTRACTION-FILTER-FACADES*
+          *EXTRACTION-FILTER-VITRAZH*
+          *EXTRACTION-FILTER-FONAR*)
+    (progn
+      ;; Используем видимые слои из групповых фильтров,
+      ;; исключая служебные слои 0 и Defpoints
+      (setq selected
+        (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
+    )
+    (progn
+      ;; Групповые фильтры не выбраны — используем выбранные слои
+      (setq selected (extraction-selected-names))
+    )
+  )
+
+  (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
   (setq *EXTRACTION-ACTION* 'CUTSHEET)
   (done_dialog 1)
@@ -1517,4 +1604,39 @@
 
 
 (princ "\nEXTRACTION.LSP загружен.")
+
+;; ============================================================
+;; ЗАГЛУШКИ для модулей в разработке
+;; ДОБАВЛЕНО (Р1.4): чтобы кнопки "Облицовка" и "Витраж"
+;; не выдавали ошибку "Модуль не загружен"
+;; ИСПРАВЛЕНО: полный список аргументов для совместимости
+;; с вызовом из диспетчера
+;; ============================================================
+
+(defun cladding-main (layers report-mode export-excel
+                      export-txt create-table save-base / )
+  (princ "\nОБЛИЦОВКА: модуль в разработке.")
+  (princ "\nВыбранные слои: ")
+  (if layers
+    (foreach l layers (princ (strcat l " ")))
+    (princ "все")
+  )
+  (princ)
+  ;; Возвращаем T, чтобы диспетчер не считал это ошибкой
+  T
+)
+
+(defun vitrazh-main (layers report-mode export-excel
+                     export-txt create-table save-base / )
+  (princ "\nВИТРАЖ: модуль в разработке.")
+  (princ "\nВыбранные слои: ")
+  (if layers
+    (foreach l layers (princ (strcat l " ")))
+    (princ "все")
+  )
+  (princ)
+  ;; Возвращаем T, чтобы диспетчер не считал это ошибкой
+  T
+)
+
 (princ)
