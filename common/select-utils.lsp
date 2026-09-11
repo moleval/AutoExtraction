@@ -24,9 +24,18 @@
 ;;
 ;;; ИСПРАВЛЕНО (Этап Р2 — Ремонт кода):
 ;;;   Р2.2: обнуление *extraction-preselected-set* перенесено
-;;;         после проверки результата. Если фильтрация вернула
-;;;         пустой результат, предварительный выбор сохраняется
-;;;         для повторной попытки.
+;;;         после проверки результата
+;;
+;;; ИСПРАВЛЕНО (Этап Р3 — Ремонт кода, технический долг):
+;;;   Р3.2: двухступенчатый поиск длины в su-get-length:
+;;;         ступень 1 — точное "ДЛИНА",
+;;;         ступень 2 — подстрока "ДЛИНА" без "ШИРИНА"/"ВЫСОТА".
+;;;         Для CUTLINE поведение не меняется (блоки предварительно
+;;;         фильтруются по точному совпадению).
+;;;   Р3.3: кэш свойств динамических блоков по ename.
+;;;         Свойства читаются ОДИН раз за запуск и за ОДИН проход
+;;;         по GetDynamicBlockProperties (было до 9 перечислений
+;;;         на блок). Кэш сбрасывается в начале каждого выбора.
 ;;
 ;;; ПРАВИЛА ОТСЕИВАНИЯ (зафиксированы):
 ;;;   Блок принимается в раскрой хлыстов, если:
@@ -91,17 +100,128 @@
   )
 )
 
+
+;; ============================================================
+;; КЭШ СВОЙСТВ ДИНАМИЧЕСКИХ БЛОКОВ
+;; ДОБАВЛЕНО (Р3.3): устранение технического долга
+;;
+;; Проблема: каждый блок проверялся до 3 раз за запуск,
+;; и каждая проверка делала до 3 проходов по COM-свойствам
+;; (GetDynamicBlockProperties). Итого до 9 перечислений на блок.
+;;
+;; Решение:
+;;   - свойства читаются ОДИН раз за запуск (кэш по ename);
+;;   - чтение выполняется за ОДИН проход по свойствам;
+;;   - кэш сбрасывается в начале каждого выбора объектов.
+;;
+;; Формат записи кэша:
+;;   (ename . (has-len has-wid has-hei len-exact len-soft))
+;; ============================================================
+
+(if (not (boundp '*su-block-props-cache*))
+  (setq *su-block-props-cache* '())
+)
+
+;; Сброс кэша. Вызывается в начале каждого выбора объектов,
+;; чтобы изменения свойств блоков в чертеже не давали устаревших данных
+(defun su-block-props-cache-clear ()
+  (setq *su-block-props-cache* '())
+)
+
+;; ============================================================
+;; Чтение свойств блока за ОДИН проход, с кэшированием по ename
+;; ДОБАВЛЕНО (Р3.3)
+;;
+;; Возвращает список:
+;;   (has-len has-wid has-hei len-exact len-soft)
+;; где:
+;;   has-len   — есть свойство с точным именем "ДЛИНА"
+;;   has-wid   — есть свойство с подстрокой "ШИРИНА"
+;;   has-hei   — есть свойство с подстрокой "ВЫСОТА"
+;;   len-exact — значение свойства "ДЛИНА" (точное совпадение)
+;;   len-soft  — значение первого свойства, содержащего "ДЛИНА",
+;;               но не содержащего "ШИРИНА"/"ВЫСОТА"
+;;               (ступень 2 для Фасонки/Подсистемы, Р3.2)
+;; ============================================================
+(defun su-get-block-props (obj / ent cached dynprops prop pname pval
+                               has-len has-wid has-hei len-exact len-soft entry)
+  (setq ent (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+
+  (if (vl-catch-all-error-p ent)
+    '(nil nil nil nil nil)
+    (progn
+      (setq cached (assoc ent *su-block-props-cache*))
+      (if cached
+        (cdr cached)
+        (progn
+          (setq has-len nil has-wid nil has-hei nil
+                len-exact nil len-soft nil)
+
+          (setq dynprops
+            (vl-catch-all-apply 'vlax-invoke
+              (list obj 'GetDynamicBlockProperties)))
+
+          (if (not (vl-catch-all-error-p dynprops))
+            (foreach prop dynprops
+              (setq pname
+                (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+              (if (and (not (vl-catch-all-error-p pname))
+                       pname
+                       (= (type pname) 'STR))
+                (progn
+                  (setq pname (strcase (vl-string-trim " \t\r\n" pname)))
+                  (cond
+                    ;; Ступень 1: точное совпадение "ДЛИНА"
+                    ((= pname "ДЛИНА")
+                     (setq has-len T)
+                     (setq pval (vl-catch-all-apply 'vla-get-Value (list prop)))
+                     (if (not (vl-catch-all-error-p pval))
+                       (setq len-exact (su-value-to-number pval)))
+                    )
+                    ;; Ступень 2 (Р3.2): подстрока "ДЛИНА",
+                    ;; исключаем свойства вида "Ширина_Длина_зазора"
+                    ((and (vl-string-search "ДЛИНА" pname)
+                          (not (vl-string-search "ШИРИНА" pname))
+                          (not (vl-string-search "ВЫСОТА" pname)))
+                     (if (null len-soft)
+                       (progn
+                         (setq pval (vl-catch-all-apply 'vla-get-Value (list prop)))
+                         (if (not (vl-catch-all-error-p pval))
+                           (setq len-soft (su-value-to-number pval)))
+                       )
+                     )
+                    )
+                  )
+                  (if (vl-string-search "ШИРИНА" pname) (setq has-wid T))
+                  (if (vl-string-search "ВЫСОТА" pname) (setq has-hei T))
+                )
+              )
+            )
+          )
+
+          (setq entry (list has-len has-wid has-hei len-exact len-soft))
+          (setq *su-block-props-cache*
+            (cons (cons ent entry) *su-block-props-cache*))
+          entry
+        )
+      )
+    )
+  )
+)
+
+
 ;; ============================================================
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
+;; ИСПРАВЛЕНО (Р2.2): предвыбор обнуляется только при успехе
+;; ДОБАВЛЕНО (Р3.3): сброс кэша свойств в начале выбора
 ;; ============================================================
 (defun su-select-inserts (layers / ss i ent data layer out layer-name)
+  (su-block-props-cache-clear)   ;; ДОБАВЛЕНО (Р3.3)
   (setq out '())
 
   (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
     (progn
       (setq ss *extraction-preselected-set*)
-      ;; ИСПРАВЛЕНО (Р2.2): обнуляем только если результат непустой
-      ;; (см. проверку после фильтрации ниже)
     )
     (setq ss (ssget "_I"))
   )
@@ -237,178 +357,55 @@
 )
 
 ;; ============================================================
-;; Проверка наличия свойства "ДЛИНА" у динамического блока
-;; ДОБАВЛЕНО (Этап 2.1)
-;; СТРОГИЙ ПОИСК (Вариант А): точное совпадение "ДЛИНА"
-;; (регистронезависимо через strcase)
-;; Возвращает: T если свойство найдено, иначе nil
+;; Проверки свойств через кэш
+;; ОБНОВЛЕНО (Р3.3): ранее каждая функция делала отдельный
+;; проход по GetDynamicBlockProperties
 ;; ============================================================
-(defun su-has-length-property (obj / dynprops prop pname result)
-  (setq result nil)
-  (setq dynprops
-    (vl-catch-all-apply
-      'vlax-invoke
-      (list obj 'GetDynamicBlockProperties)
-    )
-  )
-  (if (not (vl-catch-all-error-p dynprops))
-    (foreach prop dynprops
-      (if (null result)
-        (progn
-          (setq pname
-            (vl-catch-all-apply
-              'vla-get-PropertyName
-              (list prop)
-            )
-          )
-          (if (and
-                (not (vl-catch-all-error-p pname))
-                pname
-                (= (type pname) 'STR)
-                (= (strcase pname) "ДЛИНА")
-              )
-            (setq result T)
-          )
-        )
-      )
-    )
-  )
-  result
+(defun su-has-length-property (obj)
+  (car (su-get-block-props obj))
 )
 
-;; ============================================================
-;; Проверка наличия свойства "ШИРИНА" у динамического блока
-;; ДОБАВЛЕНО (Этап 2.1)
-;; ПОИСК ПО ПОДСТРОКЕ: любое свойство, содержащее "ШИРИНА"
-;; (регистронезависимо)
-;; Возвращает: T если свойство найдено, иначе nil
-;; ============================================================
-(defun su-has-width-property (obj / dynprops prop pname result)
-  (setq result nil)
-  (setq dynprops
-    (vl-catch-all-apply
-      'vlax-invoke
-      (list obj 'GetDynamicBlockProperties)
-    )
-  )
-  (if (not (vl-catch-all-error-p dynprops))
-    (foreach prop dynprops
-      (if (null result)
-        (progn
-          (setq pname
-            (vl-catch-all-apply
-              'vla-get-PropertyName
-              (list prop)
-            )
-          )
-          (if (and
-                (not (vl-catch-all-error-p pname))
-                pname
-                (= (type pname) 'STR)
-                (vl-string-search "ШИРИНА" (strcase pname))
-              )
-            (setq result T)
-          )
-        )
-      )
-    )
-  )
-  result
+(defun su-has-width-property (obj)
+  (cadr (su-get-block-props obj))
 )
 
-;; ============================================================
-;; Проверка наличия свойства "ВЫСОТА" у динамического блока
-;; ДОБАВЛЕНО (Этап 2.1)
-;; ПОИСК ПО ПОДСТРОКЕ: любое свойство, содержащее "ВЫСОТА"
-;; (регистронезависимо)
-;; Возвращает: T если свойство найдено, иначе nil
-;; ============================================================
-(defun su-has-height-property (obj / dynprops prop pname result)
-  (setq result nil)
-  (setq dynprops
-    (vl-catch-all-apply
-      'vlax-invoke
-      (list obj 'GetDynamicBlockProperties)
-    )
-  )
-  (if (not (vl-catch-all-error-p dynprops))
-    (foreach prop dynprops
-      (if (null result)
-        (progn
-          (setq pname
-            (vl-catch-all-apply
-              'vla-get-PropertyName
-              (list prop)
-            )
-          )
-          (if (and
-                (not (vl-catch-all-error-p pname))
-                pname
-                (= (type pname) 'STR)
-                (vl-string-search "ВЫСОТА" (strcase pname))
-              )
-            (setq result T)
-          )
-        )
-      )
-    )
-  )
-  result
+(defun su-has-height-property (obj)
+  (caddr (su-get-block-props obj))
 )
 
 ;; ============================================================
 ;; Проверка пригодности динамического блока для раскроя хлыстов
-;; ДОБАВЛЕНО (Этап 2.1)
-;;
-;; БЛОК ПРИГОДЕН, ЕСЛИ:
+;; ЛОГИКА БЕЗ ИЗМЕНЕНИЙ, но через кэш (Р3.3):
 ;;   ? Есть свойство "ДЛИНА" (точное совпадение)
 ;;   ? НЕТ свойства с подстрокой "ШИРИНА"
 ;;   ? НЕТ свойства с подстрокой "ВЫСОТА"
-;;
-;; Возвращает: T если блок пригоден, иначе nil
 ;; ============================================================
-(defun su-is-valid-stock-block (obj)
-  (and
-    ;; Есть точное свойство "ДЛИНА"
-    (su-has-length-property obj)
-    ;; НЕТ "ШИРИНА"
-    (not (su-has-width-property obj))
-    ;; НЕТ "ВЫСОТА"
-    (not (su-has-height-property obj))
-  )
+(defun su-is-valid-stock-block (obj / p)
+  (setq p (su-get-block-props obj))
+  (and (car p) (not (cadr p)) (not (caddr p)))
 )
 
 ;; ============================================================
 ;; Получение имени типа динамического блока
 ;; ДОБАВЛЕНО (Этап 3.1): вынесено из cutline.lsp для унификации
 ;;
-;; Используется в:
-;;   - CUTLINE (выпадающий список типов блоков)
-;;   - SUBSYSTEM (группировка по типам в отчёте)
-;;   - CUTSHEET (будущий модуль раскроя листа)
-;;
 ;; Логика:
 ;;   1. Если есть свойство "Видимость" с непустым значением
 ;;      ? возвращаем значение видимости
 ;;   2. Иначе ? возвращаем EffectiveName блока
 ;;   3. Если оба недоступны ? "Без имени"
-;;
-;; Возвращает: строка — имя типа блока
 ;; ============================================================
 (defun su-get-dynblock-type-name (ent / obj vis name)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
   (if (vl-catch-all-error-p obj)
     "Без имени"
     (progn
-      ;; Пробуем получить видимость
       (setq vis (vl-catch-all-apply 'su-get-visibility (list obj)))
       (if (or (vl-catch-all-error-p vis) (null vis) (not (= (type vis) 'STR)))
         (setq vis nil)
       )
-      ;; Если видимость есть и непустая — используем её
       (if (and vis (> (strlen (vl-string-trim " \t\r\n" vis)) 0))
         (vl-string-trim " \t\r\n" vis)
-        ;; Иначе — EffectiveName
         (progn
           (setq name (vl-catch-all-apply 'su-get-effective-name (list obj)))
           (if (or (vl-catch-all-error-p name) (null name) (not (= (type name) 'STR)))
@@ -426,16 +423,11 @@
 
 ;; ============================================================
 ;; Сбор уникальных типов динамических блоков из набора
-;; ДОБАВЛЕНО (Этап 3.1): вынесено из cutline.lsp для унификации
+;; ДОБАВЛЕНО (Этап 3.1)
 ;;
 ;; Параметры:
 ;;   ss        — selection set
 ;;   filter-fn — функция проверки пригодности блока (или nil для всех)
-;;
-;; Используется в:
-;;   - CUTLINE: (su-collect-dynblock-types ss 'su-is-valid-stock-block)
-;;   - SUBSYSTEM: (su-collect-dynblock-types ss nil)
-;;   - CUTSHEET: (su-collect-dynblock-types ss 'su-is-valid-sheet-block)
 ;;
 ;; Возвращает: отсортированный список строк — имена типов
 ;; ============================================================
@@ -451,7 +443,6 @@
           (progn
             (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
             (if (not (vl-catch-all-error-p obj))
-              ;; Проверяем пригодность блока (если задан фильтр)
               (if (or (null filter-fn)
                       (apply filter-fn (list obj)))
                 (progn
@@ -466,7 +457,6 @@
         )
         (setq i (1+ i))
       )
-      ;; Сортируем по алфавиту
       (vl-sort types '(lambda (a b) (< (strcase a) (strcase b))))
     )
   )
@@ -474,64 +464,25 @@
 
 ;; ============================================================
 ;; Получение длины из динамических свойств
-;; ОБНОВЛЕНО (Этап 2.1): защита от ошибок через vl-catch-all-apply
+;; ОБНОВЛЕНО (Р3.2): двухступенчатый поиск
+;;   Ступень 1: точное совпадение "ДЛИНА"
+;;   Ступень 2: подстрока "ДЛИНА" (без "ШИРИНА"/"ВЫСОТА")
+;; ОБНОВЛЕНО (Р3.3): значение берётся из кэша
 ;;
-;; СТРОГИЙ ПОИСК (Вариант А):
-;;   Только точное совпадение "ДЛИНА" (регистронезависимо)
+;; Для CUTLINE поведение не меняется: блоки предварительно
+;; фильтруются по точному совпадению, поэтому ступень 2
+;; в раскрое никогда не срабатывает.
+;; Для Фасонки и Подсистемы ступень 2 спасает блоки
+;; с именами свойств вида "Длина профиля".
 ;;
-;; Это защищает от ложных срабатываний на свойства типа:
-;;   "Длина общая", "Полная длина", "Ширина_Длина_зазора"
-;;
-;; Возвращает: длина в мм (целое число) или nil
+;; Возвращает: длина в мм (целое) или nil
 ;; ============================================================
-(defun su-get-length (obj / dynprops prop pname value result)
-  (setq result nil)
-  (setq dynprops
-    (vl-catch-all-apply
-      'vlax-invoke
-      (list obj 'GetDynamicBlockProperties)
-    )
-  )
-
-  (if (not (vl-catch-all-error-p dynprops))
-    (progn
-      (foreach prop dynprops
-        (if (null result)
-          (progn
-            (setq pname
-              (vl-catch-all-apply
-                'vla-get-PropertyName
-                (list prop)
-              )
-            )
-            (if (and
-                  (not (vl-catch-all-error-p pname))
-                  pname
-                  (= (type pname) 'STR)
-                  (= (strcase pname) "ДЛИНА")
-                )
-              (progn
-                (setq value
-                  (vl-catch-all-apply
-                    'vla-get-Value
-                    (list prop)
-                  )
-                )
-                (if (not (vl-catch-all-error-p value))
-                  (setq result (su-value-to-number value))
-                )
-              )
-            )
-          )
-        )
-      )
-
-      ;; Округление до целого числа (мм)
-      (if (numberp result)
-        (atoi (rtos result 2 0))
-        nil
-      )
-    )
+(defun su-get-length (obj / p len)
+  (setq p (su-get-block-props obj))
+  (setq len (if (car p) (nth 3 p) (nth 4 p)))
+  (if (numberp len)
+    (atoi (rtos len 2 0))
+    nil
   )
 )
 
@@ -592,19 +543,6 @@
 ;; ============================================================
 ;; Типы объектов, допустимые в CUTLINE
 ;; ============================================================
-;; Раскрой хлыстов принимает:
-;;   LINE   — отрезок;
-;;   MLINE  — мультилиния;
-;;   INSERT — динамический блок (с отсевом через
-;;            su-is-valid-stock-block на этапе пост-фильтрации).
-;;
-;; Дуги, эллипсы, сплайны, полилинии — не принимаются.
-;;
-;; ДОБАВЛЕНО (Этап 2.2):
-;;   "INSERT" добавлен для поддержки динамических блоков.
-;;   Отсеивание непригодных блоков выполняется в
-;;   su-select-cutline-objects через su-filter-dynblocks.
-;; ============================================================
 
 (setq *su-cutline-types* '("LINE" "MLINE" "INSERT"))
 
@@ -639,17 +577,6 @@
 ;; ============================================================
 ;; Пост-фильтрация динамических блоков для раскроя
 ;; ДОБАВЛЕНО (Этап 2.2)
-;;
-;; Для каждого INSERT проверяется пригодность через
-;; su-is-valid-stock-block:
-;;   ? Есть свойство "ДЛИНА" (точное совпадение)
-;;   ? НЕТ свойства с подстрокой "ШИРИНА"
-;;   ? НЕТ свойства с подстрокой "ВЫСОТА"
-;;
-;; Непригодные блоки отсеиваются.
-;; LINE и MLINE принимаются без проверки.
-;;
-;; Возвращает: отфильтрованный набор или nil
 ;; ============================================================
 (defun su-filter-dynblocks (ss / i ent typ obj new-ss)
   (if (null ss)
@@ -662,12 +589,10 @@
         (setq typ (cdr (assoc 0 (entget ent))))
 
         (cond
-          ;; LINE и MLINE — принимаем без проверки
           ((or (= typ "LINE") (= typ "MLINE"))
            (ssadd ent new-ss)
           )
 
-          ;; INSERT — проверяем пригодность
           ((= typ "INSERT")
            (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
            (if (and
@@ -708,12 +633,15 @@
   )
 )
 
+
 ;; ============================================================
 ;; Извлечение исходного набора объектов для CUTLINE
 ;; ИСПРАВЛЕНО (Р2.2): предвыбор НЕ обнуляется при пустом
-;; результате фильтрации — сохраняется для повторной попытки
+;; результате фильтрации
+;; ДОБАВЛЕНО (Р3.3): сброс кэша свойств в начале выбора
 ;; ============================================================
 (defun su-select-cutline-objects (layers / ss ssfilter raw-count pre-ss)
+  (su-block-props-cache-clear)   ;; ДОБАВЛЕНО (Р3.3)
   (setq ss nil)
   (setq ssfilter (su-build-cutline-ssfilter layers))
 
