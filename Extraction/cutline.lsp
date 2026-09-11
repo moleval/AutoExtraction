@@ -24,7 +24,7 @@
 ;;;
 ;;; ИСПРАВЛЕНО (аудит):
 ;;;   - n1-draw-text: защита от nil-цвета
-;;;   - n1-draw-summary: убрано магическое 100.0, точный расчёт tableH
+;;;   - n1-draw-summary: убрано магическое 100.0, точный расчет tableH
 ;;;   - n1-draw-oversized: исправлена опечатка *NEСТ-COLOR-HEADER*
 ;;;                        (латиница) ? *NEST-COLOR-HEADER*
 ;;;   - n1-draw-oversized: убрано магическое 100.0
@@ -201,7 +201,9 @@
   (setq bars '())
   (setq skip 0)
   (foreach p sorted-pieces
-    (if (> p stock)
+    ;; p + kerf > stock: даже один рез не помещается — не размещаем,
+    ;; иначе отход хлыста станет отрицательным (деталь ровно в хлыст при kerf > 0)
+    (if (> (+ p kerf) stock)
       (setq skip (1+ skip))
       (progn
         (setq placed nil j 0)
@@ -240,7 +242,7 @@
 )
 
 ;; ============================================================
-;; Подсчёт объектов по типам
+;; Подсчет объектов по типам
 ;; ============================================================
 (defun n1-count-by-type (ss / i ent typ counts found obj len)
   (setq counts '(("LINE" . 0) ("MLINE" . 0) ("DYNBLOCK" . 0)) i 0)
@@ -338,7 +340,7 @@
   )
 )
 
-;; Безопасные обёртки
+;; Безопасные обертки
 (defun n1-safe-set-tile (key value)
   (vl-catch-all-apply 'set_tile (list key value))
 )
@@ -424,7 +426,8 @@
                 '(lambda ()
                    (start_list "lst_layers")
                    (foreach l base-layers (add_list l))
-                   (end_list)))
+                   (end_list))
+                nil)
 
               (cond
                 ((and (> line-cnt 0) (> mline-cnt 0))
@@ -659,7 +662,7 @@
 ;; Сводная таблица раскроя
 ;; ИСПРАВЛЕНО:
 ;;   - убрано магическое 100.0, y привязан к pad и rowH
-;;   - точный расчёт tableH
+;;   - точный расчет tableH
 ;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
     barHeight th rowH pad col1W col2W col3W tableW tableH
@@ -764,7 +767,7 @@
 )
 
 ;; ============================================================
-;; Таблица неразмещённых деталей
+;; Таблица неразмещенных деталей
 ;; ИСПРАВЛЕНО:
 ;;   - *NEСТ-COLOR-HEADER* ? *NEST-COLOR-HEADER*
 ;;   - убрано магическое 100.0
@@ -1112,9 +1115,9 @@
       (write-line "    <Cell><Data ss:Type=\"String\"></Data></Cell>" f)
       (write-line "   </Row>" f)
 
-      ;; Блок отчёта (столбцы B-D)
+      ;; Блок отчета (столбцы B-D)
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">ОТЧЁТ</Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">ОТЧЕТ</Data></Cell>" f)
       (write-line "   </Row>" f)
 
       (write-line "   <Row>" f)
@@ -1154,7 +1157,7 @@
       (write-line (strcat "    <Cell ss:StyleID=\"ReportKpd\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">" (rtos kpd 2 1) " %</Data></Cell>") f)
       (write-line "   </Row>" f)
 
-      ;; Секция неразмещённых (столбцы B-D)
+      ;; Секция неразмещенных (столбцы B-D)
       (if oversized
         (progn
           (write-line "   <Row>" f)
@@ -1334,7 +1337,7 @@
   (cond
     ((vl-catch-all-error-p r)
      (princ (strcat "\nОшибка диалога: " (vl-catch-all-error-message r)))
-     (princ "\nРаскрой отменён.")
+     (princ "\nРаскрой отменен.")
      (princ) (exit)
     )
     ((null r)
@@ -1445,7 +1448,7 @@
         )
       )
     )
-    (princ "\nГалочка .xls снята — файл не создаётся.")
+    (princ "\nГалочка .xls снята — файл не создается.")
   )
 
   ;; 8. Раскладка AutoCAD

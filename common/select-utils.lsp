@@ -78,13 +78,13 @@
 )
 
 ;; Выбор вхождений блоков (INSERT) с учётом предварительного выбора
-(defun su-select-inserts (layers / ss i ent data layer out layer-name)
+(defun su-select-inserts (layers / ss i ent data layer out layer-name preset-used)
   (setq out '())
 
   (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
     (progn
       (setq ss *extraction-preselected-set*)
-      (setq *extraction-preselected-set* nil)
+      (setq preset-used T)  ; очистим глобал только после УСПЕШНОЙ фильтрации
     )
     (setq ss (ssget "_I"))
   )
@@ -121,6 +121,10 @@
     )
   )
 
+  ;; Предвыбор очищается только после успешной обработки
+  (if preset-used
+    (setq *extraction-preselected-set* nil)
+  )
   (reverse out)
 )
 
@@ -360,7 +364,7 @@
 ;;
 ;; Возвращает: длина в мм (целое число) или nil
 ;; ============================================================
-(defun su-get-length (obj / dynprops prop pname value result)
+(defun su-get-length (obj / dynprops pass prop pname value result)
   (setq result nil)
   (setq dynprops
     (vl-catch-all-apply
@@ -371,6 +375,10 @@
 
   (if (not (vl-catch-all-error-p dynprops))
     (progn
+      ;; Проход 1: строгое имя «ДЛИНА»; проход 2: имя, содержащее «ДЛИНА»
+      ;; («Длина профиля», «ДЛИНА1» и т.п.)
+      (setq pass 1)
+      (while (and (null result) (<= pass 2))
       (foreach prop dynprops
         (if (null result)
           (progn
@@ -384,7 +392,10 @@
                   (not (vl-catch-all-error-p pname))
                   pname
                   (= (type pname) 'STR)
-                  (= (strcase pname) "ДЛИНА")
+                  (if (= pass 1)
+                    (= (strcase pname) "ДЛИНА")
+                    (wcmatch (strcase pname) "*ДЛИНА*")
+                  )
                 )
               (progn
                 (setq value
@@ -400,6 +411,8 @@
             )
           )
         )
+      )
+      (setq pass (1+ pass))
       )
 
       ;; Округление до целого числа (мм)
