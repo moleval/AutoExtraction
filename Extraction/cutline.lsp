@@ -17,6 +17,8 @@
 ;;;   Этап 2.4: Диалог с 4 радиокнопками
 ;;;   Этап 3.1: Выпадающий список типов блоков
 ;;;             (функции вынесены в common/select-utils.lsp)
+;;;   Этап 3.2: Динамическое обновление количества блоков
+;;;             и сортировка неразмещённых деталей
 ;;
 ;;; ТИПЫ РАСКРОЯ (диалог):
 ;;;   Только линии
@@ -29,6 +31,10 @@
 ;;;                в common/select-utils.lsp для унификации
 ;;;                с Подсистемой (su-get-dynblock-type-name,
 ;;;                su-collect-dynblock-types)
+;;;   - Этап 3.2: динамическое обновление количества блоков
+;;;                при выборе типа из выпадающего списка
+;;;   - Этап 3.2: сортировка неразмещённых деталей по убыванию
+;;;                длины в консоли, таблице и экспорте
 ;;; ============================================================
 (vl-load-com)
 
@@ -70,6 +76,11 @@
 ;; ДОБАВЛЕНО (Этап 3.1): список уникальных типов динамических блоков
 (if (not (boundp '*n1-dynblock-types-list*))
   (setq *n1-dynblock-types-list* '())
+)
+
+;; ДОБАВЛЕНО (Этап 3.2): сохранение набора для пересчёта при выборе типа
+(if (not (boundp '*n1-cutline-ss*))
+  (setq *n1-cutline-ss* nil)
 )
 
 (if (not (boundp '*CUTLINE-LAST-STOCK*)) (setq *CUTLINE-LAST-STOCK* *CUTLINE-DEFAULT-STOCK*))
@@ -361,7 +372,7 @@
                        (= type-name "Все типы блоков"))
                  (ssadd ent new-ss)
                  (progn
-                   ;; ИСПРАВЛЕНО (Этап 3.1): используем общую функцию
+                   ;; Используем общую функцию из common/select-utils.lsp
                    (setq block-type-name (su-get-dynblock-type-name ent))
                    (if (= block-type-name type-name)
                      (ssadd ent new-ss)
@@ -380,6 +391,51 @@
     (setq i (1+ i))
   )
   new-ss
+)
+
+;; ============================================================
+;; Подсчёт динамических блоков конкретного типа
+;; ДОБАВЛЕНО (Этап 3.2): для динамического обновления количества
+;; в диалоге при выборе типа из выпадающего списка
+;;
+;; Если type-name пустой или "Все типы блоков" — считаем все
+;; подходящие блоки. Иначе — только с совпадающим именем типа.
+;; ============================================================
+(defun n1-count-dynblock-by-type (ss type-name
+                                  / i ent typ obj count block-type-name)
+  (setq count 0 i 0)
+  (if (null ss)
+    0
+    (progn
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq typ (cdr (assoc 0 (entget ent))))
+        (if (= typ "INSERT")
+          (progn
+            (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+            (if (and (not (vl-catch-all-error-p obj))
+                     (su-is-valid-stock-block obj))
+              (progn
+                (if (or (null type-name)
+                        (= type-name "")
+                        (= type-name "Все типы блоков"))
+                  (setq count (1+ count))
+                  (progn
+                    (setq block-type-name (su-get-dynblock-type-name ent))
+                    (if (= block-type-name type-name)
+                      (setq count (1+ count))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+      count
+    )
+  )
 )
 
 (defun n1-filter-name-str ( / f1 f2 f3 s)
@@ -446,24 +502,36 @@
 
 ;; ============================================================
 ;; Обработчик выбора типа динамического блока
-;; ДОБАВЛЕНО (Этап 3.1)
+;; ОБНОВЛЕНО (Этап 3.2): динамическое обновление количества блоков
 ;;
 ;; При выборе конкретного типа:
 ;;   - Сохраняем его в *n1-tmp-dynblock-type*
 ;;   - Переключаем радиокнопку на "Динамические блоки"
+;;   - Обновляем количество блоков этого типа в диалоге
 ;;
 ;; При выборе "Все типы блоков" (индекс 0):
 ;;   - Сбрасываем *n1-tmp-dynblock-type* в ""
+;;   - Обновляем количество на общее число динамических блоков
 ;; ============================================================
-(defun n1-on-dynblock-type-changed (value / idx type-name)
+(defun n1-on-dynblock-type-changed (value / idx type-name new-count)
   (setq idx (atoi value))
   (if (= idx 0)
     ;; "Все типы блоков" — сброс
-    (setq *n1-tmp-dynblock-type* "")
+    (progn
+      (setq *n1-tmp-dynblock-type* "")
+      ;; Пересчитываем общее количество динамических блоков
+      (setq new-count (n1-count-dynblock-by-type *n1-cutline-ss* ""))
+      (n1-safe-set-tile "txt_dynblock_count"
+        (strcat (itoa new-count) " шт."))
+    )
     (progn
       ;; Конкретный тип
       (setq type-name (nth (1- idx) *n1-dynblock-types-list*))
       (setq *n1-tmp-dynblock-type* type-name)
+      ;; Пересчитываем количество блоков этого типа
+      (setq new-count (n1-count-dynblock-by-type *n1-cutline-ss* type-name))
+      (n1-safe-set-tile "txt_dynblock_count"
+        (strcat (itoa new-count) " шт."))
       ;; Автопереключение на "Динамические блоки"
       (n1-select-radio "rb_dynblock")
     )
@@ -473,6 +541,7 @@
 ;; ============================================================
 ;; Диалог параметров раскроя
 ;; ОБНОВЛЕНО (Этап 3.1): добавлен выпадающий список типов блоков
+;; ОБНОВЛЕНО (Этап 3.2): сохранение набора для пересчёта
 ;; ============================================================
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           ss-for-types
@@ -522,6 +591,10 @@
                 (strcat (itoa dynblock-cnt) " шт."))
               (n1-safe-set-tile "txt_both_count"
                 (strcat (itoa all-cnt) " шт."))
+
+              ;; ДОБАВЛЕНО (Этап 3.2): сохраняем набор для пересчёта
+              ;; при выборе типа из выпадающего списка
+              (setq *n1-cutline-ss* ss-for-types)
 
               ;; ---- Заполнение выпадающего списка типов блоков ----
               ;; ДОБАВЛЕНО (Этап 3.1): используем общую функцию из
@@ -708,14 +781,23 @@
   (list (reverse ok) (reverse oversized))
 )
 
-(defun n1-report-oversized (oversized stock / rec total-cnt)
+;; ============================================================
+;; Вывод неразмещённых деталей в консоль
+;; ОБНОВЛЕНО (Этап 3.2): сортировка по убыванию длины
+;; ============================================================
+(defun n1-report-oversized (oversized stock / rec total-cnt sorted)
   (if oversized
     (progn
       (princ "\n")
       (princ "\n=== НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ ===")
       (princ (strcat "\n(длина превышает хлыст " (rtos stock 2 0) " мм)"))
+
+      ;; Сортировка по убыванию длины
+      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
+      (setq sorted (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
+
       (setq total-cnt 0)
-      (foreach rec oversized
+      (foreach rec sorted
         (setq total-cnt (+ total-cnt (cadr rec)))
         (princ (strcat "\n  Длина " (rtos (car rec) 2 0)
                        " мм, кол-во " (itoa (cadr rec)) " шт."))
@@ -763,7 +845,7 @@
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    (setq labelX (- x0 (* barHeight 2.25)))
+    (setq labelX (- x0 (* barHeight 2.75)))
     (setq labelY1 (+ y0 (* barHeight 0.65)))
     (setq labelY2 (+ y0 (* barHeight 0.20)))
     (n1-draw-text (list labelX labelY1) txtH
@@ -902,6 +984,7 @@
 
 ;; ============================================================
 ;; Таблица неразмещённых деталей
+;; ОБНОВЛЕНО (Этап 3.2): сортировка по убыванию длины
 ;; ============================================================
 (defun n1-draw-oversized (oversized stock insPt /
     barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
@@ -934,6 +1017,10 @@
       (n1-draw-text (list x1 y) th
                     (strcat "(длина превышает хлыст " (rtos stock 2 0) " мм)")
                     *NEST-COLOR-VALUE*)
+
+      ;; Сортировка по убыванию длины
+      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
+      (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
 
       (setq y (- y rowH))
       (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
@@ -981,6 +1068,7 @@
 
 ;; ============================================================
 ;; XLS-экспорт
+;; ОБНОВЛЕНО (Этап 3.2): сортировка неразмещённых по убыванию
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
                      num-bars stock-total-mm product-total-mm kpd /
@@ -994,11 +1082,17 @@
     nil
     (progn
       (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
+
+      ;; Сортировка по убыванию длины
+      ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
       (if oversized
-        (foreach rec oversized
-          (setq total-cnt-unplaced (+ total-cnt-unplaced (cadr rec)))
-          (setq total-sum-unplaced (+ total-sum-unplaced
-                                      (/ (* (car rec) (cadr rec)) 1000.0)))
+        (progn
+          (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
+          (foreach rec oversized
+            (setq total-cnt-unplaced (+ total-cnt-unplaced (cadr rec)))
+            (setq total-sum-unplaced (+ total-sum-unplaced
+                                        (/ (* (car rec) (cadr rec)) 1000.0)))
+          )
         )
       )
 
@@ -1288,6 +1382,7 @@
       (write-line "   </Row>" f)
 
       ;; Секция неразмещённых (столбцы B-D)
+      ;; oversized уже отсортирован по убыванию выше
       (if oversized
         (progn
           (write-line "   <Row>" f)
@@ -1329,6 +1424,7 @@
 )
 
 ;; ---------- CSV-экспорт (fallback) ----------
+;; ОБНОВЛЕНО (Этап 3.2): сортировка неразмещённых по убыванию
 (defun n1-write-csv (bars stock kerf oversized /
                        fname f i bar pieces waste used util rec
                        total-cnt-unplaced total-sum-unplaced)
@@ -1350,6 +1446,10 @@
       )
       (if oversized
         (progn
+          ;; Сортировка по убыванию длины
+          ;; ДОБАВЛЕНО (Этап 3.2): по запросу пользователя
+          (setq oversized (vl-sort oversized '(lambda (a b) (> (car a) (car b)))))
+
           (setq total-cnt-unplaced 0 total-sum-unplaced 0.0)
           (foreach rec oversized
             (setq total-cnt-unplaced (+ total-cnt-unplaced (cadr rec)))

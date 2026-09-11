@@ -1,16 +1,18 @@
 // ============================================================
 // cutline_filter.dcl — Параметры раскроя хлыстов CUTLINE
 //
-// ОБНОВЛЕНО (Этап 3.1):
-//   Добавлен выпадающий список "Тип блока:" для выбора
-//   конкретного типа динамического блока
+// ОБНОВЛЕНО (Этап 3.3):
+//   - Фиксированные ширины для выравнивания количества
+//   - list_box вместо popup_list для отображения полных
+//     наименований типов блоков
 // ============================================================
 
 cutline_filter_dialog : dialog {
   label = "Раскрой хлыстов";
 
   // ----------------------------------------------------------
-  // ТИПЫ ДЛЯ РАСКРОЯ (с количеством справа, прижатым к краю)
+  // ТИПЫ ДЛЯ РАСКРОЯ (с количеством справа, выровненным)
+  // ОБНОВЛЕНО (Этап 3.3): фиксированные ширины для выравнивания
   // ----------------------------------------------------------
   : boxed_column {
     label = "Какие детали раскроить";
@@ -19,12 +21,13 @@ cutline_filter_dialog : dialog {
       : radio_button {
         key = "rb_line";
         label = "Только линии";
+        width = 24;
       }
-      : spacer { }
       : text {
         key = "txt_line_count";
         label = "";
         alignment = right;
+        width = 12;
       }
     }
 
@@ -32,12 +35,13 @@ cutline_filter_dialog : dialog {
       : radio_button {
         key = "rb_mline";
         label = "Только мультилинии";
+        width = 24;
       }
-      : spacer { }
       : text {
         key = "txt_mline_count";
         label = "";
         alignment = right;
+        width = 12;
       }
     }
 
@@ -45,12 +49,13 @@ cutline_filter_dialog : dialog {
       : radio_button {
         key = "rb_dynblock";
         label = "Динамические блоки";
+        width = 24;
       }
-      : spacer { }
       : text {
         key = "txt_dynblock_count";
         label = "";
         alignment = right;
+        width = 12;
       }
     }
 
@@ -58,29 +63,29 @@ cutline_filter_dialog : dialog {
       : radio_button {
         key = "rb_both";
         label = "Все типы";
+        width = 24;
       }
-      : spacer { }
       : text {
         key = "txt_both_count";
         label = "";
         alignment = right;
+        width = 12;
       }
     }
+  }
 
-    // ----------------------------------------------------------
-    // Выпадающий список типов динамических блоков
-    // ДОБАВЛЕНО (Этап 3.1)
-    // ----------------------------------------------------------
-    : row {
-      : text {
-        key = "txt_dynblock_filter_label";
-        label = "Тип блока:";
-        width = 18;
-      }
-      : popup_list {
-        key = "popup_dynblock_type";
-        width = 30;
-      }
+  // ----------------------------------------------------------
+  // ТИП БЛОКА (выпадающий список)
+  // ОБНОВЛЕНО (Этап 3.3): list_box вместо popup_list
+  // для отображения полных наименований
+  // ----------------------------------------------------------
+  : boxed_column {
+    label = "Тип блока";
+
+    : list_box {
+      key = "popup_dynblock_type";
+      width = 50;
+      height = 5;
     }
   }
 
