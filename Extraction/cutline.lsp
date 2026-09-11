@@ -1346,7 +1346,7 @@
 
       ;; ֱכמך מעק¸עא (סעמכבצû B-D)
       (write-line "   <Row>" f)
-      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">־ׂ׳¨ׂ</Data></Cell>" f)
+      (write-line "    <Cell ss:Index=\"2\" ss:StyleID=\"ReportTitle\" ss:MergeAcross=\"2\"><Data ss:Type=\"String\">־ׂ׳ֵׂ</Data></Cell>" f)
       (write-line "   </Row>" f)
 
       (write-line "   <Row>" f)
