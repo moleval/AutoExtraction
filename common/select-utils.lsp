@@ -18,6 +18,10 @@
 ;;;   su-build-cutline-ssfilter — добавлен INSERT в фильтр
 ;;;   su-select-cutline-objects — вызов пост-фильтрации
 ;;
+;;; ДОБАВЛЕНО (Этап 3.1 — унификация с Подсистемой):
+;;;   su-get-dynblock-type-name  — имя типа блока (Видимость или имя)
+;;;   su-collect-dynblock-types  — сбор уникальных типов
+;;
 ;;; ПРАВИЛА ОТСЕИВАНИЯ (зафиксированы):
 ;;;   Блок принимается в раскрой хлыстов, если:
 ;;;     ? Есть свойство "ДЛИНА" (точное совпадение)
@@ -339,12 +343,103 @@
 ;; ============================================================
 (defun su-is-valid-stock-block (obj)
   (and
-    ;; Есть точное свойство "ДЛИНА"
     (su-has-length-property obj)
-    ;; НЕТ "ШИРИНА"
     (not (su-has-width-property obj))
-    ;; НЕТ "ВЫСОТА"
     (not (su-has-height-property obj))
+  )
+)
+
+;; ============================================================
+;; Получение имени типа динамического блока
+;; ДОБАВЛЕНО (Этап 3.1): вынесено из cutline.lsp для унификации
+;;
+;; Используется в:
+;;   - CUTLINE (выпадающий список типов блоков)
+;;   - SUBSYSTEM (группировка по типам в отчёте)
+;;   - CUTSHEET (будущий модуль раскроя листа)
+;;
+;; Логика:
+;;   1. Если есть свойство "Видимость" с непустым значением
+;;      ? возвращаем значение видимости
+;;   2. Иначе ? возвращаем EffectiveName блока
+;;   3. Если оба недоступны ? "Без имени"
+;;
+;; Возвращает: строка — имя типа блока
+;; ============================================================
+(defun su-get-dynblock-type-name (ent / obj vis name)
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+  (if (vl-catch-all-error-p obj)
+    "Без имени"
+    (progn
+      ;; Пробуем получить видимость
+      (setq vis (vl-catch-all-apply 'su-get-visibility (list obj)))
+      (if (or (vl-catch-all-error-p vis) (null vis) (not (= (type vis) 'STR)))
+        (setq vis nil)
+      )
+      ;; Если видимость есть и непустая — используем её
+      (if (and vis (> (strlen (vl-string-trim " \t\r\n" vis)) 0))
+        (vl-string-trim " \t\r\n" vis)
+        ;; Иначе — EffectiveName
+        (progn
+          (setq name (vl-catch-all-apply 'su-get-effective-name (list obj)))
+          (if (or (vl-catch-all-error-p name) (null name) (not (= (type name) 'STR)))
+            "Без имени"
+            (if (> (strlen (vl-string-trim " \t\r\n" name)) 0)
+              (vl-string-trim " \t\r\n" name)
+              "Без имени"
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; ============================================================
+;; Сбор уникальных типов динамических блоков из набора
+;; ДОБАВЛЕНО (Этап 3.1): вынесено из cutline.lsp для унификации
+;;
+;; Параметры:
+;;   ss        — selection set
+;;   filter-fn — функция проверки пригодности блока (или nil для всех)
+;;
+;; Используется в:
+;;   - CUTLINE: (su-collect-dynblock-types ss 'su-is-valid-stock-block)
+;;   - SUBSYSTEM: (su-collect-dynblock-types ss nil)
+;;   - CUTSHEET: (su-collect-dynblock-types ss 'su-is-valid-sheet-block)
+;;
+;; Возвращает: отсортированный список строк — имена типов
+;; ============================================================
+(defun su-collect-dynblock-types (ss filter-fn / i ent typ obj types type-name)
+  (setq types '() i 0)
+  (if (null ss)
+    '()
+    (progn
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq typ (cdr (assoc 0 (entget ent))))
+        (if (= typ "INSERT")
+          (progn
+            (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+            (if (not (vl-catch-all-error-p obj))
+              ;; Проверяем пригодность блока (если задан фильтр)
+              (if (or (null filter-fn)
+                      (apply filter-fn (list obj)))
+                (progn
+                  (setq type-name (su-get-dynblock-type-name ent))
+                  (if (not (member type-name types))
+                    (setq types (cons type-name types))
+                  )
+                )
+              )
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+      ;; Сортируем по алфавиту
+      (vl-sort types '(lambda (a b) (< (strcase a) (strcase b))))
+    )
   )
 )
 
@@ -587,7 +682,7 @@
 
 ;; ============================================================
 ;; Извлечение исходного набора объектов для CUTLINE
-;; ОБНОВЛЕНО: пояснение о результатах пост-фильтрации
+;; ОБНОВЛЕНО (Этап 2.2): пояснение о результатах пост-фильтрации
 ;;
 ;; Приоритет источников:
 ;;   1. *extraction-preselected-set* (предварительный выбор)

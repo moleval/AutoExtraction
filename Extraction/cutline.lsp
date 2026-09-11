@@ -3,31 +3,32 @@
 ;;; Команда: CUTLINE / РАСКРОЙХЛЫСТА
 ;;; Объекты: LINE, MLINE, динамические блоки с свойством "Длина"
 ;;; Алгоритм: First-Fit Decreasing (FFD)
-;;;
+;;
 ;;; ПОДДЕРЖИВАЕМЫЕ ТИПЫ:
 ;;;   LINE      — обычные линии
 ;;;   MLINE     — мультилинии (длина по осевой трассе)
 ;;;   DYNBLOCK  — динамические блоки со свойством "Длина"
 ;;;               (блоки со свойством "Ширина" или "Высота" отсеиваются)
-;;;
+;;
 ;;; ЭТАПЫ ВНЕДРЕНИЯ ДИНАМИЧЕСКИХ БЛОКОВ:
 ;;;   Этап 2.1: Функции анализа блоков (в select-utils.lsp)
 ;;;   Этап 2.2: Выбор блоков (в select-utils.lsp)
 ;;;   Этап 2.3: Обработка блоков в алгоритме раскроя
 ;;;   Этап 2.4: Диалог с 4 радиокнопками
-;;;
+;;;   Этап 3.1: Выпадающий список типов блоков
+;;;             (функции вынесены в common/select-utils.lsp)
+;;
 ;;; ТИПЫ РАСКРОЯ (диалог):
 ;;;   Только линии
 ;;;   Только мультилинии
 ;;;   Динамические блоки
 ;;;   Все типы
-;;;
+;;
 ;;; ИСПРАВЛЕНО (аудит):
-;;;   - n1-draw-text: защита от nil-цвета
-;;;   - n1-draw-summary: убрано магическое 100.0, точный расчёт tableH
-;;;   - n1-draw-oversized: исправлена опечатка *NEСТ-COLOR-HEADER*
-;;;                        (латиница) ? *NEST-COLOR-HEADER*
-;;;   - n1-draw-oversized: убрано магическое 100.0
+;;;   - Этап 3.1: функции получения имени типа блока вынесены
+;;;                в common/select-utils.lsp для унификации
+;;;                с Подсистемой (su-get-dynblock-type-name,
+;;;                su-collect-dynblock-types)
 ;;; ============================================================
 (vl-load-com)
 
@@ -59,6 +60,17 @@
 (if (not (boundp '*n1-tmp-kerf*))    (setq *n1-tmp-kerf*  *CUTLINE-DEFAULT-KERF*))
 (if (not (boundp '*n1-tmp-chk-xls*)) (setq *n1-tmp-chk-xls* T))
 (if (not (boundp '*n1-tmp-chk-acad*)) (setq *n1-tmp-chk-acad* T))
+
+;; ДОБАВЛЕНО (Этап 3.1): выбранный тип динамического блока
+;; "" означает "Все типы блоков"
+(if (not (boundp '*n1-tmp-dynblock-type*))
+  (setq *n1-tmp-dynblock-type* "")
+)
+
+;; ДОБАВЛЕНО (Этап 3.1): список уникальных типов динамических блоков
+(if (not (boundp '*n1-dynblock-types-list*))
+  (setq *n1-dynblock-types-list* '())
+)
 
 (if (not (boundp '*CUTLINE-LAST-STOCK*)) (setq *CUTLINE-LAST-STOCK* *CUTLINE-DEFAULT-STOCK*))
 (if (not (boundp '*CUTLINE-LAST-KERF*))  (setq *CUTLINE-LAST-KERF*  *CUTLINE-DEFAULT-KERF*))
@@ -287,6 +299,9 @@
   )
 )
 
+;; ============================================================
+;; Фильтрация набора по типу
+;; ============================================================
 (defun n1-filter-ss-by-type (ss typ / i ent new-ss ent-typ obj)
   (setq new-ss (ssadd) i 0)
   (repeat (sslength ss)
@@ -304,6 +319,56 @@
                  (not (vl-catch-all-error-p obj))
                  (su-is-valid-stock-block obj))
              (ssadd ent new-ss)
+           )
+         )
+       )
+      )
+      ((= typ "ALL")
+       (ssadd ent new-ss)
+      )
+    )
+    (setq i (1+ i))
+  )
+  new-ss
+)
+
+;; ============================================================
+;; Фильтрация набора по типу И имени типа блока
+;; ДОБАВЛЕНО (Этап 3.1)
+;;
+;; Если type-name пустой или "Все типы блоков" — берём все
+;; подходящие блоки. Иначе — только с совпадающим именем типа.
+;; ============================================================
+(defun n1-filter-ss-by-type-and-name (ss typ type-name
+                                      / i ent new-ss ent-typ obj block-type-name)
+  (setq new-ss (ssadd) i 0)
+  (repeat (sslength ss)
+    (setq ent (ssname ss i))
+    (setq ent-typ (cdr (assoc 0 (entget ent))))
+    (cond
+      ((or (= typ "LINE") (= typ "MLINE"))
+       (if (= ent-typ typ) (ssadd ent new-ss))
+      )
+      ((= typ "DYNBLOCK")
+       (if (= ent-typ "INSERT")
+         (progn
+           (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+           (if (and (not (vl-catch-all-error-p obj))
+                    (su-is-valid-stock-block obj))
+             (progn
+               (if (or (null type-name)
+                       (= type-name "")
+                       (= type-name "Все типы блоков"))
+                 (ssadd ent new-ss)
+                 (progn
+                   ;; ИСПРАВЛЕНО (Этап 3.1): используем общую функцию
+                   (setq block-type-name (su-get-dynblock-type-name ent))
+                   (if (= block-type-name type-name)
+                     (ssadd ent new-ss)
+                   )
+                 )
+               )
+             )
            )
          )
        )
@@ -355,6 +420,7 @@
 
 ;; ============================================================
 ;; Ручное управление радиокнопками
+;; ОБНОВЛЕНО (Этап 3.1): блокировка выпадающего списка
 ;; ============================================================
 (defun n1-select-radio (selected / keys k)
   (setq keys '("rb_line" "rb_mline" "rb_dynblock" "rb_both"))
@@ -367,17 +433,54 @@
     ((= selected "rb_dynblock") (setq *n1-tmp-choice* 'DYNBLOCK))
     ((= selected "rb_both")     (setq *n1-tmp-choice* 'ALL))
   )
+
+  ;; Блокируем/разблокируем выпадающий список в зависимости от выбранного типа
+  (if (= selected "rb_dynblock")
+    (n1-safe-mode-tile "popup_dynblock_type" 0)  ; разблокировать
+    (progn
+      (n1-safe-mode-tile "popup_dynblock_type" 1)  ; заблокировать
+      (setq *n1-tmp-dynblock-type* "")              ; сбросить выбор
+    )
+  )
+)
+
+;; ============================================================
+;; Обработчик выбора типа динамического блока
+;; ДОБАВЛЕНО (Этап 3.1)
+;;
+;; При выборе конкретного типа:
+;;   - Сохраняем его в *n1-tmp-dynblock-type*
+;;   - Переключаем радиокнопку на "Динамические блоки"
+;;
+;; При выборе "Все типы блоков" (индекс 0):
+;;   - Сбрасываем *n1-tmp-dynblock-type* в ""
+;; ============================================================
+(defun n1-on-dynblock-type-changed (value / idx type-name)
+  (setq idx (atoi value))
+  (if (= idx 0)
+    ;; "Все типы блоков" — сброс
+    (setq *n1-tmp-dynblock-type* "")
+    (progn
+      ;; Конкретный тип
+      (setq type-name (nth (1- idx) *n1-dynblock-types-list*))
+      (setq *n1-tmp-dynblock-type* type-name)
+      ;; Автопереключение на "Динамические блоки"
+      (n1-select-radio "rb_dynblock")
+    )
+  )
 )
 
 ;; ============================================================
 ;; Диалог параметров раскроя
+;; ОБНОВЛЕНО (Этап 3.1): добавлен выпадающий список типов блоков
 ;; ============================================================
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
+                          ss-for-types
                           default-tol default-stock default-kerf
                           layers
                           default-xls default-acad
                           / dcl-file dcl-id result
-                            all-cnt base-layers)
+                            all-cnt base-layers tn)
 
   (setq dcl-file (findfile "cutline_filter.dcl"))
 
@@ -410,6 +513,7 @@
             (progn
               (setq all-cnt (+ line-cnt mline-cnt dynblock-cnt))
 
+              ;; ---- Количество напротив радиокнопок ----
               (n1-safe-set-tile "txt_line_count"
                 (strcat (itoa line-cnt) " шт."))
               (n1-safe-set-tile "txt_mline_count"
@@ -419,6 +523,30 @@
               (n1-safe-set-tile "txt_both_count"
                 (strcat (itoa all-cnt) " шт."))
 
+              ;; ---- Заполнение выпадающего списка типов блоков ----
+              ;; ДОБАВЛЕНО (Этап 3.1): используем общую функцию из
+              ;; common/select-utils.lsp для унификации с Подсистемой
+              (setq *n1-tmp-dynblock-type* "")
+              (setq *n1-dynblock-types-list*
+                (su-collect-dynblock-types ss-for-types 'su-is-valid-stock-block))
+
+              (start_list "popup_dynblock_type")
+              (add_list "Все типы блоков")
+              (foreach tn *n1-dynblock-types-list*
+                (add_list tn)
+              )
+              (end_list)
+              (set_tile "popup_dynblock_type" "0")
+
+              ;; Блокируем выпадающий список, если выбран не "Динамические блоки"
+              ;; или если динамических блоков нет
+              (if (or (<= dynblock-cnt 0)
+                      (and (not (eq *n1-tmp-choice* 'DYNBLOCK))
+                           (not (eq *n1-tmp-choice* 'ALL))))
+                (n1-safe-mode-tile "popup_dynblock_type" 1)
+              )
+
+              ;; ---- Слои ----
               (setq base-layers (n1-layer-display-list layers))
               (vl-catch-all-apply
                 '(lambda ()
@@ -426,6 +554,7 @@
                    (foreach l base-layers (add_list l))
                    (end_list)))
 
+              ;; ---- Радиокнопки: начальное состояние ----
               (cond
                 ((and (> line-cnt 0) (> mline-cnt 0))
                  (n1-safe-set-tile "rb_both" "1")
@@ -450,21 +579,30 @@
                  (setq *n1-tmp-choice* 'ALL))
               )
 
+              ;; Блокируем кнопки для отсутствующих типов
               (if (<= line-cnt 0)     (n1-safe-mode-tile "rb_line" 1))
               (if (<= mline-cnt 0)    (n1-safe-mode-tile "rb_mline" 1))
               (if (<= dynblock-cnt 0) (n1-safe-mode-tile "rb_dynblock" 1))
               (if (<= all-cnt 0)      (n1-safe-mode-tile "rb_both" 1))
 
+              ;; ---- Параметры ----
               (n1-safe-set-tile "edt_stock" (rtos default-stock 2 0))
               (n1-safe-set-tile "edt_kerf"  (rtos default-kerf 2 0))
 
+              ;; ---- Экспорт ----
               (n1-safe-set-tile "chk_xls"  (if default-xls  "1" "0"))
               (n1-safe-set-tile "chk_acad" (if default-acad "1" "0"))
 
+              ;; ---- Обработчики радиокнопок (ручное управление) ----
               (n1-safe-action-tile "rb_line"     "(n1-select-radio \"rb_line\")")
               (n1-safe-action-tile "rb_mline"    "(n1-select-radio \"rb_mline\")")
               (n1-safe-action-tile "rb_dynblock" "(n1-select-radio \"rb_dynblock\")")
               (n1-safe-action-tile "rb_both"     "(n1-select-radio \"rb_both\")")
+
+              ;; ---- Обработчик выпадающего списка типов блоков ----
+              ;; ДОБАВЛЕНО (Этап 3.1)
+              (n1-safe-action-tile "popup_dynblock_type"
+                "(n1-on-dynblock-type-changed $value)")
 
               (n1-safe-action-tile "edt_stock"
                 "(setq *n1-tmp-stock* (atof $value))")
@@ -483,6 +621,7 @@
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
 
+              ;; ОБНОВЛЕНО (Этап 3.1): добавлен 7-й элемент — выбранный тип
               (if (= result 1)
                 (list
                   *n1-tmp-choice*
@@ -491,6 +630,7 @@
                   (if (< *n1-tmp-kerf* 0.0) default-kerf *n1-tmp-kerf*)
                   *n1-tmp-chk-xls*
                   *n1-tmp-chk-acad*
+                  *n1-tmp-dynblock-type*
                 )
                 nil
               )
@@ -657,9 +797,6 @@
 
 ;; ============================================================
 ;; Сводная таблица раскроя
-;; ИСПРАВЛЕНО:
-;;   - убрано магическое 100.0, y привязан к pad и rowH
-;;   - точный расчёт tableH
 ;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
     barHeight th rowH pad col1W col2W col3W tableW tableH
@@ -698,7 +835,7 @@
 
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
-  ;; ИСПРАВЛЕНО: без магического 100.0
+  ;; Без магического 100.0
   (setq y (- top pad rowH))
 
   (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
@@ -765,9 +902,6 @@
 
 ;; ============================================================
 ;; Таблица неразмещённых деталей
-;; ИСПРАВЛЕНО:
-;;   - *NEСТ-COLOR-HEADER* ? *NEST-COLOR-HEADER*
-;;   - убрано магическое 100.0
 ;; ============================================================
 (defun n1-draw-oversized (oversized stock insPt /
     barHeight th rowH pad pad-bottom col1W col2W col3W tableW tableH
@@ -791,7 +925,7 @@
 
       (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
-      ;; ИСПРАВЛЕНО: без магического 100.0
+      ;; Без магического 100.0
       (setq y (- top pad rowH))
 
       (n1-draw-text (list x1 y) (* th 1.3) "Неразмещенные детали" *NEST-COLOR-TITLE*)
@@ -804,7 +938,6 @@
       (setq y (- y rowH))
       (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
       (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
-      ;; ИСПРАВЛЕНО: было *NEСТ-COLOR-HEADER* (латиница) — приводило к nil-цвету
       (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
 
       (setq y (- y rowH))
@@ -1247,6 +1380,7 @@
 
 ;; ============================================================
 ;; Главная функция
+;; ОБНОВЛЕНО (Этап 3.1): фильтрация по типу блока
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
@@ -1256,7 +1390,7 @@
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
                        layers layers-str total-input type-counts
-                       user-filter line-cnt mline-cnt dynblock-cnt
+                       user-filter line-cnt mline-cnt dynblock-cnt dynblock-type
                        export-xls export-acad
                        default-xls default-acad
                        default-stock default-kerf
@@ -1326,9 +1460,10 @@
 
   (setq tol *CUTLINE-DEFAULT-TOL*)
 
+  ;; ОБНОВЛЕНО (Этап 3.1): передача набора для сбора типов блоков
   (setq r (vl-catch-all-apply
             'n1-cutline-dialog
-            (list line-cnt mline-cnt dynblock-cnt *CUTLINE-DEFAULT-TOL*
+            (list line-cnt mline-cnt dynblock-cnt ss *CUTLINE-DEFAULT-TOL*
                   default-stock default-kerf layers default-xls default-acad)))
 
   (cond
@@ -1344,12 +1479,14 @@
     (T (setq dialog-result r))
   )
 
-  (setq user-filter  (car dialog-result)
-        tol          (cadr dialog-result)
-        stock        (caddr dialog-result)
-        kerf         (cadddr dialog-result)
-        export-xls   (nth 4 dialog-result)
-        export-acad  (nth 5 dialog-result))
+  ;; ОБНОВЛЕНО (Этап 3.1): извлечение выбранного типа блока
+  (setq user-filter   (car dialog-result)
+        tol           (cadr dialog-result)
+        stock         (caddr dialog-result)
+        kerf          (cadddr dialog-result)
+        export-xls    (nth 4 dialog-result)
+        export-acad   (nth 5 dialog-result)
+        dynblock-type (nth 6 dialog-result))
 
   (setq *CUTLINE-LAST-STOCK* stock
         *CUTLINE-LAST-KERF*  kerf
@@ -1359,6 +1496,7 @@
   (princ "\nПараметры приняты из окна диалога.")
 
   ;; 2в. Фильтрация
+  ;; ОБНОВЛЕНО (Этап 3.1): фильтрация DYNBLOCK по типу блока
   (cond
     ((eq user-filter 'LINE)
      (setq ss (n1-filter-ss-by-type ss "LINE"))
@@ -1367,8 +1505,11 @@
      (setq ss (n1-filter-ss-by-type ss "MLINE"))
      (princ "\nОставлены только мультилинии (MLINE)."))
     ((eq user-filter 'DYNBLOCK)
-     (setq ss (n1-filter-ss-by-type ss "DYNBLOCK"))
-     (princ "\nОставлены только динамические блоки."))
+     (setq ss (n1-filter-ss-by-type-and-name ss "DYNBLOCK" dynblock-type))
+     (if (and dynblock-type (/= dynblock-type "") (/= dynblock-type "Все типы блоков"))
+       (princ (strcat "\nОставлены динамические блоки типа: " dynblock-type))
+       (princ "\nОставлены все динамические блоки."))
+    )
     (T (princ "\nОставлены линии, мультилинии и динамические блоки."))
   )
 
