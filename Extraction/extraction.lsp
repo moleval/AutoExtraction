@@ -10,12 +10,20 @@
 ;;;     Заполнение;
 ;;;   - модуль "Переименователь" (blockrename).
 ;;;
+;;; ДОБАВЛЕНО: автоматическое выделение слоёв по умолчанию
+;;;   для каждой задачи. Если пользователь не менял выбор,
+;;;   при следующем запуске задачи эти слои будут выделены
+;;;   автоматически. Если пользователь изменил выбор, новые
+;;;   слои сохраняются и используются при следующем запуске.
+;;;
+;;; ИСПРАВЛЕНО: сохранение слоёв в правильную переменную задачи
+;;;   (ранее все задачи, кроме Подсистемы, сохраняли слои в
+;;;   переменную Фасонки).
+;;;
+;;; Маски с * поддерживаются через wcmatch.
+;;;
 ;;; Переименование блоков — только по кнопке "Переименовать".
 ;;; Enter в поле "Новое имя" НЕ вызывает переименование.
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.2):
-;;;   D4: Оптимизация функции extraction-unique-ci —
-;;;       append заменён на cons/reverse (O(N?) ? O(N))
 ;;; ============================================================
 
 (vl-load-com)
@@ -87,6 +95,49 @@
   (setq *extraction-syncing-checks* nil)
 )
 
+;; Флаг: блокировка сохранения слоёв при программном изменении
+;; ДОБАВЛЕНО: защита от ложного срабатывания при переключении задач
+(if (not (boundp '*extraction-syncing-layers*))
+  (setq *extraction-syncing-layers* nil)
+)
+
+;; ============================================================
+;; Слои по умолчанию для каждой задачи
+;; ДОБАВЛЕНО: автоматическое выделение слоёв при выборе задачи
+;;
+;; Если пользователь не менял выбор, при следующем запуске
+;; задачи эти слои будут выделены автоматически.
+;; Если пользователь изменил выбор, новые слои сохраняются
+;; и используются при следующем запуске.
+;;
+;; Маски с * поддерживаются через wcmatch.
+;; ============================================================
+
+;; Фасонка — слои по умолчанию
+(if (not (boundp '*EXTRACTION-LAST-FASONKA-LAYERS*))
+  (setq *EXTRACTION-LAST-FASONKA-LAYERS* '("Фасонка*" "Железо*"))
+)
+
+;; Заполнение — слои по умолчанию
+(if (not (boundp '*EXTRACTION-LAST-ZAPOLNENIE-LAYERS*))
+  (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* '("Заполнение" "Стекло" "Обозначение ст-т"))
+)
+
+;; Облицовка — слои по умолчанию
+(if (not (boundp '*EXTRACTION-LAST-CLADDING-LAYERS*))
+  (setq *EXTRACTION-LAST-CLADDING-LAYERS* '("*Облицовка*" "*Кассет*" "*Керамогранит*"))
+)
+
+;; Витраж — слои по умолчанию
+(if (not (boundp '*EXTRACTION-LAST-VITRAZH-LAYERS*))
+  (setq *EXTRACTION-LAST-VITRAZH-LAYERS* '("Витражи" "Стойк*" "Ригел*"))
+)
+
+;; Раскрой хлыстов — слои по умолчанию
+(if (not (boundp '*EXTRACTION-LAST-CUTLINE-LAYERS*))
+  (setq *EXTRACTION-LAST-CUTLINE-LAYERS* nil)  ;; пусто — пользователь выбирает
+)
+
 
 ;; ============================================================
 ;; РАБОЧЕЕ СОСТОЯНИЕ
@@ -113,9 +164,6 @@
 
 ;; ============================================================
 ;; УНИКАЛЬНЫЕ СТРОКИ
-;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
-;; Оптимизировано: cons вместо append (O(1) вместо O(N))
-;; Порядок элементов сохраняется через reverse в конце.
 ;; ============================================================
 
 (defun extraction-unique-ci (lst / out x key)
@@ -443,8 +491,9 @@
 
 ;; ============================================================
 ;; УСТАНОВКА ВЫДЕЛЕНИЯ СЛОЁВ
+;; ОБНОВЛЕНО: поддержка масок через wcmatch
+;; ОБНОВЛЕНО: блокировка сохранения при программном изменении
 ;; ============================================================
-
 (defun extraction-select-layers-in-list
        (layers-to-select / i item selected str after-set)
 
@@ -452,10 +501,20 @@
   (setq i 0)
 
   (foreach item *EXTRACTION-VISIBLE-LAYERS*
+    ;; Проверяем: слой совпадает с одним из шаблонов?
+    ;; Используем wcmatch для поддержки масок с *
     (if (vl-some
-          '(lambda (x) (= (strcase x) (strcase item)))
+          '(lambda (x)
+             (or
+               ;; Точное совпадение (регистронезависимо)
+               (= (strcase x) (strcase item))
+               ;; Совпадение по маске (wcmatch)
+               (wcmatch (strcase item) (strcase x))
+             )
+           )
           layers-to-select)
-      (setq selected (cons i selected)))
+      (setq selected (cons i selected))
+    )
     (setq i (1+ i))
   )
 
@@ -491,7 +550,12 @@
     )
   )
 
+  ;; Блокируем сохранение при программном изменении
+  ;; Это защищает от ложного срабатывания при переключении задач
+  (setq *extraction-syncing-layers* T)
   (extraction-layer-selection-changed)
+  (setq *extraction-syncing-layers* nil)
+
   (extraction-update-select-buttons)
 )
 
@@ -629,49 +693,119 @@
 
 
 ;; ============================================================
-;; ПЕРЕКЛЮЧЕНИЕ ЗАДАЧИ
+;; ПЕРЕКЛЮЧЕНИЕ ЗАДАЧИ И ВОССТАНОВЛЕНИЕ СЛОЁВ ПО УМОЛЧАНИЮ
+;; ОБНОВЛЕНО: поддержка всех задач (не только Подсистема)
 ;; ============================================================
-
 (defun extraction-toggle-subsystem-layers ( / layers-to-select)
-  (if (= (get_tile "rb_task_subsystem") "1")
-    (progn
-      (mode_tile "box_subsystem_layers" 0)
-      (mode_tile "chk_subsystem_1" 0)
-      (mode_tile "chk_subsystem_2" 0)
-      (mode_tile "chk_subsystem_3" 0)
+  (cond
+    ;; ============================================================
+    ;; ПОДСИСТЕМА
+    ;; ============================================================
+    ((= (get_tile "rb_task_subsystem") "1")
+     (mode_tile "box_subsystem_layers" 0)
+     (mode_tile "chk_subsystem_1" 0)
+     (mode_tile "chk_subsystem_2" 0)
+     (mode_tile "chk_subsystem_3" 0)
 
-      (extraction-rebuild-layer-list)
+     (extraction-rebuild-layer-list)
 
-      (setq layers-to-select *EXTRACTION-LAST-SUBSYSTEM-LAYERS*)
+     ;; Восстанавливаем слои Подсистемы
+     (setq layers-to-select *EXTRACTION-LAST-SUBSYSTEM-LAYERS*)
 
-      (if (null layers-to-select)
-        (progn
-          (setq layers-to-select '())
+     (if (null layers-to-select)
+       (progn
+         (setq layers-to-select '())
+         (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+           (setq layers-to-select (cons "Подсистема" layers-to-select)))
+         (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+           (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
+         (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+           (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
+       )
+     )
 
-          (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-            (setq layers-to-select (cons "Подсистема" layers-to-select)))
-
-          (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-            (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
-
-          (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-            (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
-        )
-      )
-
-      (extraction-select-layers-in-list layers-to-select)
-      (extraction-sync-checks-from-layers)
+     (extraction-select-layers-in-list layers-to-select)
+     (extraction-sync-checks-from-layers)
     )
-    (progn
-      (mode_tile "box_subsystem_layers" 1)
-      (mode_tile "chk_subsystem_1" 1)
-      (mode_tile "chk_subsystem_2" 1)
-      (mode_tile "chk_subsystem_3" 1)
 
-      (extraction-rebuild-layer-list)
+    ;; ============================================================
+    ;; ФАСОНКА
+    ;; ============================================================
+    ((= (get_tile "rb_task_fasonka") "1")
+     (mode_tile "box_subsystem_layers" 1)
+     (mode_tile "chk_subsystem_1" 1)
+     (mode_tile "chk_subsystem_2" 1)
+     (mode_tile "chk_subsystem_3" 1)
 
-      (if *EXTRACTION-LAST-FASONKA-LAYERS*
-        (extraction-select-layers-in-list *EXTRACTION-LAST-FASONKA-LAYERS*))
+     (extraction-rebuild-layer-list)
+
+     ;; Восстанавливаем слои Фасонки
+     (if *EXTRACTION-LAST-FASONKA-LAYERS*
+       (extraction-select-layers-in-list *EXTRACTION-LAST-FASONKA-LAYERS*)
+     )
+    )
+
+    ;; ============================================================
+    ;; ЗАПОЛНЕНИЕ
+    ;; ============================================================
+    ((= (get_tile "rb_task_zapolnenie") "1")
+     (mode_tile "box_subsystem_layers" 1)
+     (mode_tile "chk_subsystem_1" 1)
+     (mode_tile "chk_subsystem_2" 1)
+     (mode_tile "chk_subsystem_3" 1)
+
+     (extraction-rebuild-layer-list)
+
+     ;; Восстанавливаем слои Заполнения
+     (if *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*
+       (extraction-select-layers-in-list *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*)
+     )
+    )
+
+    ;; ============================================================
+    ;; ОБЛИЦОВКА
+    ;; ============================================================
+    ((= (get_tile "rb_task_cladding") "1")
+     (mode_tile "box_subsystem_layers" 1)
+     (mode_tile "chk_subsystem_1" 1)
+     (mode_tile "chk_subsystem_2" 1)
+     (mode_tile "chk_subsystem_3" 1)
+
+     (extraction-rebuild-layer-list)
+
+     ;; Восстанавливаем слои Облицовки
+     (if *EXTRACTION-LAST-CLADDING-LAYERS*
+       (extraction-select-layers-in-list *EXTRACTION-LAST-CLADDING-LAYERS*)
+     )
+    )
+
+    ;; ============================================================
+    ;; ВИТРАЖ
+    ;; ============================================================
+    ((= (get_tile "rb_task_vitrazh") "1")
+     (mode_tile "box_subsystem_layers" 1)
+     (mode_tile "chk_subsystem_1" 1)
+     (mode_tile "chk_subsystem_2" 1)
+     (mode_tile "chk_subsystem_3" 1)
+
+     (extraction-rebuild-layer-list)
+
+     ;; Восстанавливаем слои Витража
+     (if *EXTRACTION-LAST-VITRAZH-LAYERS*
+       (extraction-select-layers-in-list *EXTRACTION-LAST-VITRAZH-LAYERS*)
+     )
+    )
+
+    ;; ============================================================
+    ;; ДРУГИЕ ЗАДАЧИ (по умолчанию — без автоматического выделения)
+    ;; ============================================================
+    (T
+     (mode_tile "box_subsystem_layers" 1)
+     (mode_tile "chk_subsystem_1" 1)
+     (mode_tile "chk_subsystem_2" 1)
+     (mode_tile "chk_subsystem_3" 1)
+
+     (extraction-rebuild-layer-list)
     )
   )
 )
@@ -679,18 +813,35 @@
 
 ;; ============================================================
 ;; ИЗМЕНЕНИЕ ВЫБОРА В СПИСКЕ
+;; ОБНОВЛЕНО: сохранение слоёв в переменную, соответствующую
+;; текущей задаче (а не всегда в Фасонку)
 ;; ============================================================
-
 (defun extraction-layer-selection-changed ( / selected)
   (setq selected (extraction-selected-names))
   (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
-  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-    (progn
-      (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
-      (extraction-sync-checks-from-layers)
+  ;; Сохраняем только если это НЕ программное изменение
+  ;; Флаг устанавливается в extraction-select-layers-in-list
+  (if (not *extraction-syncing-layers*)
+    (cond
+      ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+       (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+       (extraction-sync-checks-from-layers))
+
+      ((eq *EXTRACTION-TASK-ID* 'FASONKA)
+       (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected))
+
+      ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
+       (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected))
+
+      ((eq *EXTRACTION-TASK-ID* 'CLADDING)
+       (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected))
+
+      ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
+       (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected))
+
+      ;; Для других задач (Раскрой и т.д.) — не сохраняем
     )
-    (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected)
   )
 
   (extraction-update-select-buttons)
@@ -784,20 +935,33 @@
 
 ;; ============================================================
 ;; ЗАПУСК ЗАДАЧИ
+;; ОБНОВЛЕНО: сохранение выбранных слоёв после выполнения
 ;; ============================================================
-
 (defun run-task
        (task-id layers report-mode export-excel export-txt
                 create-table save-base / r)
 
+  ;; Сохраняем выбранные слои для следующего запуска
   (cond
+    ((eq task-id 'FASONKA)
+     (setq *EXTRACTION-LAST-FASONKA-LAYERS* layers))
+    ((eq task-id 'SUBSYSTEM)
+     (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* layers))
+    ((eq task-id 'ZAPOLNENIE)
+     (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* layers))
+    ((eq task-id 'CLADDING)
+     (setq *EXTRACTION-LAST-CLADDING-LAYERS* layers))
+    ((eq task-id 'VITRAZH)
+     (setq *EXTRACTION-LAST-VITRAZH-LAYERS* layers))
+  )
 
+  ;; Запускаем задачу
+  (cond
     ((eq task-id 'FASONKA)
      (setq r
        (vl-catch-all-apply 'fasonka-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-
      (if (vl-catch-all-error-p r)
        (princ "\nМодуль Фасонка не загружен или ошибка выполнения."))
     )
@@ -807,7 +971,6 @@
        (vl-catch-all-apply 'subsystem-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-
      (if (vl-catch-all-error-p r)
        (princ "\nМодуль Подсистема не загружен или ошибка выполнения."))
     )
@@ -817,7 +980,6 @@
        (vl-catch-all-apply 'cladding-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-
      (if (vl-catch-all-error-p r)
        (princ "\nМодуль Облицовка не загружен или ошибка выполнения."))
     )
@@ -827,7 +989,6 @@
        (vl-catch-all-apply 'vitrazh-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-
      (if (vl-catch-all-error-p r)
        (princ "\nМодуль Витраж не загружен или ошибка выполнения."))
     )
@@ -837,7 +998,6 @@
        (vl-catch-all-apply 'zapolnenie-main
          (list layers report-mode export-excel export-txt
                create-table save-base)))
-
      (if (vl-catch-all-error-p r)
        (princ "\nМодуль Заполнение не загружен или ошибка выполнения."))
     )
@@ -865,7 +1025,11 @@
       "Для Подсистемы доступны все слои; "
       "три чекбокса — быстрый выбор типовых слоёв.\n"
       "Кнопка \"Выбрать все\" выделяет все слои, "
-      "отображаемые с учётом фильтров.\n\n"
+      "отображаемые с учётом фильтров.\n"
+      "Слои по умолчанию выделяются автоматически "
+      "при выборе задачи.\n"
+      "Изменённый выбор сохраняется для каждого "
+      "задачи отдельно.\n\n"
       "Блоки: фильтр \"Анонимные блоки\" показывает "
       "только PASTEBLOCK-блоки (A$C...). "
       "Переименование — по кнопке."
@@ -1304,11 +1468,12 @@
                 ;; ------------------------------------------------
 
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
-                  (setq r
-                    (vl-catch-all-apply 'cutline-main
-                      (list *EXTRACTION-SELECTED-LAYERS*)))
-                  (if (vl-catch-all-error-p r)
-                    (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
+                 (setq r
+                   (vl-catch-all-apply 'cutline-main
+                     (list *EXTRACTION-SELECTED-LAYERS*)))
+
+                 (if (vl-catch-all-error-p r)
+                   (princ "\nМодуль CUTLINE не загружен или ошибка выполнения."))
                 )
 
                 ;; ------------------------------------------------
@@ -1317,7 +1482,8 @@
 
                 ((eq *EXTRACTION-ACTION* 'CUTSHEET)
                  (setq r
-                   (vl-catch-all-apply 'cutsheet-main '()))
+                   (vl-catch-all-apply 'cutsheet-main
+                     (list *EXTRACTION-SELECTED-LAYERS*)))
 
                  (if (vl-catch-all-error-p r)
                    (princ "\nМодуль CUTSHEET не загружен или ошибка выполнения."))
