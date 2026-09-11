@@ -1166,7 +1166,15 @@
     (setq layers layers-from-caller)
   )
 
-  (princ (strcat "\n" (car (n1-layer-display-list layers))))
+    ;; Отображаем все выбранные слои через запятую
+  (princ (strcat "\n"
+    (if (or (null layers) (= (length layers) 0))
+      "Все слои"
+      (apply 'strcat
+        (mapcar '(lambda (x) (strcat x ", ")) layers)
+      )
+    )
+  ))
 
   ;; 2. Выбор объектов
   (princ "\nВыберите отрезки и/или мультилинии — исходные детали:")

@@ -1,6 +1,23 @@
 ;;; ============================================================
 ;;; common/select-utils.lsp
 ;;; Выбор вхождений блоков и извлечение динамических свойств
+;;
+;;; ИСПРАВЛЕНИЯ (аудит Этап 3, пункт B4):
+;;; su-get-length использует строгий поиск:
+;;;   Только точное совпадение "ДЛИНА" (Вариант А)
+;;
+;;; ДОБАВЛЕНО (Этап 2.1 — анализ динамических блоков):
+;;;   su-has-length-property  — точное совпадение "ДЛИНА"
+;;;   su-has-width-property   — подстрока "ШИРИНА"
+;;;   su-has-height-property  — подстрока "ВЫСОТА"
+;;;   su-is-valid-stock-block — комплексная проверка пригодности
+;;
+;;; ПРАВИЛА ОТСЕИВАНИЯ (зафиксированы):
+;;;   Блок принимается в раскрой хлыстов, если:
+;;;     ? Есть свойство "ДЛИНА" (точное совпадение)
+;;;     ? НЕТ свойства с подстрокой "ШИРИНА"
+;;;     ? НЕТ свойства с подстрокой "ВЫСОТА"
+;;;   Иначе блок отсеивается.
 ;;; ============================================================
 (vl-load-com)
 
@@ -183,8 +200,162 @@
   )
 )
 
+;; ============================================================
+;; Проверка наличия свойства "ДЛИНА" у динамического блока
+;; ДОБАВЛЕНО (Этап 2.1)
+;; СТРОГИЙ ПОИСК (Вариант А): точное совпадение "ДЛИНА"
+;; (регистронезависимо через strcase)
+;; Возвращает: T если свойство найдено, иначе nil
+;; ============================================================
+(defun su-has-length-property (obj / dynprops prop pname result)
+  (setq result nil)
+  (setq dynprops
+    (vl-catch-all-apply
+      'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)
+    )
+  )
+  (if (not (vl-catch-all-error-p dynprops))
+    (foreach prop dynprops
+      (if (null result)
+        (progn
+          (setq pname
+            (vl-catch-all-apply
+              'vla-get-PropertyName
+              (list prop)
+            )
+          )
+          (if (and
+                (not (vl-catch-all-error-p pname))
+                pname
+                (= (type pname) 'STR)
+                (= (strcase pname) "ДЛИНА")
+              )
+            (setq result T)
+          )
+        )
+      )
+    )
+  )
+  result
+)
+
+;; ============================================================
+;; Проверка наличия свойства "ШИРИНА" у динамического блока
+;; ДОБАВЛЕНО (Этап 2.1)
+;; ПОИСК ПО ПОДСТРОКЕ: любое свойство, содержащее "ШИРИНА"
+;; (регистронезависимо)
+;; Возвращает: T если свойство найдено, иначе nil
+;; ============================================================
+(defun su-has-width-property (obj / dynprops prop pname result)
+  (setq result nil)
+  (setq dynprops
+    (vl-catch-all-apply
+      'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)
+    )
+  )
+  (if (not (vl-catch-all-error-p dynprops))
+    (foreach prop dynprops
+      (if (null result)
+        (progn
+          (setq pname
+            (vl-catch-all-apply
+              'vla-get-PropertyName
+              (list prop)
+            )
+          )
+          (if (and
+                (not (vl-catch-all-error-p pname))
+                pname
+                (= (type pname) 'STR)
+                (vl-string-search "ШИРИНА" (strcase pname))
+              )
+            (setq result T)
+          )
+        )
+      )
+    )
+  )
+  result
+)
+
+;; ============================================================
+;; Проверка наличия свойства "ВЫСОТА" у динамического блока
+;; ДОБАВЛЕНО (Этап 2.1)
+;; ПОИСК ПО ПОДСТРОКЕ: любое свойство, содержащее "ВЫСОТА"
+;; (регистронезависимо)
+;; Возвращает: T если свойство найдено, иначе nil
+;; ============================================================
+(defun su-has-height-property (obj / dynprops prop pname result)
+  (setq result nil)
+  (setq dynprops
+    (vl-catch-all-apply
+      'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)
+    )
+  )
+  (if (not (vl-catch-all-error-p dynprops))
+    (foreach prop dynprops
+      (if (null result)
+        (progn
+          (setq pname
+            (vl-catch-all-apply
+              'vla-get-PropertyName
+              (list prop)
+            )
+          )
+          (if (and
+                (not (vl-catch-all-error-p pname))
+                pname
+                (= (type pname) 'STR)
+                (vl-string-search "ВЫСОТА" (strcase pname))
+              )
+            (setq result T)
+          )
+        )
+      )
+    )
+  )
+  result
+)
+
+;; ============================================================
+;; Проверка пригодности динамического блока для раскроя хлыстов
+;; ДОБАВЛЕНО (Этап 2.1)
+;;
+;; БЛОК ПРИГОДЕН, ЕСЛИ:
+;;   ? Есть свойство "ДЛИНА" (точное совпадение)
+;;   ? НЕТ свойства с подстрокой "ШИРИНА"
+;;   ? НЕТ свойства с подстрокой "ВЫСОТА"
+;;
+;; Возвращает: T если блок пригоден, иначе nil
+;; ============================================================
+(defun su-is-valid-stock-block (obj)
+  (and
+    ;; Есть точное свойство "ДЛИНА"
+    (su-has-length-property obj)
+    ;; НЕТ "ШИРИНА"
+    (not (su-has-width-property obj))
+    ;; НЕТ "ВЫСОТА"
+    (not (su-has-height-property obj))
+  )
+)
+
+;; ============================================================
 ;; Получение длины из динамических свойств
+;; ОБНОВЛЕНО (Этап 2.1): защита от ошибок через vl-catch-all-apply
+;;
+;; СТРОГИЙ ПОИСК (Вариант А):
+;;   Только точное совпадение "ДЛИНА" (регистронезависимо)
+;;
+;; Это защищает от ложных срабатываний на свойства типа:
+;;   "Длина общая", "Полная длина", "Ширина_Длина_зазора"
+;;
+;; Возвращает: длина в мм (целое число) или nil
+;; ============================================================
 (defun su-get-length (obj / dynprops prop pname value result)
+  (setq result nil)
   (setq dynprops
     (vl-catch-all-apply
       'vlax-invoke
@@ -192,10 +363,8 @@
     )
   )
 
-  (if (vl-catch-all-error-p dynprops)
-    nil
+  (if (not (vl-catch-all-error-p dynprops))
     (progn
-      (setq result nil)
       (foreach prop dynprops
         (if (null result)
           (progn
@@ -219,15 +388,15 @@
                   )
                 )
                 (if (not (vl-catch-all-error-p value))
-                  (setq result
-                    (su-value-to-number value)
-                  )
+                  (setq result (su-value-to-number value))
                 )
               )
             )
           )
         )
       )
+
+      ;; Округление до целого числа (мм)
       (if (numberp result)
         (atoi (rtos result 2 0))
         nil
@@ -297,6 +466,11 @@
 ;;   LINE  — отрезок;
 ;;   MLINE — мультилиния.
 ;; Дуги, эллипсы, сплайны, полилинии — не принимаются.
+;;
+;; ПРИМЕЧАНИЕ (Этап 2.2):
+;;   Здесь будет добавлен "INSERT" для динамических блоков.
+;;   Отсеивание непригодных блоков будет выполняться
+;;   через su-is-valid-stock-block.
 ;; ============================================================
 
 (setq *su-cutline-types* '("LINE" "MLINE"))
