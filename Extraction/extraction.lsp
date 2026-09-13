@@ -33,6 +33,14 @@
 ;;;         вызывает (exit) — это штатный выход, а не ошибка.
 ;;;         Пользователь видит сообщение об отмене, а не о поломке.
 ;;;
+;;; ИСПРАВЛЕНО (Облицовка, К1.3):
+;;;   extraction-read-params сохраняет выбранные слои в
+;;;   переменную СВОЕЙ задачи (cond по пяти задачам), а не
+;;;   всегда в переменную Фасонки.
+;;;   Заглушка cladding-main защищена от переопределения
+;;;   реальной реализации (определяется только если функции
+;;;   ещё нет); удаляется полностью на этапе К4.
+;;;
 ;;; Маски с * поддерживаются через wcmatch.
 ;;;
 ;;; Переименование блоков — только по кнопке "Переименовать".
@@ -938,6 +946,9 @@
 
 ;; ============================================================
 ;; ЧТЕНИЕ ПАРАМЕТРОВ
+;; ИСПРАВЛЕНО (Облицовка, К1.3): слои сохраняются в переменную
+;; СВОЕЙ задачи через cond по пяти задачам, а не всегда в
+;; переменную Фасонки
 ;; ============================================================
 
 (defun extraction-read-params ( / selected)
@@ -974,22 +985,40 @@
 
   (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
-  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-    (progn
-      (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+  ;; Сохраняем слои в переменную СВОЕЙ задачи
+  (cond
+    ((eq *EXTRACTION-TASK-ID* 'FASONKA)
+     (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected)
+     T
+    )
 
-      (if (null selected)
-        (progn
-          (alert "Не выбрано ни одного слоя подсистемы.")
-          nil
-        )
-        T
-      )
+    ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+     (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+     (if (null selected)
+       (progn
+         (alert "Не выбрано ни одного слоя подсистемы.")
+         nil
+       )
+       T
+     )
     )
-    (progn
-      (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected)
-      T
+
+    ((eq *EXTRACTION-TASK-ID* 'CLADDING)
+     (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected)
+     T
     )
+
+    ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
+     (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected)
+     T
+    )
+
+    ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
+     (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected)
+     T
+    )
+
+    (T T)
   )
 
   (setq *EXTRACTION-REPORT-MODE*
@@ -1662,23 +1691,31 @@
 
 ;; ============================================================
 ;; ЗАГЛУШКИ для модулей в разработке
-;; ДОБАВЛЕНО (Р1.4): чтобы кнопки "Облицовка" и "Витраж"
-;; не выдавали ошибку "Модуль не загружен"
-;; ИСПРАВЛЕНО: полный список аргументов для совместимости
-;; с вызовом из диспетчера
+;;
+;; vitrazh-main: модуль Витраж не реализован — заглушка всегда.
+;;
+;; cladding-main: ЗАЩИЩЁННАЯ заглушка (Облицовка, К1.3).
+;; Определяется ТОЛЬКО если реальная реализация ещё не
+;; загружена. Это исключает затирание реальной функции
+;; из cladding.lsp при повторной загрузке extraction.lsp
+;; в любом порядке загрузки.
+;; На этапе К4 заглушка удаляется полностью, а cladding.lsp
+;; добавляется в загрузочную цепочку.
 ;; ============================================================
 
-(defun cladding-main (layers report-mode export-excel
-                      export-txt create-table save-base / )
-  (princ "\nОБЛИЦОВКА: модуль в разработке.")
-  (princ "\nВыбранные слои: ")
-  (if layers
-    (foreach l layers (princ (strcat l " ")))
-    (princ "все")
+(if (not (= (type cladding-main) 'SUBR))
+  (defun cladding-main (layers report-mode export-excel
+                        export-txt create-table save-base / )
+    (princ "\nОБЛИЦОВКА: модуль в разработке.")
+    (princ "\nВыбранные слои: ")
+    (if layers
+      (foreach l layers (princ (strcat l " ")))
+      (princ "все")
+    )
+    (princ)
+    ;; Возвращаем T, чтобы диспетчер не считал это ошибкой
+    T
   )
-  (princ)
-  ;; Возвращаем T, чтобы диспетчер не считал это ошибкой
-  T
 )
 
 (defun vitrazh-main (layers report-mode export-excel
