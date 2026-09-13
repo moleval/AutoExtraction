@@ -390,6 +390,16 @@
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
 
       ;; --------------------------------------------------------
+      ;; EXTRACTION / CLADDING
+      ;; ДОБАВЛЕНО (К4): облицовка в основной загрузочной цепочке
+      ;; --------------------------------------------------------
+
+      (setq path (strcat root "\\Extraction\\cladding.lsp"))
+      (if (findfile path)
+        (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+      
+      ;; --------------------------------------------------------
       ;; EXTRACTION / CUTLINE
       ;; --------------------------------------------------------
 
@@ -1702,21 +1712,6 @@
 ;; На этапе К4 заглушка удаляется полностью, а cladding.lsp
 ;; добавляется в загрузочную цепочку.
 ;; ============================================================
-
-(if (not (= (type cladding-main) 'SUBR))
-  (defun cladding-main (layers report-mode export-excel
-                        export-txt create-table save-base / )
-    (princ "\nОБЛИЦОВКА: модуль в разработке.")
-    (princ "\nВыбранные слои: ")
-    (if layers
-      (foreach l layers (princ (strcat l " ")))
-      (princ "все")
-    )
-    (princ)
-    ;; Возвращаем T, чтобы диспетчер не считал это ошибкой
-    T
-  )
-)
 
 (defun vitrazh-main (layers report-mode export-excel
                      export-txt create-table save-base / )

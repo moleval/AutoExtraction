@@ -61,8 +61,9 @@
         '(
           "fasonka.lsp"
           "subsystem.lsp"
+          "cladding.lsp"
           "zapolnenie.lsp"
-          "extraction.lsp"   ; диспетчер, перезагружаетс€ дл€ обновлени€
+          "extraction.lsp"
           "cutline.lsp"
           "cutsheet.lsp"
           "blockrename.lsp"
