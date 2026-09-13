@@ -1,16 +1,24 @@
 ;;; ============================================================
-;;; CLADDING-TEST.LSP — тестовые помощники для К1
-;;; Команды: MKTEST, RMTEST, TEST-FALLBACK, CLCOUNTERS
-;;; РЕДАКЦИЯ 3: удаление слоёв через ActiveX (у .-LAYER нет
-;;; опции Delete в этой локали); добавлен CLCOUNTERS
+;;; CLADDING-TEST.LSP — тестовые помощники для Облицовки
+;;; РЕДАКЦИЯ 4: добавлены временная команда RELOAD
+;;; и зонд TBLTEST (пошаговая проверка создания таблицы)
+;;
+;;; Команды:
+;;;   MKTEST       — создать тестовый набор (8 полилиний, 2 слоя)
+;;;   RMTEST       — удалить набор и слои
+;;;   CLCOUNTERS   — показать счётчики предупреждений
+;;;   TEST-FALLBACK— сверка AutoCAD Area и Green на выбранной фигуре
+;;;   RELOAD       — ВРЕМЕННАЯ перезагрузка модулей облицовки (до К4)
+;;;   TBLTEST      — зонд создания таблицы AutoCAD по шагам
 ;;; ============================================================
 
 (vl-load-com)
 
 ;; ============================================================
-;; СЛУЖЕБНЫЕ
+;; СЛУЖЕБНЫЕ: слой и полилиния
 ;; ============================================================
 
+;; Создание слоя через entmake (без команды .-LAYER)
 (defun cl-test-ensure-layer (name)
   (if (not (tblsearch "LAYER" name))
     (if (null
@@ -45,7 +53,7 @@
   )
 )
 
-;; LWPOLYLINE: точки строго 2D; булж только ненулевой
+;; LWPOLYLINE: точки строго 2D; булж добавляется только ненулевой
 (defun cl-test-lw (layer closed pts blgs / i e bv res)
   (setq e (list (cons 0 "LWPOLYLINE")
                 (cons 100 "AcDbEntity")
@@ -189,6 +197,174 @@
   (princ)
 )
 
-(princ "\nCLADDING-TEST.LSP загружен (ред. 3).")
-(princ "\nКоманды: MKTEST, RMTEST, TEST-FALLBACK, CLCOUNTERS")
+;; ============================================================
+;; ВРЕМЕННАЯ КОМАНДА RELOAD: перезагрузка модулей облицовки
+;; ДОБАВЛЕНО (К2): используется до этапа К4, пока cladding.lsp
+;; не входит в загрузочную цепочку диспетчера.
+;; ВНИМАНИЕ: перекрывает проектную c:RELOAD из reload.lsp,
+;; если та загружена в сеансе; после К4 удалить этот defun.
+;; ============================================================
+(defun c:reload ()
+  (load "D:/AutoExtraction/common/select-utils.lsp")
+  (load "D:/AutoExtraction/Extraction/cladding.lsp")
+  (load "D:/AutoExtraction/tests/cladding-test.lsp")
+  (princ "\nМодули облицовки перезагружены.")
+  (princ)
+)
+
+;; ============================================================
+;; TBLTEST: зонд создания таблицы AutoCAD по шагам
+;; Повторяет последовательность cl-create-table-summary
+;; с перехватом каждого шага для локализации ошибки
+;; ============================================================
+(defun c:tbltest ( / pt doc space tbl r)
+  (vl-load-com)
+  (setq pt (getpoint "\nТочка: "))
+  (if (null pt)
+    (princ "\nОтмена.")
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument
+                                    (list (vlax-get-acad-object))))
+      (princ (if (vl-catch-all-error-p doc)
+               (strcat "\nШАГ ОШИБКА: activedocument: "
+                       (vl-catch-all-error-message doc))
+               "\nШаг 1 activedocument: OK"))
+
+      (setq space (vl-catch-all-apply 'vla-get-modelspace (list doc)))
+      (princ (if (vl-catch-all-error-p space)
+               (strcat "\nШАГ ОШИБКА: modelspace: "
+                       (vl-catch-all-error-message space))
+               "\nШаг 2 modelspace: OK"))
+
+      (setq tbl (vl-catch-all-apply 'vla-addtable
+                    (list space (vlax-3d-point pt) 5 4 10.0 50.0)))
+      (princ (if (vl-catch-all-error-p tbl)
+               (strcat "\nШАГ ОШИБКА: addtable: "
+                       (vl-catch-all-error-message tbl))
+               "\nШаг 3 addtable: OK"))
+
+      (if (not (vl-catch-all-error-p tbl))
+        (progn
+          (setq r (vl-catch-all-apply 'vla-SetColumnWidth (list tbl 0 15.0)))
+          (princ (if (vl-catch-all-error-p r)
+                   (strcat "\nШАГ ОШИБКА: setcolumnwidth: "
+                           (vl-catch-all-error-message r))
+                   "\nШаг 4 setcolumnwidth: OK"))
+
+          (setq r (vl-catch-all-apply 'vla-MergeCells (list tbl 0 0 0 3)))
+          (princ (if (vl-catch-all-error-p r)
+                   (strcat "\nШАГ ОШИБКА: mergecells: "
+                           (vl-catch-all-error-message r))
+                   "\nШаг 5 mergecells: OK"))
+
+          (setq r (vl-catch-all-apply 'vla-SetText (list tbl 0 0 "{\\LТест}")))
+          (princ (if (vl-catch-all-error-p r)
+                   (strcat "\nШАГ ОШИБКА: settext: "
+                           (vl-catch-all-error-message r))
+                   "\nШаг 6 settext: OK"))
+
+          (setq r (vl-catch-all-apply 'vla-SetCellAlignment (list tbl 0 0 5)))
+          (princ (if (vl-catch-all-error-p r)
+                   (strcat "\nШАГ ОШИБКА: setcellalignment: "
+                           (vl-catch-all-error-message r))
+                   "\nШаг 7 setcellalignment: OK"))
+
+          (setq r (vl-catch-all-apply 'vla-update (list tbl)))
+          (princ (if (vl-catch-all-error-p r)
+                   (strcat "\nШАГ ОШИБКА: update: "
+                           (vl-catch-all-error-message r))
+                   "\nШаг 8 update: OK"))
+        )
+      )
+    )
+  )
+  (princ)
+)
+
+;; ============================================================
+;; TBLTEST2: точная реплика cl-create-table-summary по шагам
+;; Печатает имя каждого шага; останавливается на первом отказе
+;; ============================================================
+(defun c:tbltest2 ( / pt doc space tbl bad st)
+
+  (defun st (name fn args / r)
+    (if bad
+      nil
+      (progn
+        (setq r (vl-catch-all-apply fn args))
+        (if (vl-catch-all-error-p r)
+          (progn
+            (setq bad T)
+            (princ (strcat "\nШАГ ОШИБКА: " name ": "
+                           (vl-catch-all-error-message r)))
+          )
+          (princ (strcat "\nШаг " name ": OK"))
+        )
+        r
+      )
+    )
+  )
+
+  (setq bad nil)
+  (setq pt (getpoint "\nТочка: "))
+  (if (null pt)
+    (princ "\nОтмена.")
+    (progn
+      (setq doc (st "01 activedocument" 'vla-get-ActiveDocument
+                    (list (vlax-get-acad-object))))
+      (setq space (st "02 modelspace" 'vla-get-modelspace (list doc)))
+      (setq tbl (st "03 addtable" 'vla-addtable
+                    (list space (vlax-3d-point pt) 5 4 10.0 50.0)))
+      (st "04 width col0" 'vla-SetColumnWidth (list tbl 0 15.0))
+      (st "05 width col1" 'vla-SetColumnWidth (list tbl 1 90.0))
+      (st "06 width col2" 'vla-SetColumnWidth (list tbl 2 30.0))
+      (st "07 width col3" 'vla-SetColumnWidth (list tbl 3 35.0))
+      (st "08 merge title" 'vla-MergeCells (list tbl 0 0 0 3))
+      (st "09 text title" 'vla-SetText (list tbl 0 0 "{\\LОблицовка}"))
+      (st "10 text h0" 'vla-SetText (list tbl 1 0 "№"))
+      (st "11 text h1" 'vla-SetText (list tbl 1 1 "Слой"))
+      (st "12 text h2" 'vla-SetText (list tbl 1 2 "Кол-во, шт."))
+      (st "13 text h3" 'vla-SetText (list tbl 1 3 "Площадь, м2"))
+      (st "14 align h0" 'vla-SetCellAlignment (list tbl 1 0 5))
+      (st "15 align h1" 'vla-SetCellAlignment (list tbl 1 1 5))
+      (st "16 align h2" 'vla-SetCellAlignment (list tbl 1 2 5))
+      (st "17 align h3" 'vla-SetCellAlignment (list tbl 1 3 5))
+      ;; строка данных 1
+      (st "18 text r2c0" 'vla-SetText (list tbl 2 0 "1"))
+      (st "19 text r2c1" 'vla-SetText (list tbl 2 1 "ТЕСТ_КАССЕТЫ"))
+      (st "20 text r2c2" 'vla-SetText (list tbl 2 2 "2"))
+      (st "21 text r2c3" 'vla-SetText (list tbl 2 3 "1,44"))
+      (st "22 align r2c0" 'vla-SetCellAlignment (list tbl 2 0 5))
+      (st "23 align r2c1" 'vla-SetCellAlignment (list tbl 2 1 4))
+      (st "24 align r2c2" 'vla-SetCellAlignment (list tbl 2 2 5))
+      (st "25 align r2c3" 'vla-SetCellAlignment (list tbl 2 3 5))
+      ;; строка данных 2
+      (st "26 text r3c0" 'vla-SetText (list tbl 3 0 "2"))
+      (st "27 text r3c1" 'vla-SetText (list tbl 3 1 "ТЕСТ_КЕРАМОГРАНИТ"))
+      (st "28 text r3c2" 'vla-SetText (list tbl 3 2 "4"))
+      (st "29 text r3c3" 'vla-SetText (list tbl 3 3 "1,44"))
+      (st "30 align r3c0" 'vla-SetCellAlignment (list tbl 3 0 5))
+      (st "31 align r3c1" 'vla-SetCellAlignment (list tbl 3 1 4))
+      (st "32 align r3c2" 'vla-SetCellAlignment (list tbl 3 2 5))
+      (st "33 align r3c3" 'vla-SetCellAlignment (list tbl 3 3 5))
+      ;; итог
+      (st "34 merge total" 'vla-MergeCells (list tbl 4 0 4 1))
+      (st "35 text total0" 'vla-SetText (list tbl 4 0 "{\\LИтого}"))
+      (st "36 text total2" 'vla-SetText (list tbl 4 2 "6"))
+      (st "37 text total3" 'vla-SetText (list tbl 4 3 "2,88"))
+      (st "38 align total0" 'vla-SetCellAlignment (list tbl 4 0 5))
+      (st "39 align total2" 'vla-SetCellAlignment (list tbl 4 2 5))
+      (st "40 align total3" 'vla-SetCellAlignment (list tbl 4 3 5))
+      (st "41 update" 'vla-update (list tbl))
+      (if bad
+        (princ "\n=== реплика остановлена на шаге с ошибкой ===")
+        (princ "\n=== реплика прошла полностью: отказ вне этих шагов ===")
+      )
+    )
+  )
+  (princ)
+)
+
+(princ "\nCLADDING-TEST.LSP загружен (ред. 4).")
+(princ "\nКоманды: MKTEST, RMTEST, TEST-FALLBACK, CLCOUNTERS, RELOAD, TBLTEST")
 (princ)
