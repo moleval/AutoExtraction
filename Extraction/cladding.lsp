@@ -18,19 +18,20 @@
 ;;;     повёрнутые и непрямоугольные -> группа _НЕПРЯМОУГ_
 ;;;     (критерий: |S - dx*dy| > max(1 мм2, 1% dx*dy) по AABB).
 ;;;
-;;; ЭТАП К2: таблицы AutoCAD SUMMARY и DETAIL; глобалки
-;;; последнего прогона для переиспользования (в т.ч. будущей
-;;; задачей "Раскрой листа"): *CLADDING-LAST-RECORDS/DATA/MODE*.
-;;; Таблицы — чистые функции от агрегированных данных.
-;;; Номинал "WxH" машиночитаем; _НЕПРЯМОУГ_ зарезервирован.
+;;; К2: таблицы AutoCAD SUMMARY и DETAIL; глобалки последнего
+;;; прогона *CLADDING-LAST-RECORDS/DATA/MODE* (в т.ч. для
+;;; будущей задачи "Раскрой листа").
+;;; К3: экспорт XLS (SpreadsheetML, windows-1251) и CSV
+;;; (разделитель ";", площадь строкой с запятой); fallback
+;;; XLS -> CSV; имя файла save-base или "<dwg> Облицовка
+;;; подробный|краткий".
 ;;;
-;;; РЕДАКЦИЯ 6:
-;;;   - vla-MergeCells вызывается в порядке (Row1 Row2 Col1 Col2)
-;;;     по факту окружения: итоговые слияния исправлены на
-;;;     (row row c1 c2); титульные (0 0 0 N) уже верны;
-;;;   - *error* распознаёт русское сообщение об Esc (*ПРЕРВА*);
-;;;   - cladding-main сохраняет последние результаты и вызывает
-;;;     таблицы вместо заглушки К2.
+;;; РЕДАКЦИЯ 9: оформление титула с серой заливкой и контуром
+;;; по периметру; выравнивание итоговой строки DETAIL
+;;; (убрана пустая ячейка между слиянием и количеством).
+;;; РЕДАКЦИЯ 8: баланс скобок в cl-write-xls; № — сквозной.
+;;; РЕДАКЦИЯ 6: vla-MergeCells в порядке (Row1 Row2 Col1 Col2);
+;;; *error* распознаёт *ПРЕРВА*.
 ;;; ============================================================
 
 (vl-load-com)
@@ -428,7 +429,6 @@
 
 ;; ============================================================
 ;; ГЛОБАЛКИ ПОСЛЕДНЕГО ПРОГОНА (К2)
-;; Для переиспользования, в т.ч. будущей задачей "Раскрой листа"
 ;; ============================================================
 (if (not (boundp '*CLADDING-LAST-RECORDS*))
   (setq *CLADDING-LAST-RECORDS* nil)
@@ -446,7 +446,7 @@
 ;; ============================================================
 (defun cladding-main (layers report-mode export-excel export-txt
                       create-table save-base
-                      / *error* records data)
+                      / *error* records data xls-base xlsfile csvfile)
 
   (defun *error* (msg)
     (if (and msg
@@ -473,12 +473,39 @@
 
       (cl-report data report-mode)
       (cl-warnings)
+
+      ;; Экспорт XLS/CSV (К3)
       (if export-excel
-        (princ "\nXLS/CSV: будет реализовано на этапе К3.")
+        (progn
+          (setq xls-base
+            (if save-base
+              save-base
+              (strcat (getvar "DWGPREFIX")
+                      (vl-filename-base (getvar "DWGNAME"))
+                      " Облицовка "
+                      (if (= (strcase report-mode) "DETAIL")
+                        "подробный"
+                        "краткий")))
+          )
+          (setq xlsfile (strcat xls-base ".xls"))
+          (if (cl-write-xls data report-mode xlsfile)
+            (princ (strcat "\nXLS сохранен: " xlsfile))
+            (progn
+              (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+              (setq csvfile (strcat xls-base ".csv"))
+              (if (cl-write-csv data report-mode csvfile)
+                (princ (strcat "\nCSV сохранен: " csvfile))
+                (princ "\nНе удалось создать CSV.")
+              )
+            )
+          )
+        )
       )
       (if export-txt
         (princ "\nTXT: для облицовки не предусмотрен.")
       )
+
+      ;; Таблица AutoCAD (К2)
       (if create-table
         (if (= (strcase report-mode) "DETAIL")
           (cl-create-table-detail data)
@@ -521,8 +548,7 @@
 
 ;; ============================================================
 ;; ТАБЛИЦА AUTOCAD — SUMMARY (К2)
-;; Колонки: №, Слой, Кол-во, Площадь м2
-;; Слияния: (Row1 Row2 Col1 Col2) по факту окружения (ред. 6)
+;; Слияния: (Row1 Row2 Col1 Col2) по факту окружения
 ;; ============================================================
 (defun cl-create-table-summary (data / pt tbl row nRows nCols space
                                     rec total-cnt total-area)
@@ -569,7 +595,7 @@
         (setq row (1+ row))
       )
 
-      ;; Итог: слияние (Row1 Row2 Col1 Col2) = (row row 0 1)
+      ;; Итог: слияние (row row 0 1)
       (vla-MergeCells tbl row row 0 1)
       (vla-SetText tbl row 0 "{\\LИтого}")
       (vla-SetText tbl row 2 (itoa total-cnt))
@@ -587,7 +613,6 @@
 
 ;; ============================================================
 ;; ТАБЛИЦА AUTOCAD — DETAIL (К2)
-;; Колонки: №, Слой, Номинал, Кол-во, Площадь м2
 ;; Группировка по слоям с подитогом, общий итог внизу
 ;; ============================================================
 (defun cl-create-table-detail (data / pt tbl row nRows nCols space
@@ -694,5 +719,263 @@
   )
 )
 
-(princ "\nCLADDING.LSP загружен (К1-К2, ред. 6). Команда: CLADDING")
+;; ============================================================
+;; ЭКСПОРТ XLS (К3): SpreadsheetML, windows-1251
+;; РЕДАКЦИЯ 9: титул с серой заливкой и контуром по периметру;
+;; итоговая строка DETAIL выровнена под заголовками
+;; ============================================================
+(defun cl-write-xls (data report-mode fname / f brd rec total-cnt total-area
+                          groups grp grpName grpRows grpCnt grpArea detail
+                          itemNum)
+  (setq f (open fname "w"))
+  (if (null f)
+    nil
+    (progn
+      (setq detail (= (strcase report-mode) "DETAIL"))
+      (setq brd
+        (strcat
+          "<Borders>"
+          "<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
+          "<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
+          "<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
+          "<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
+          "</Borders>"))
+
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">" f)
+      (write-line " <Styles>" f)
+      (write-line "  <Style ss:ID=\"Default\"><Alignment ss:Vertical=\"Center\"/></Style>" f)
+      (write-line
+        (strcat "  <Style ss:ID=\"Title\"><Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>"
+                "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>"
+                brd "</Style>")
+        f)
+      (write-line
+        (strcat "  <Style ss:ID=\"Header\"><Font ss:Bold=\"1\"/>"
+                "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>"
+                brd "</Style>")
+        f)
+      (write-line
+        (strcat "  <Style ss:ID=\"Data\">"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>"
+                brd "</Style>")
+        f)
+      (write-line
+        (strcat "  <Style ss:ID=\"DataLeft\">"
+                "<Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>"
+                brd "</Style>")
+        f)
+      (write-line
+        (strcat "  <Style ss:ID=\"Total\"><Font ss:Bold=\"1\"/>"
+                "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>"
+                brd "</Style>")
+        f)
+      (write-line " </Styles>" f)
+      (write-line " <Worksheet ss:Name=\"Облицовка\">" f)
+      (write-line "  <Table>" f)
+
+      (if detail
+        (progn
+          (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
+          (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
+          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"60\"/>" f)
+          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+        )
+        (progn
+          (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
+          (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"140\"/>" f)
+          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+        )
+      )
+
+      ;; Титул
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line
+        (strcat "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\""
+                (if detail "4" "3")
+                "\"><Data ss:Type=\"String\">Облицовка</Data></Cell>")
+        f)
+      (write-line "   </Row>" f)
+
+      ;; Шапка
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
+      (if detail
+        (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Номинал</Data></Cell>" f)
+      )
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq total-cnt 0 total-area 0.0 itemNum 0)
+
+      (if detail
+        (progn
+          ;; Группировка по слоям для подитогов
+          (setq groups '())
+          (foreach rec data
+            (setq grp (assoc (cadr rec) groups))
+            (if grp
+              (setq groups (subst (append grp (list (list rec))) grp groups))
+              (setq groups (append groups (list (list (cadr rec) (list rec)))))
+            )
+          )
+          (foreach grp groups
+            (setq grpName (car grp)
+                  grpRows (cdr grp)
+                  grpCnt 0
+                  grpArea 0.0)
+            (foreach rec grpRows
+              (setq rec (car rec))
+              (setq grpCnt (+ grpCnt (nth 3 rec)))
+              (setq grpArea (+ grpArea (nth 4 rec)))
+              (setq total-cnt (+ total-cnt (nth 3 rec)))
+              (setq total-area (+ total-area (nth 4 rec)))
+              (setq itemNum (1+ itemNum))
+              (write-line "   <Row>" f)
+              (write-line
+                (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                        (itoa itemNum) "</Data></Cell>")
+                f)
+              (write-line
+                (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">"
+                        (cadr rec) "</Data></Cell>")
+                f)
+              (write-line
+                (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">"
+                        (caddr rec) "</Data></Cell>")
+                f)
+              (write-line
+                (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                        (itoa (nth 3 rec)) "</Data></Cell>")
+                f)
+              (write-line
+                (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                        (rtos (cl-round2 (nth 4 rec)) 2 2) "</Data></Cell>")
+                f)
+              (write-line "   </Row>" f)
+            )
+            ;; Подитог слоя
+            (write-line "   <Row>" f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">  "
+                      grpName "</Data></Cell>")
+              f)
+            (write-line "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"String\"></Data></Cell>" f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">"
+                      (itoa grpCnt) "</Data></Cell>")
+              f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">"
+                      (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>")
+              f)
+            (write-line "   </Row>" f)
+          )
+        )
+        (progn
+          (foreach rec data
+            (setq total-cnt (+ total-cnt (nth 3 rec)))
+            (setq total-area (+ total-area (nth 4 rec)))
+            (setq itemNum (1+ itemNum))
+            (write-line "   <Row>" f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                      (itoa itemNum) "</Data></Cell>")
+              f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">"
+                      (cadr rec) "</Data></Cell>")
+              f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                      (itoa (nth 3 rec)) "</Data></Cell>")
+              f)
+            (write-line
+              (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">"
+                      (rtos (cl-round2 (nth 4 rec)) 2 2) "</Data></Cell>")
+              f)
+            (write-line "   </Row>" f)
+          )
+        )
+      )
+
+      ;; Итого (РЕДАКЦИЯ 9: убрана пустая ячейка в DETAIL)
+      (write-line "   <Row>" f)
+      (write-line
+        (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\""
+                (if detail "2" "1")
+                "\"><Data ss:Type=\"String\">Итого</Data></Cell>")
+        f)
+      (write-line
+        (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">"
+                (itoa total-cnt) "</Data></Cell>")
+        f)
+      (write-line
+        (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">"
+                (rtos (cl-round2 total-area) 2 2) "</Data></Cell>")
+        f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ============================================================
+;; ЭКСПОРТ CSV (К3): fallback и самостоятельный формат
+;; Разделитель ";", площадь строкой с запятой.
+;; DETAIL — плоский список без подитогов + строка "Итого"
+;; ============================================================
+(defun cl-write-csv (data report-mode fname / f rec detail
+                          total-cnt total-area)
+  (setq f (open fname "w"))
+  (if (null f)
+    nil
+    (progn
+      (setq detail (= (strcase report-mode) "DETAIL"))
+      (setq total-cnt 0 total-area 0.0)
+      (if detail
+        (write-line "Слой;Номинал;Кол-во, шт;Площадь, м2" f)
+        (write-line "Слой;Кол-во, шт;Площадь, м2" f)
+      )
+      (foreach rec data
+        (setq total-cnt (+ total-cnt (nth 3 rec)))
+        (setq total-area (+ total-area (nth 4 rec)))
+        (if detail
+          (write-line (strcat (cadr rec) ";" (caddr rec) ";"
+                              (itoa (nth 3 rec)) ";"
+                              (cl-format-area (cl-round2 (nth 4 rec)))) f)
+          (write-line (strcat (cadr rec) ";"
+                              (itoa (nth 3 rec)) ";"
+                              (cl-format-area (cl-round2 (nth 4 rec)))) f)
+        )
+      )
+      (if detail
+        (write-line (strcat "Итого;;" (itoa total-cnt) ";"
+                            (cl-format-area (cl-round2 total-area))) f)
+        (write-line (strcat "Итого;" (itoa total-cnt) ";"
+                            (cl-format-area (cl-round2 total-area))) f)
+      )
+      (close f)
+      T
+    )
+  )
+)
+
+(princ "\nCLADDING.LSP загружен (К1-К3, ред. 9). Команда: CLADDING")
 (princ)
