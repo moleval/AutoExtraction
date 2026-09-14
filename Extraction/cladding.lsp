@@ -2,8 +2,8 @@
 ;;; CLADDING.LSP — Облицовка
 ;;; Часть 1: полилинии (К1-К3)
 ;;; Часть 2: динамические блоки (Б1-Б4)
-;;; РЕДАКЦИЯ 25: Б4 — XLS с формулами ROUND/SUM, серая заливка
-;;; подрезных, корректные столбцы подитогов; CSV без сдвига.
+;;; РЕДАКЦИЯ 27: выверен баланс скобок; сводная таблица блоков
+;;; в кратком режиме; диспетчер передаёт do-blocks.
 ;;; ============================================================
 
 (vl-load-com)
@@ -473,13 +473,12 @@
   result
 )
 
-;; ---------- Б3: таблица блоков в AutoCAD ----------
+;; ---------- Б3: таблица блоков в AutoCAD (подробный) ----------
 (defun cl-create-blocks-table (data /
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     total-cnt total-area grp layer layerIdx subCnt subArea
     nCols nRows space tbl row itemNum oldEcho doc
     lastLayerIdx rowInLayer maxLayerLen maxTypeLen layerStr typeStr)
-
   (if (null data)
     (progn (princ "\nНет данных блоков для таблицы.") nil)
     (progn
@@ -494,12 +493,10 @@
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
           (vla-startundomark doc)
-
           (setq total-cnt 0 total-area 0.0)
           (foreach grp data
             (setq total-cnt (+ total-cnt (nth 5 grp)))
             (setq total-area (+ total-area (nth 6 grp))))
-
           (setq maxLayerLen 10 maxTypeLen 10)
           (foreach grp data
             (setq layerStr (nth 1 grp))
@@ -508,20 +505,16 @@
               (setq maxLayerLen (strlen layerStr)))
             (if (> (strlen typeStr) maxTypeLen)
               (setq maxTypeLen (strlen typeStr))))
-
           (setq units (cl-build-block-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
           (setq chunk-idx 0 itemNum 0 nCols 7)
-
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
             (setq nRows (+ 2 (car chunk)))
             (if is-last (setq nRows (1+ nRows)))
             (setq items (cdr chunk))
-
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
-
             (if (vl-catch-all-error-p tbl)
               (princ (strcat "\nОшибка создания таблицы блоков: "
                              (vl-catch-all-error-message tbl)))
@@ -533,10 +526,8 @@
                 (vla-SetColumnWidth tbl 4 30.0)
                 (vla-SetColumnWidth tbl 5 25.0)
                 (vla-SetColumnWidth tbl 6 30.0)
-
                 (vla-MergeCells tbl 0 0 0 6)
                 (vla-SetText tbl 0 0 "{\\LОблицовка (блоки)}")
-
                 (vla-SetText tbl 1 0 "№")
                 (vla-SetText tbl 1 1 "Слой")
                 (vla-SetText tbl 1 2 "Тип")
@@ -551,10 +542,8 @@
                 (vla-SetCellAlignment tbl 1 4 5)
                 (vla-SetCellAlignment tbl 1 5 5)
                 (vla-SetCellAlignment tbl 1 6 5)
-
                 (setq row 2)
                 (setq lastLayerIdx -1 rowInLayer 0)
-
                 (foreach item items
                   (if (eq (car item) 'data)
                     (progn
@@ -600,7 +589,6 @@
                         (cl-format-area (cl-round2 subArea)))
                       (vla-SetCellAlignment tbl row 6 5)
                       (setq row (1+ row)))))
-
                 (if is-last
                   (progn
                     (vla-MergeCells tbl row row 0 4)
@@ -611,25 +599,95 @@
                     (vla-SetText tbl row 6
                       (cl-format-area (cl-round2 total-area)))
                     (vla-SetCellAlignment tbl row 6 5)))
-
                 (vla-update tbl)
                 (princ (strcat "\nТаблица блоков "
                                (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
             (setq chunk-idx (1+ chunk-idx)))
-
           (vla-endundomark doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
           (princ (strcat "\nВсего создано таблиц блоков: "
                          (itoa total-chunks)))
-          T))))
-)
+          T)))))
+
+
+;; ---------- Б3: сводная таблица блоков (краткий режим) ----------
+(defun cl-create-blocks-table-summary (data / pt pt_wcs layerGroups lg layer
+                                          g cnt area total-cnt total-area
+                                          nCols nRows space tbl row oldEcho doc)
+  (if (null data)
+    (progn (princ "\nНет данных блоков для таблицы.") nil)
+    (progn
+      (setq pt (getpoint "\nУкажите точку вставки таблицы блоков: "))
+      (if (null pt)
+        (progn (princ "\nТаблица блоков пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+          (setq layerGroups (cl-group-blocks-by-layer data))
+          (setq nCols 4)
+          (setq nRows (+ 3 (length layerGroups)))
+          (setq tbl (vl-catch-all-apply 'vla-addtable
+                    (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+          (if (vl-catch-all-error-p tbl)
+            (princ (strcat "\nОшибка создания таблицы блоков: "
+                           (vl-catch-all-error-message tbl)))
+            (progn
+              (vla-SetColumnWidth tbl 0 15.0)
+              (vla-SetColumnWidth tbl 1 150.0)
+              (vla-SetColumnWidth tbl 2 25.0)
+              (vla-SetColumnWidth tbl 3 30.0)
+              (vla-MergeCells tbl 0 0 0 3)
+              (vla-SetText tbl 0 0 "{\\LОблицовка (блоки)}")
+              (vla-SetText tbl 1 0 "№")
+              (vla-SetText tbl 1 1 "Слой")
+              (vla-SetText tbl 1 2 "Кол-во, шт.")
+              (vla-SetText tbl 1 3 "Площадь, м2")
+              (vla-SetCellAlignment tbl 1 0 5)
+              (vla-SetCellAlignment tbl 1 1 5)
+              (vla-SetCellAlignment tbl 1 2 5)
+              (vla-SetCellAlignment tbl 1 3 5)
+              (setq row 2 total-cnt 0 total-area 0.0)
+              (foreach lg layerGroups
+                (setq layer (car lg))
+                (setq cnt 0 area 0.0)
+                (foreach g (cdr lg)
+                  (setq cnt  (+ cnt  (nth 5 g)))
+                  (setq area (+ area (nth 6 g))))
+                (setq total-cnt  (+ total-cnt  cnt))
+                (setq total-area (+ total-area area))
+                (vla-SetText tbl row 0 (itoa (- row 1)))
+                (vla-SetText tbl row 1 layer)
+                (vla-SetText tbl row 2 (itoa cnt))
+                (vla-SetText tbl row 3 (cl-format-area (cl-round2 area)))
+                (vla-SetCellAlignment tbl row 0 5)
+                (vla-SetCellAlignment tbl row 1 4)
+                (vla-SetCellAlignment tbl row 2 5)
+                (vla-SetCellAlignment tbl row 3 5)
+                (setq row (1+ row)))
+              (vla-MergeCells tbl row row 0 1)
+              (vla-SetText tbl row 0 "        {\\LИтого по всем блокам:}")
+              (vla-SetCellAlignment tbl row 0 4)
+              (vla-SetText tbl row 2 (itoa total-cnt))
+              (vla-SetCellAlignment tbl row 2 5)
+              (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
+              (vla-SetCellAlignment tbl row 3 5)
+              (vla-update tbl)
+              (princ "\nТаблица блоков (кратко) создана.")))
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          T)))))
+
 
 ;; ============================================================
 ;; Б4: ЭКСПОРТ БЛОКОВ В XLS/CSV
 ;; ============================================================
 
-;; ---------- Б4: Экспорт блоков в XLS ----------
 (defun cl-blocks-write-xls (groups fname / f brd grp total-cnt total-area
                               layerGroups lg layer layer-cnt layer-area
                               grpCnt grpArea itemNum row-num is-cut
@@ -743,7 +801,6 @@
       T))
 )
 
-;; ---------- Б4: Экспорт блоков в CSV ----------
 (defun cl-blocks-write-csv (groups fname / f grp total-cnt total-area
                               layerGroups lg layer layer-cnt layer-area
                               grpCnt grpArea itemNum)
@@ -771,11 +828,9 @@
                               (itoa (nth 3 grp)) ";"
                               (itoa grpCnt) ";"
                               (cl-format-area (cl-round2 grpArea))) f))
-        ;; Подитог слоя: 4 разделителя -> кол-во в столбец 5, площадь в 6
         (write-line (strcat "        Итого: " layer ";;;;"
                             (itoa layer-cnt) ";"
                             (cl-format-area (cl-round2 layer-area))) f))
-      ;; Общий итог: 4 разделителя -> кол-во в столбец 5, площадь в 6
       (write-line (strcat "        Итого по всем блокам:;;;;"
                           (itoa total-cnt) ";"
                           (cl-format-area (cl-round2 total-area))) f)
@@ -791,21 +846,19 @@
 (if (not (boundp '*CLADDING-LAST-MODE*))    (setq *CLADDING-LAST-MODE* nil))
 
 ;; ============================================================
-;; ОСНОВНАЯ ФУНКЦИЯ ПОЛИЛИНИЙ (сигнатура диспетчера)
+;; ОСНОВНАЯ ФУНКЦИЯ (сигнатура диспетчера, 7-й параметр do-blocks)
 ;; ============================================================
 (defun cladding-main (layers report-mode export-excel export-txt
-                      create-table save-base
-                      / *error* records data xls-base xlsfile csvfile)
-
+                      create-table save-base do-blocks
+                      / *error* records data xls-base xlsfile csvfile
+                        brec bgroups bxls bcsv)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg)
                            "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*ПРЕРВА*")))
       (princ (strcat "\nОшибка: " msg)))
     (princ))
-
   (princ "\n=== Облицовка: сбор полилиний ===")
   (setq records (cl-collect layers))
-
   (if records
     (progn
       (setq data (cl-aggregate records (= (strcase report-mode) "DETAIL")))
@@ -839,8 +892,36 @@
     (progn
       (princ "\nДанных по полилиниям нет.")
       (cl-warnings)))
+  (if do-blocks
+    (progn
+      (princ "\n=== Облицовка: сбор блоков ===")
+      (setq brec (cl-collect-blocks layers))
+      (if brec
+        (progn
+          (setq bgroups (cl-blocks-aggregate brec))
+          (cl-blocks-report bgroups)
+          (if create-table
+            (if (= (strcase report-mode) "DETAIL")
+              (cl-create-blocks-table bgroups)
+              (cl-create-blocks-table-summary bgroups)))
+          (if export-excel
+            (progn
+              (setq bxls (strcat (getvar "DWGPREFIX")
+                                 (vl-filename-base (getvar "DWGNAME"))
+                                 " Облицовка блоки.xls"))
+              (if (cl-blocks-write-xls bgroups bxls)
+                (princ (strcat "\nXLS сохранен: " bxls))
+                (progn
+                  (setq bcsv (strcat (getvar "DWGPREFIX")
+                                     (vl-filename-base (getvar "DWGNAME"))
+                                     " Облицовка блоки.csv"))
+                  (if (cl-blocks-write-csv bgroups bcsv)
+                    (princ (strcat "\nCSV сохранен: " bcsv))
+                    (princ "\nНе удалось создать CSV."))))))
+        (princ "\nБлоки облицовки не найдены."))))
   (princ)
 )
+)  
 
 ;; ============================================================
 ;; АВТОНОМНЫЕ КОМАНДЫ
@@ -856,7 +937,7 @@
   (setq report-mode (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <S>: "))
   (if (null report-mode) (setq report-mode "S"))
   (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
-  (cladding-main layers report-mode nil nil nil nil)
+  (cladding-main layers report-mode nil nil nil nil nil)
   (princ)
 )
 
@@ -1182,5 +1263,5 @@
       T))
 )
 
-(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 25). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
+(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 27). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
 (princ)
