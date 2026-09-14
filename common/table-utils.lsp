@@ -1,31 +1,81 @@
 ;;; ============================================================
 ;;; common/table-utils.lsp
-;;; Создание таблиц AutoCAD для отчётов Фасонки
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.1):
-;;;   D7: добавлены переменные ans, oldEcho, recCount в /-список
-;;;       tbl-create-report
-;;;   D8: убран интерактивный вопрос о создании таблицы.
-;;;       Решение принимается на уровне диспетчера (chk_acad)
-;;;       или автономных команд.
-;;;   БАГ: в ветке SUMMARY не обновлялся список createdTables,
-;;;       из-за чего выводилось противоречивое сообщение
-;;;       "Таблица SUMMARY создана." и "Таблицы не созданы."
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.2):
-;;;   D4: Оптимизация группировки в ветке DETAIL —
-;;;       append заменён на cons (O(1) вместо O(N)).
-;;;       Порядок групп сохраняется через reverse перед использованием.
-;;
-;;; ИСПРАВЛЕНИЯ (аудит Этап 4.4):
-;;;   D12: Добавлены поясняющие комментарии о сохранении и
-;;;       восстановлении CMDECHO в функции tbl-create-report.
+;;; Создание таблиц AutoCAD для отчётов
+;;;
+;;; УНИФИЦИРОВАННЫЙ УПАКОВЩИК ТАБЛИЦ:
+;;;   *TU-MAX-ROWS* / *TU-IDEAL-ROWS* / *TU-MIN-FILL*
+;;;   tu-pack-groups, tu-next-table-point, tu-is-last-chunk
+;;;
+;;; Отчёты Фасонки:
+;;;   tbl-fill-detail, tbl-fill-summary, tbl-create-report
 ;;; ============================================================
 
 (vl-load-com)
 
+;; ============================================================
+;; УНИФИЦИРОВАННЫЙ УПАКОВЩИК ТАБЛИЦ
+;;
+;; Единые лимиты строк на таблицу AutoCAD:
+;;   *TU-MAX-ROWS*   = 95  ; жёсткий потолок
+;;   *TU-IDEAL-ROWS* = 50  ; желаемая наполненность
+;;   *TU-MIN-FILL*   = 35  ; минимум наполнения при делении
+;;
+;; SUMMARY-таблицы не кускуются.
+;; Общий итог кладётся только в последнюю таблицу (Вариант А).
+;; ============================================================
+
+(setq *TU-MAX-ROWS*   95)
+(setq *TU-IDEAL-ROWS* 50)
+(setq *TU-MIN-FILL*   35)
+
 ;; ------------------------------------------------------------
-;; Функция заполнения DETAIL-таблицы
+;; tu-pack-groups
+;; Вход:  units = список (nRows . data)
+;; Выход: список кусков; кусок = список units (в исходном порядке)
+;; Группа НЕ рвётся.
+;; ------------------------------------------------------------
+(defun tu-pack-groups (units / chunks cur curRows u n canAdd)
+  (setq chunks '()  cur '()  curRows 0)
+  (foreach u units
+    (setq n (car u)
+          canAdd nil)
+    (cond
+      ((zerop curRows)                                   (setq canAdd T))
+      ((<= (+ curRows n) *TU-IDEAL-ROWS*)                (setq canAdd T))
+      ((and (< curRows *TU-MIN-FILL*)
+            (<= (+ curRows n) *TU-MAX-ROWS*))            (setq canAdd T))
+      (T                                                 (setq canAdd nil))
+    )
+    (if canAdd
+      (setq cur (cons u cur)  curRows (+ curRows n))
+      (progn
+        (if cur (setq chunks (cons (reverse cur) chunks)))
+        (setq cur (list u)  curRows n)
+      )
+    )
+  )
+  (if cur (setq chunks (cons (reverse cur) chunks)))
+  (reverse chunks)
+)
+
+;; ------------------------------------------------------------
+;; tu-next-table-point — точка следующей таблицы (вниз по Y)
+;; ------------------------------------------------------------
+(defun tu-next-table-point (pt neededRows rowHeight gap)
+  (list (car pt)
+        (- (cadr pt) (+ (* neededRows rowHeight) gap))
+        0.0)
+)
+
+;; ------------------------------------------------------------
+;; tu-is-last-chunk — признак последнего куска
+;; ------------------------------------------------------------
+(defun tu-is-last-chunk (idx total)
+  (= idx (1- total))
+)
+
+;; ------------------------------------------------------------
+;; Функция заполнения DETAIL-таблицы Фасонки
 ;; ------------------------------------------------------------
 (defun tbl-fill-detail (table groups / row g gIdx gName gRecs totalSum itemNum len count sum)
   (vla-SetColumnWidth table 0 17.5)
@@ -82,7 +132,7 @@
 )
 
 ;; ------------------------------------------------------------
-;; Функция заполнения SUMMARY-таблицы
+;; Функция заполнения SUMMARY-таблицы Фасонки
 ;; ------------------------------------------------------------
 (defun tbl-fill-summary (table groups / row i name count sum totalCount totalSum)
   (vla-SetColumnWidth table 0 10.0)
@@ -99,8 +149,7 @@
   (vla-SetCellAlignment table 1 1 5)
   (vla-SetCellAlignment table 1 2 5)
   (vla-SetCellAlignment table 1 3 5)
-  (setq row 2
-        i 0)
+  (setq row 2 i 0)
   (foreach g groups
     (setq name  (car g)
           count (cadr g)
@@ -116,9 +165,7 @@
     (vla-SetCellAlignment table row 3 5)
     (setq row (1+ row))
   )
-  ;; Итоговая строка
-  (setq totalCount 0
-        totalSum   0.0)
+  (setq totalCount 0 totalSum 0.0)
   (foreach g groups
     (setq totalCount (+ totalCount (cadr g))
           totalSum   (+ totalSum (caddr g)))
@@ -133,33 +180,17 @@
 )
 
 ;; ------------------------------------------------------------
-;; Основная функция создания таблиц AutoCAD
-;; ИСПРАВЛЕНО (аудит Этап 4.1):
-;;   D7: добавлены ans, oldEcho, recCount в /-список
-;;   D8: убран вопрос о создании таблицы.
-;;       Решение о создании принято до вызова этой функции
-;;       (на уровне диспетчера или автономной команды).
-;;   БАГ: в ветке SUMMARY не обновлялся список createdTables.
-;; ИСПРАВЛЕНО (аудит Этап 4.2):
-;;   D4: Оптимизация группировки в ветке DETAIL —
-;;       append заменён на cons (O(1) вместо O(N)).
-;;       Порядок групп сохраняется через reverse перед использованием.
-;; ИСПРАВЛЕНО (аудит Этап 4.4):
-;;   D12: Добавлены поясняющие комментарии о сохранении и
-;;       восстановлении CMDECHO.
+;; Основная функция создания таблиц Фасонки
 ;; ------------------------------------------------------------
 (defun tbl-create-report (report-type report-data / acad doc space pt pt_wcs
                           doTotals skipSingleTotals mergeTotals alignData
                           maxRowsPerTable idealRowsPerTable minFill
-                          indexed-groups groupIndex currentGroups currentDataRows
+                          indexed-groups currentGroups currentDataRows
                           tableIndex createdTables
                           gIndex gName gRecs tableObj groupRows
                           neededRows ig canAdd
                           ans oldEcho recCount)
 
-  ;; Решение о создании таблицы принято на уровне вызывающего кода.
-  ;; Эта функция вызывается только если create-table = T.
-  ;; Никаких дополнительных вопросов пользователю не задаётся.
   (setq pt (getpoint "\nУкажите точку вставки первой таблицы: "))
   (if pt
     (progn
@@ -168,35 +199,17 @@
             space (vla-get-modelspace doc)
             pt_wcs (trans pt 1 0))
       (setq doTotals T skipSingleTotals nil mergeTotals T alignData T)
-      (setq maxRowsPerTable 60 idealRowsPerTable 45 minFill 40)
+      (setq maxRowsPerTable *TU-MAX-ROWS*
+            idealRowsPerTable *TU-IDEAL-ROWS*
+            minFill *TU-MIN-FILL*)
 
-      ;; ============================================================
-      ;; Сохранение и восстановление CMDECHO
-      ;; ИСПРАВЛЕНО (аудит Этап 4.4, пункт D12):
-      ;; Добавлен поясняющий комментарий.
-      ;;
-      ;; Подавляем эхо-вывод команд на время создания таблицы,
-      ;; чтобы не засорять командную строку.
-      ;; Восстановление выполняется в конце функции через
-      ;; (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho)).
-      ;;
-      ;; При ошибке между сохранением и восстановлением переменная
-      ;; может остаться изменённой. Это известное ограничение,
-      ;; но риск минимален, так как операции создания таблицы
-      ;; обычно завершаются успешно.
-      ;; ============================================================
       (setq oldEcho (getvar "CMDECHO"))
       (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
       (vla-startundomark doc)
 
-      ;; Инициализация списка созданных таблиц и счётчика
-      (setq createdTables '()
-            tableIndex 0)
+      (setq createdTables '() tableIndex 0)
 
       (if (= report-type "DETAIL")
-        ;; ============================================================
-        ;; ВЕТКА DETAIL
-        ;; ============================================================
         (progn
           (setq indexed-groups report-data)
           (setq currentGroups '() currentDataRows 0)
@@ -213,14 +226,10 @@
               (t (setq canAdd nil))
             )
             (if canAdd
-              ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
-              ;; cons вместо append для накопления групп
               (progn (setq currentGroups (cons ig currentGroups) currentDataRows (+ currentDataRows groupRows)))
               (progn
                 (if currentGroups
                   (progn
-                    ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
-                    ;; Восстанавливаем порядок групп перед использованием
                     (setq currentGroups (reverse currentGroups))
                     (setq neededRows 2)
                     (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
@@ -232,7 +241,7 @@
                         (vla-update tableObj)
                         (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
                         (princ (strcat "\nТаблица " (itoa tableIndex) " создана."))
-                        (setq pt_wcs (list (car pt_wcs) (- (cadr pt_wcs) (+ (* neededRows 10.0) 20.0)) 0.0))
+                        (setq pt_wcs (tu-next-table-point pt_wcs neededRows 10.0 20.0))
                       )
                     )
                   )
@@ -243,8 +252,6 @@
           )
           (if currentGroups
             (progn
-              ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
-              ;; Восстанавливаем порядок групп перед использованием
               (setq currentGroups (reverse currentGroups))
               (setq neededRows 2)
               (foreach g currentGroups (setq neededRows (+ neededRows (length (caddr g)) (if doTotals 1 0))))
@@ -261,9 +268,6 @@
             )
           )
         )
-        ;; ============================================================
-        ;; ВЕТКА SUMMARY
-        ;; ============================================================
         (progn
           (setq neededRows (+ 3 (length report-data)))
           (setq tableObj (vl-catch-all-apply 'vla-addtable (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
@@ -272,16 +276,13 @@
             (progn
               (tbl-fill-summary tableObj report-data)
               (vla-update tableObj)
-              ;; ИСПРАВЛЕНО (аудит Этап 4.1): добавляем таблицу в список созданных
-              (setq createdTables (cons tableObj createdTables)
-                    tableIndex (1+ tableIndex))
+              (setq createdTables (cons tableObj createdTables) tableIndex (1+ tableIndex))
               (princ "\nТаблица SUMMARY создана.")
             )
           )
         )
       )
 
-      ;; Завершение Undo-группы и восстановление эхо-вывода
       (vla-endundomark doc)
       (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
       (if createdTables
