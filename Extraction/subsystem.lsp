@@ -467,241 +467,209 @@
   result
 )
 
-;; ------------------------------------------------------------
-;; AutoCAD DETAIL
-;; ------------------------------------------------------------
+;; ============================================================
+;; Кускование Подсистемы — подготовка плоского списка
+;; Штучные — группа 1 (без подитога).
+;; Мерные — каждая группа по имени, с подитогом.
+;; ============================================================
 
-(defun subsystem-create-table-detail
-       (data / pt tbl row nRows nCols space
-             name len cnt sum totalSum
-             groupIndex itemNum groups groupName groupRows)
+(defun su-build-flat-items (data / items groups grp groupName groupRows
+                             rec len cnt totalSum groupIndex)
+  (setq items '())
+  (setq groupIndex 1)
 
-  (setq
-    pt
-    (getpoint
-      "\nУкажите точку вставки таблицы: "
+  ;; Штучные позиции — группа 1
+  (foreach rec data
+    (if (null (cadr rec))
+      (setq items (append items (list (cons 'data (cons groupIndex rec)))))
     )
   )
 
-  (if pt
-
-    (progn
-
-      (setvar "CMDECHO" 0)
-
-      (setq nCols 5)
-      (setq nRows 2)
-
-      ;; Штучные строки.
-      (foreach rec data
-        (if (null (cadr rec))
-          (setq nRows (1+ nRows))
-        )
+  ;; Мерные группы
+  (setq groups '())
+  (foreach rec data
+    (if (cadr rec)
+      (if (not (assoc (car rec) groups))
+        (setq groups (cons (list (car rec)) groups))
       )
-
-      ;; Группы мерных элементов.
-      (setq groups '())
-
-      (foreach rec data
-        (if (cadr rec)
-          (if (not (assoc (car rec) groups))
-            (setq
-              groups
-              (cons (list (car rec)) groups)
-            )
-          )
-        )
-      )
-
-      (foreach grp groups
-        (setq
-          nRows
-          (+
-            nRows
-            (length
-              (vl-remove-if-not
-                '(lambda (x)
-                   (and
-                     (= (car x) (car grp))
-                     (cadr x)
-                   )
-                )
-                data
-              )
-            )
-            1
-          )
-        )
-      )
-
-      (setq
-        space
-        (vla-get-modelspace
-          (vla-get-activedocument
-            (vlax-get-acad-object)
-          )
-        )
-      )
-
-      (setq
-        tbl
-        (vla-addtable
-          space
-          (vlax-3d-point pt)
-          nRows
-          nCols
-          10.0
-          50.0
-        )
-      )
-
-      (vla-SetColumnWidth tbl 0 15.0)
-      (vla-SetColumnWidth tbl 1 150.0)
-      (vla-SetColumnWidth tbl 2 25.0)
-      (vla-SetColumnWidth tbl 3 25.0)
-      (vla-SetColumnWidth tbl 4 30.0)
-
-      (vla-MergeCells tbl 0 0 0 4)
-      (vla-SetText tbl 0 0 "{\\LПодсистема}")
-
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Наименование")
-      (vla-SetText tbl 1 2 "Длина, мм")
-      (vla-SetText tbl 1 3 "Кол-во, шт.")
-      (vla-SetText tbl 1 4 "Сумма, м.п.")
-
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
-      (vla-SetCellAlignment tbl 1 4 5)
-
-      (setq
-        row 2
-        itemNum 0
-      )
-
-      ;; --------------------------------------------------------
-      ;; ШТУЧНЫЕ
-      ;; --------------------------------------------------------
-
-      (foreach rec data
-
-        (setq
-          name (car rec)
-          len  (cadr rec)
-          cnt  (caddr rec)
-        )
-
-        (if (null len)
-
-          (progn
-
-            (setq itemNum (1+ itemNum))
-
-            (vla-SetText tbl row 0 (itoa itemNum))
-            (vla-SetText tbl row 1 name)
-            (vla-SetText tbl row 2 "")
-            (vla-SetText tbl row 3 (itoa cnt))
-            (vla-SetText tbl row 4 "")
-
-            ;; Наименование — ВЛЕВО.
-            (vla-SetCellAlignment tbl row 0 5)
-            (vla-SetCellAlignment tbl row 1 4)
-            (vla-SetCellAlignment tbl row 2 5)
-            (vla-SetCellAlignment tbl row 3 5)
-            (vla-SetCellAlignment tbl row 4 5)
-
-            (setq row (1+ row))
-          )
-        )
-      )
-
-      ;; --------------------------------------------------------
-      ;; МЕРНЫЕ
-      ;; --------------------------------------------------------
-
-      (setq
-        groups
-        (vl-sort
-          groups
-          '(lambda (a b)
-             (subsystem-sort-less a b)
-           )
-        )
-      )
-
-      (foreach grp groups
-
-        (setq
-          groupName (car grp)
-          groupRows '()
-          totalSum 0.0
-        )
-
-        (foreach rec data
-          (if
-            (and
-              (= (car rec) groupName)
-              (cadr rec)
-            )
-            (setq
-              groupRows
-              (append groupRows (list rec))
-            )
-          )
-        )
-
-        (foreach rec groupRows
-
-          (setq
-            len (cadr rec)
-            cnt (caddr rec)
-            sum (/ (* len cnt) 1000.0)
-            totalSum (+ totalSum sum)
-          )
-
-          (setq itemNum (1+ itemNum))
-
-          (vla-SetText tbl row 0 (itoa itemNum))
-          (vla-SetText tbl row 1 groupName)
-          (vla-SetText tbl row 2 (rtos len 2 0))
-          (vla-SetText tbl row 3 (itoa cnt))
-          (vla-SetText tbl row 4 (rtos sum 2 2))
-
-          ;; Наименование — ВЛЕВО.
-          (vla-SetCellAlignment tbl row 0 5)
-          (vla-SetCellAlignment tbl row 1 4)
-          (vla-SetCellAlignment tbl row 2 5)
-          (vla-SetCellAlignment tbl row 3 5)
-          (vla-SetCellAlignment tbl row 4 5)
-
-          (setq row (1+ row))
-        )
-
-        ;; Подитог группы.
-        (vla-MergeCells tbl row row 1 3)
-
-        (vla-SetText tbl row 0 "")
-        (vla-SetText
-          tbl row 1
-          (strcat "{\\L" groupName "}")
-        )
-        (vla-SetCellAlignment tbl row 1 4)
-
-        (vla-SetText tbl row 4 (rtos totalSum 2 2))
-        (vla-SetCellAlignment tbl row 4 5)
-
-        (setq row (1+ row))
-      )
-
-      (vla-update tbl)
-      (setvar "CMDECHO" 1)
-
-      tbl
     )
   )
+  (setq groups (vl-sort groups '(lambda (a b) (subsystem-sort-less a b))))
+
+  (foreach grp groups
+    (setq groupIndex (1+ groupIndex))
+    (setq groupName (car grp))
+    (setq groupRows '())
+    (setq totalSum 0.0)
+
+    (foreach rec data
+      (if (and (= (car rec) groupName) (cadr rec))
+        (progn
+          (setq groupRows (append groupRows (list rec)))
+          (setq totalSum (+ totalSum (/ (* (cadr rec) (caddr rec)) 1000.0)))
+        )
+      )
+    )
+
+    ;; Строки данных группы
+    (foreach rec groupRows
+      (setq items (append items (list (cons 'data (cons groupIndex rec)))))
+    )
+    ;; Подитог группы
+    (setq items (append items (list (list 'subtotal groupIndex groupName totalSum))))
+  )
+
+  items
 )
+
+
+(defun su-build-units (data idealRows / items chunks ch result)
+  (setq items (su-build-flat-items data))
+  (setq chunks (tc-partition-flat items idealRows))
+  (setq result '())
+  (foreach ch chunks
+    (setq result (append result (list (cons (length ch) ch)))))
+  result
+)
+
+;; ============================================================
+;; AutoCAD DETAIL — кускованная таблица
+;; ============================================================
+
+(defun subsystem-create-table-detail (data /
+    pt pt_wcs units total-chunks chunk-idx is-last chunk items item
+    nCols nRows space tbl row oldEcho doc
+    lastGroupIdx rowInGroup maxNameLen nameStr
+    name len cnt sum totalSum)
+
+  (if (null data)
+    (progn (princ "\nНет данных для таблицы Подсистемы.") nil)
+    (progn
+      (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+      (if (null pt)
+        (progn (princ "\nТаблица пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+
+          ;; Максимальная длина имени для ширины колонки
+          (setq maxNameLen 10)
+          (foreach item data
+            (setq nameStr (car item))
+            (if (> (strlen nameStr) maxNameLen)
+              (setq maxNameLen (strlen nameStr))))
+
+          (setq units (su-build-units data *TU-IDEAL-ROWS*))
+          (setq total-chunks (length units))
+          (setq chunk-idx 0 nCols 5)
+
+          ;; Нумерация продолжается через куски
+          (setq lastGroupIdx -1 rowInGroup 0)
+
+          (foreach chunk units
+            (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
+            (setq nRows (+ 2 (car chunk)))
+            (setq items (cdr chunk))
+            (setq tbl (vl-catch-all-apply 'vla-addtable
+              (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+
+            (if (vl-catch-all-error-p tbl)
+              (princ (strcat "\nОшибка создания таблицы Подсистемы: "
+                             (vl-catch-all-error-message tbl)))
+              (progn
+                (vla-SetColumnWidth tbl 0 15.0)
+                (vla-SetColumnWidth tbl 1 (* maxNameLen 3.0))
+                (vla-SetColumnWidth tbl 2 25.0)
+                (vla-SetColumnWidth tbl 3 25.0)
+                (vla-SetColumnWidth tbl 4 30.0)
+
+                (vla-MergeCells tbl 0 0 0 4)
+                (vla-SetText tbl 0 0 "{\\LПодсистема}")
+
+                (vla-SetText tbl 1 0 "№")
+                (vla-SetText tbl 1 1 "Наименование")
+                (vla-SetText tbl 1 2 "Длина, мм")
+                (vla-SetText tbl 1 3 "Кол-во, шт.")
+                (vla-SetText tbl 1 4 "Сумма, м.п.")
+
+                (vla-SetCellAlignment tbl 1 0 5)
+                (vla-SetCellAlignment tbl 1 1 5)
+                (vla-SetCellAlignment tbl 1 2 5)
+                (vla-SetCellAlignment tbl 1 3 5)
+                (vla-SetCellAlignment tbl 1 4 5)
+
+                (setq row 2)
+
+                (foreach item items
+                  (if (eq (car item) 'data)
+                    ;; Строка данных
+                    (progn
+                      (setq groupIdx (cadr item))
+                      (setq name (caddr item))
+                      (setq len  (cadddr item))
+                      (setq cnt  (caddr (cddr item)))
+
+                      (if (/= groupIdx lastGroupIdx)
+                        (progn
+                          (setq lastGroupIdx groupIdx)
+                          (setq rowInGroup 0)))
+                      (setq rowInGroup (1+ rowInGroup))
+
+                      (vla-SetText tbl row 0
+                        (strcat (itoa groupIdx) "." (itoa rowInGroup)))
+                      (vla-SetText tbl row 1 name)
+
+                      (if len
+                        (progn
+                          (setq sum (/ (* len cnt) 1000.0))
+                          (vla-SetText tbl row 2 (rtos len 2 0))
+                          (vla-SetText tbl row 4 (rtos sum 2 2)))
+                        (progn
+                          (vla-SetText tbl row 2 "")
+                          (vla-SetText tbl row 4 "")))
+
+                      (vla-SetText tbl row 3 (itoa cnt))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 2 5)
+                      (vla-SetCellAlignment tbl row 3 5)
+                      (vla-SetCellAlignment tbl row 4 5)
+
+                      (setq row (1+ row)))
+
+                    ;; Подитог группы
+                    (progn
+                      (setq groupName (nth 2 item))
+                      (setq totalSum  (nth 3 item))
+
+                      (vla-MergeCells tbl row row 1 3)
+                      (vla-SetText tbl row 0 "")
+                      (vla-SetText tbl row 1
+                        (strcat "{\\L" groupName "}"))
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetText tbl row 4 (rtos totalSum 2 2))
+                      (vla-SetCellAlignment tbl row 4 5)
+
+                      (setq row (1+ row)))))
+
+                (vla-update tbl)
+                (princ (strcat "\nТаблица Подсистемы "
+                               (itoa (1+ chunk-idx)) " создана."))
+                (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
+
+            (setq chunk-idx (1+ chunk-idx)))
+
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          (princ (strcat "\nВсего создано таблиц Подсистемы: "
+                         (itoa total-chunks)))
+          T)))))
 
 ;; ------------------------------------------------------------
 ;; AutoCAD SUMMARY
