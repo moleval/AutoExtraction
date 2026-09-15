@@ -12,6 +12,176 @@
 ;;;  Если префикс не найден — имя возвращается без изменений.
 ;;; ============================================================
 
+;; ============================================================
+;; Кускование Фасонки — подготовка плоского списка
+;; Вход: indexed-detail = список (groupIndex groupName groupRecs)
+;; ============================================================
+
+(defun fs-build-flat-items (indexed-detail / items grp gIdx gName gRecs
+                             rec totalSum)
+  (setq items '())
+  (foreach grp indexed-detail
+    (setq gIdx  (car grp))
+    (setq gName (cadr grp))
+    (setq gRecs (caddr grp))
+    (setq totalSum 0.0)
+
+    (foreach rec gRecs
+      (setq items (append items
+        (list (list 'data gIdx (car rec) (cadr rec) (caddr rec)))))
+      (setq totalSum (+ totalSum (/ (* (cadr rec) (caddr rec)) 1000.0)))
+    )
+    (setq items (append items
+      (list (list 'subtotal gIdx gName totalSum))))
+  )
+  items
+)
+
+
+(defun fs-build-units (indexed-detail idealRows / items chunks ch result)
+  (setq items (fs-build-flat-items indexed-detail))
+  (setq chunks (tc-partition-flat items idealRows))
+  (setq result '())
+  (foreach ch chunks
+    (setq result (append result (list (cons (length ch) ch)))))
+  result
+)
+
+
+;; ============================================================
+;; ТАБЛИЦА AUTOCAD — DETAIL (кускованная)
+;; ============================================================
+
+(defun fasonka-create-table-detail (indexed-detail /
+    pt pt_wcs units total-chunks chunk-idx is-last chunk items item
+    nCols nRows space tbl row oldEcho doc
+    lastGroupIdx rowInGroup maxNameLen nameStr
+    gIdx gName len cnt sum totalSum)
+
+  (if (null indexed-detail)
+    (progn (princ "\nНет данных для таблицы Фасонки.") nil)
+    (progn
+      (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+      (if (null pt)
+        (progn (princ "\nТаблица пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+
+          ;; Максимальная длина имени для ширины колонки
+          (setq maxNameLen 10)
+          (foreach item indexed-detail
+            (setq nameStr (cadr item))
+            (if (> (strlen nameStr) maxNameLen)
+              (setq maxNameLen (strlen nameStr))))
+
+          (setq units (fs-build-units indexed-detail *TU-IDEAL-ROWS*))
+          (setq total-chunks (length units))
+          (setq chunk-idx 0 nCols 5)
+
+          ;; Нумерация продолжается через куски
+          (setq lastGroupIdx -1 rowInGroup 0)
+
+          (foreach chunk units
+            (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
+            (setq nRows (+ 2 (car chunk)))
+            (setq items (cdr chunk))
+            (setq tbl (vl-catch-all-apply 'vla-addtable
+              (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+
+            (if (vl-catch-all-error-p tbl)
+              (princ (strcat "\nОшибка создания таблицы Фасонки: "
+                             (vl-catch-all-error-message tbl)))
+              (progn
+                (vla-SetColumnWidth tbl 0 17.5)
+                (vla-SetColumnWidth tbl 1 (* maxNameLen 3.0))
+                (vla-SetColumnWidth tbl 2 25.0)
+                (vla-SetColumnWidth tbl 3 25.0)
+                (vla-SetColumnWidth tbl 4 30.0)
+
+                (vla-MergeCells tbl 0 0 0 4)
+                (vla-SetText tbl 0 0 "{\\LФасонное железо}")
+
+                (vla-SetText tbl 1 0 "№")
+                (vla-SetText tbl 1 1 "Тип фасонки")
+                (vla-SetText tbl 1 2 "Длина, мм")
+                (vla-SetText tbl 1 3 "Кол-во, шт.")
+                (vla-SetText tbl 1 4 "Сумма, м.п.")
+
+                (vla-SetCellAlignment tbl 1 0 5)
+                (vla-SetCellAlignment tbl 1 1 5)
+                (vla-SetCellAlignment tbl 1 2 5)
+                (vla-SetCellAlignment tbl 1 3 5)
+                (vla-SetCellAlignment tbl 1 4 5)
+
+                (setq row 2)
+
+                (foreach item items
+                  (if (eq (car item) 'data)
+                    ;; Строка данных
+                    (progn
+                      (setq gIdx  (cadr item))
+                      (setq gName (caddr item))
+                      (setq len   (cadddr item))
+                      (setq cnt   (caddr (cddr item)))
+                      (setq sum   (/ (* len cnt) 1000.0))
+
+                      (if (/= gIdx lastGroupIdx)
+                        (progn
+                          (setq lastGroupIdx gIdx)
+                          (setq rowInGroup 0)))
+                      (setq rowInGroup (1+ rowInGroup))
+
+                      (vla-SetText tbl row 0
+                        (strcat (itoa gIdx) "." (itoa rowInGroup)))
+                      (vla-SetText tbl row 1 (strcat " " gName))
+                      (vla-SetText tbl row 2 (rtos len 2 0))
+                      (vla-SetText tbl row 3 (itoa cnt))
+                      (vla-SetText tbl row 4 (rtos sum 2 2))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 2 5)
+                      (vla-SetCellAlignment tbl row 3 5)
+                      (vla-SetCellAlignment tbl row 4 5)
+
+                      (setq row (1+ row)))
+
+                    ;; Подитог группы
+                    (progn
+                      (setq gIdx     (cadr item))
+                      (setq gName    (nth 2 item))
+                      (setq totalSum (nth 3 item))
+
+                      (vla-MergeCells tbl row row 1 3)
+                      (vla-SetText tbl row 0
+                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa gIdx) "}"))
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetText tbl row 1 (strcat "{\\L" gName "}"))
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetText tbl row 4 (rtos totalSum 2 2))
+                      (vla-SetCellAlignment tbl row 4 5)
+
+                      (setq row (1+ row)))))
+
+                (vla-update tbl)
+                (princ (strcat "\nТаблица Фасонки "
+                               (itoa (1+ chunk-idx)) " создана."))
+                (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
+
+            (setq chunk-idx (1+ chunk-idx)))
+
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          (princ (strcat "\nВсего создано таблиц Фасонки: "
+                         (itoa total-chunks)))
+          T)))))
+
 (defun c:fasonka ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
   (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
   (if (= layers-str "")
@@ -267,7 +437,10 @@
 
           ;; Таблица AutoCAD
           (if create-table
-            (tbl-create-report report-type report-data)
+            (if (= report-type "DETAIL")
+              (fasonka-create-table-detail report-data)
+              (tbl-create-report report-type report-data)
+            )
           )
         )
         (princ "\nБлоки со свойством 'Длина' не найдены.")
