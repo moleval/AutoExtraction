@@ -113,7 +113,7 @@
           totalSum   (+ totalSum (caddr g)))
   )
   (vla-MergeCells table row row 0 1)
-  (vla-SetText table row 0 "      Итого")
+  (vla-SetText table row 0 "{     \\LИтого по всем позициям:}")
   (vla-SetCellAlignment table row 0 4)
   (vla-SetText table row 2 (itoa totalCount))
   (vla-SetCellAlignment table row 2 5)

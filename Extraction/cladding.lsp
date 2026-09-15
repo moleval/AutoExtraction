@@ -592,7 +592,7 @@
                 (if is-last
                   (progn
                     (vla-MergeCells tbl row row 0 4)
-                    (vla-SetText tbl row 0 "        {\\LИтого по всем позициям:}")
+                    (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
                     (vla-SetCellAlignment tbl row 0 4)
                     (vla-SetText tbl row 5 (itoa total-cnt))
                     (vla-SetCellAlignment tbl row 5 5)
@@ -675,7 +675,7 @@
                 (vla-SetCellAlignment tbl row 3 5)
                 (setq row (1+ row)))
               (vla-MergeCells tbl row row 0 1)
-              (vla-SetText tbl row 0 "        {\\LИтого по всем позициям:}")
+              (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
               (vla-SetCellAlignment tbl row 0 4)
               (vla-SetText tbl row 2 (itoa total-cnt))
               (vla-SetCellAlignment tbl row 2 5)
@@ -1213,7 +1213,7 @@
                 (if is-last
                   (progn
                     (vla-MergeCells tbl row row 0 3)
-                    (vla-SetText tbl row 0 "        {\\LИтого по всем позициям:}")
+                    (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
                     (vla-SetCellAlignment tbl row 0 4)
                     (vla-SetText tbl row 4 (itoa total-cnt))
                     (vla-SetCellAlignment tbl row 4 5)

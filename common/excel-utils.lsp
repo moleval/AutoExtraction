@@ -365,7 +365,7 @@
 
       ;; Итоговая строка
       (write-line
-        (strcat "Итого;;"
+        (strcat "Итого по всем позициям:;;"
                 (itoa totalCount) ";"
                 "\"" (vl-string-translate "." "," (rtos totalSum 2 2)) "\"")
         f)
@@ -1183,7 +1183,7 @@
       )
       ;; Итоговая строка (2 точки с запятой: данные в колонках 3 и 4)
       (write-line
-        (strcat "Итого;;"
+        (strcat "Итого по всем позициям:;;"
                 (itoa total-cnt) ";"
                 "\"" (eu-format-area-csv total-area) "\"")
         f)

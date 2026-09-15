@@ -503,7 +503,7 @@
         (setq row (1+ row)))
 
       (vla-MergeCells tbl row row 0 1)
-      (vla-SetText tbl row 0 "{\\LИтого}")
+      (vla-SetText tbl row 0 "{   \\LИтого по всем позициям:}")
       (vla-SetText tbl row 2 (itoa total-cnt))
       (vla-SetText tbl row 3 (zapolnenie-format-area total-area))
 
