@@ -449,27 +449,6 @@
   items
 )
 
-;; ---------- равномерное распределение по строкам ----------
-(defun cl-partition-flat (items idealRows / total numTables rowsPerTable
-                            chunks current currentCount item)
-  (setq total (length items))
-  (setq numTables (fix (+ (/ (float total) idealRows) 0.5)))
-  (if (< numTables 1) (setq numTables 1))
-  (setq rowsPerTable (fix (+ (/ (float total) numTables) 0.5)))
-  (if (< rowsPerTable 1) (setq rowsPerTable 1))
-  (setq chunks '() current '() currentCount 0)
-  (foreach item items
-    (if (and (>= currentCount rowsPerTable)
-             (eq (car item) 'data))
-      (progn
-        (setq chunks (append chunks (list current)))
-        (setq current '() currentCount 0)))
-    (setq current (append current (list item)))
-    (setq currentCount (1+ currentCount)))
-  (if current (setq chunks (append chunks (list current))))
-  chunks
-)
-
 ;; ---------- сборка кусков ----------
 (defun cl-build-block-units (data idealRows / items chunks ch result)
   (setq items (cl-build-flat-items data))
