@@ -870,432 +870,227 @@
   )
 )
 
-
 ;; ============================================================
-;; ТАБЛИЦА AUTOCAD — DETAIL
+;; Кускование Заполнения — подготовка плоского списка
+;; Группы по типу, каждая с подитогом.
 ;; ============================================================
 
-(defun zapolnenie-create-table-detail
-  (data
-   / pt
-     tbl
-     row
-     nRows
-     nCols
-     space
-     rec
-     tip
-     h
-     w
-     cnt
-     area
-     itemNum
-     total-cnt
-     total-area
-     groups
-     grp
-     grpName
-     grpRows
-     grpCnt
-     grpArea
-  )
+(defun zp-build-flat-items (data / items groups grp grpName grpRows
+                             rec h w cnt area totalCnt totalArea groupIndex)
+  (setq items '())
+  (setq groupIndex 0)
 
-  (setq
-    pt
-    (getpoint
-      "\nУкажите точку вставки таблицы: "
+  ;; Группировка по типам (сохраняем порядок из data)
+  (setq groups '())
+  (foreach rec data
+    (setq grpName (car rec))
+    (setq grp (assoc grpName groups))
+    (if grp
+      (setq groups (subst (append grp (list (list rec))) grp groups))
+      (setq groups (append groups (list (list grpName (list rec)))))
     )
   )
 
-
-  (if pt
-
-    (progn
-
-      (setvar "CMDECHO" 0)
-
-
-      ;; ------------------------------------------------------
-      ;; Группировка по типам
-      ;; ------------------------------------------------------
-
-      (setq
-        groups '()
-      )
-
-
-      (foreach rec data
-
-        (setq
-          tip
-          (car rec)
-        )
-
-
-        (setq
-          grp
-          (assoc tip groups)
-        )
-
-
-        (if grp
-
-          (setq
-            groups
-            (subst
-              (append
-                grp
-                (list
-                  (list rec)
-                )
-              )
-
-              grp
-              groups
-            )
-          )
-
-          (setq
-            groups
-            (append
-              groups
-              (list
-                (list
-                  tip
-                  (list rec)
-                )
-              )
-            )
-          )
-        )
-      )
-
-
-      ;; ------------------------------------------------------
-      ;; Размер таблицы
-      ;; ------------------------------------------------------
-
-      (setq
-        nCols 6
-        nRows
-        (+ 3
-           (length data)
-           (length groups)
-        )
-      )
-
-
-      (setq
-        space
-        (vla-get-modelspace
-          (vla-get-activedocument
-            (vlax-get-acad-object)
-          )
-        )
-      )
-
-
-      (setq
-        tbl
-        (vla-addtable
-          space
-          (vlax-3d-point pt)
-          nRows
-          nCols
-          10.0
-          50.0
-        )
-      )
-
-
-      ;; ------------------------------------------------------
-      ;; Ширины колонок
-      ;; ------------------------------------------------------
-
-      (vla-SetColumnWidth tbl 0 15.0)
-      (vla-SetColumnWidth tbl 1 75.0)
-      (vla-SetColumnWidth tbl 2 30.0)
-      (vla-SetColumnWidth tbl 3 30.0)
-      (vla-SetColumnWidth tbl 4 30.0)
-      (vla-SetColumnWidth tbl 5 35.0)
-
-
-      ;; ------------------------------------------------------
-      ;; Заголовок
-      ;; ------------------------------------------------------
-
-      (vla-MergeCells
-        tbl
-        0 0
-        0 5
-      )
-
-      (vla-SetText
-        tbl
-        0
-        0
-        "{\\LЗаполнение}"
-      )
-
-
-      ;; ------------------------------------------------------
-      ;; Шапка
-      ;; ------------------------------------------------------
-
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Тип")
-      (vla-SetText tbl 1 2 "Высота, мм")
-      (vla-SetText tbl 1 3 "Ширина, мм")
-      (vla-SetText tbl 1 4 "Кол-во, шт.")
-      (vla-SetText tbl 1 5 "Площадь, м2")
-
-
-      ;; ------------------------------------------------------
-      ;; Выравнивание шапки
-      ;; ------------------------------------------------------
-
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
-      (vla-SetCellAlignment tbl 1 4 5)
-      (vla-SetCellAlignment tbl 1 5 5)
-
-
-      ;; ------------------------------------------------------
-      ;; Данные
-      ;; ------------------------------------------------------
-
-      (setq
-        row 2
-        itemNum 0
-        total-cnt 0
-        total-area 0.0
-      )
-
-
-      (foreach grp groups
-
-        (setq
-          grpName (car grp)
-          grpRows (cdr grp)
-          grpCnt 0
-          grpArea 0.0
-        )
-
-
-        ;; ----------------------------------------------------
-        ;; Строки группы
-        ;; ----------------------------------------------------
-
-        (foreach rec grpRows
-
-          (setq
-            rec
-            (car rec)
-          )
-
-
-          (setq
-            itemNum
-            (1+ itemNum)
-
-            tip
-            (car rec)
-
-            h
-            (cadr rec)
-
-            w
-            (caddr rec)
-
-            cnt
-            (cadddr rec)
-
-            area
-            (zapolnenie-round2
-              (/ (* h w cnt) 1000000.0)
-            )
-          )
-
-
-          (setq
-            grpCnt
-            (+ grpCnt cnt)
-
-            grpArea
-            (+ grpArea area)
-
-            total-cnt
-            (+ total-cnt cnt)
-
-            total-area
-            (+ total-area area)
-          )
-
-
-          (vla-SetText
-            tbl
-            row
-            0
-            (itoa itemNum)
-          )
-
-          (vla-SetText
-            tbl
-            row
-            1
-            tip
-          )
-
-          (vla-SetText
-            tbl
-            row
-            2
-            (itoa h)
-          )
-
-          (vla-SetText
-            tbl
-            row
-            3
-            (itoa w)
-          )
-
-          (vla-SetText
-            tbl
-            row
-            4
-            (itoa cnt)
-          )
-
-          (vla-SetText
-            tbl
-            row
-            5
-            (zapolnenie-format-area area)
-          )
-
-
-          ;; Тип — влево, остальное — центр
-          (vla-SetCellAlignment tbl row 0 5)
-          (vla-SetCellAlignment tbl row 1 4)
-          (vla-SetCellAlignment tbl row 2 5)
-          (vla-SetCellAlignment tbl row 3 5)
-          (vla-SetCellAlignment tbl row 4 5)
-          (vla-SetCellAlignment tbl row 5 5)
-
-
-          (setq
-            row
-            (1+ row)
-          )
-        )
-
-
-        ;; ----------------------------------------------------
-        ;; Подитог группы
-        ;; ----------------------------------------------------
-
-        (vla-MergeCells
-          tbl
-          row
-          row
-          1
-          3
-        )
-
-        (vla-SetText
-          tbl
-          row
-          0
-          ""
-        )
-
-        (vla-SetText
-          tbl
-          row
-          1
-          (strcat
-            "   {\\L"
-            grpName
-            "}"
-          )
-        )
-
-        (vla-SetText
-          tbl
-          row
-          4
-          (itoa grpCnt)
-        )
-
-        (vla-SetText
-          tbl
-          row
-          5
-          (zapolnenie-format-area grpArea)
-        )
-
-        (vla-SetCellAlignment tbl row 0 5)
-        (vla-SetCellAlignment tbl row 1 4)
-        (vla-SetCellAlignment tbl row 4 5)
-        (vla-SetCellAlignment tbl row 5 5)
-
-
-        (setq
-          row
-          (1+ row)
-        )
-      )
-
-
-      ;; ------------------------------------------------------
-      ;; Общий итог
-      ;; ------------------------------------------------------
-
-      (vla-MergeCells
-        tbl
-        row
-        row
-        0
-        3
-      )
-
-      (vla-SetText
-        tbl
-        row
-        0
-        "{\\LИтого}"
-      )
-
-      (vla-SetText
-        tbl
-        row
-        4
-        (itoa total-cnt)
-      )
-
-      (vla-SetText
-        tbl
-        row
-        5
-        (zapolnenie-format-area total-area)
-      )
-
-      (vla-SetCellAlignment tbl row 0 5)
-      (vla-SetCellAlignment tbl row 4 5)
-      (vla-SetCellAlignment tbl row 5 5)
-
-
-      (vla-update tbl)
-
-      (setvar "CMDECHO" 1)
-
-      tbl
+  ;; Формируем плоский список
+  (foreach grp groups
+    (setq groupIndex (1+ groupIndex))
+    (setq grpName (car grp))
+    (setq grpRows (cdr grp))
+    (setq totalCnt 0 totalArea 0.0)
+
+    ;; Строки данных группы
+    (foreach rec grpRows
+      (setq rec (car rec))
+      (setq items (append items (list (cons 'data (cons groupIndex rec)))))
+      (setq h (cadr rec) w (caddr rec) cnt (cadddr rec))
+      (setq area (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
+      (setq totalCnt (+ totalCnt cnt))
+      (setq totalArea (+ totalArea area))
     )
+    ;; Подитог группы
+    (setq items (append items (list (list 'subtotal groupIndex grpName totalCnt totalArea))))
   )
+
+  items
 )
+
+
+(defun zp-build-units (data idealRows / items chunks ch result)
+  (setq items (zp-build-flat-items data))
+  (setq chunks (tc-partition-flat items idealRows))
+  (setq result '())
+  (foreach ch chunks
+    (setq result (append result (list (cons (length ch) ch)))))
+  result
+)
+
+;; ============================================================
+;; ТАБЛИЦА AUTOCAD — DETAIL (кускованная)
+;; ============================================================
+
+(defun zapolnenie-create-table-detail (data /
+    pt pt_wcs units total-chunks chunk-idx is-last chunk items item
+    nCols nRows space tbl row oldEcho doc
+    lastGroupIdx rowInGroup maxNameLen nameStr
+    tip h w cnt area total-cnt total-area
+    grpName grpCnt grpArea
+    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width)
+
+  (if (null data)
+    (progn (princ "\nНет данных для таблицы Заполнения.") nil)
+    (progn
+      (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+      (if (null pt)
+        (progn (princ "\nТаблица пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+
+          ;; Максимальная длина имени типа
+          (setq maxNameLen 10)
+          (foreach item data
+            (setq nameStr (car item))
+            (if (> (strlen nameStr) maxNameLen)
+              (setq maxNameLen (strlen nameStr))))
+
+          ;; Автоподбор ширины первой колонки "№"
+          (setq maxNumLen 3)
+          (setq zpGroups '())
+          (foreach item data
+            (setq grpName (car item))
+            (if (not (assoc grpName zpGroups))
+              (setq zpGroups (cons (list grpName 0) zpGroups))))
+          (foreach item data
+            (setq grpName (car item))
+            (setq grpEntry (assoc grpName zpGroups))
+            (if grpEntry
+              (setq zpGroups (subst
+                (list grpName (1+ (cadr grpEntry)))
+                grpEntry zpGroups))))
+          (setq grpIdx 1)
+          (foreach grpEntry (reverse zpGroups)
+            (setq numStr (strcat (itoa grpIdx) "." (itoa (cadr grpEntry))))
+            (if (> (strlen numStr) maxNumLen)
+              (setq maxNumLen (strlen numStr)))
+            (setq grpIdx (1+ grpIdx)))
+          (setq col0Width (max 15.0 (* (+ maxNumLen 1) 3.5)))
+          (setq col1Width (max 75.0 (* maxNameLen 3.0)))
+
+          (setq units (zp-build-units data *TU-IDEAL-ROWS*))
+          (setq total-chunks (length units))
+          (setq chunk-idx 0 nCols 6)
+
+          ;; Нумерация продолжается через куски
+          (setq lastGroupIdx -1 rowInGroup 0)
+
+          (foreach chunk units
+            (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
+            (setq nRows (+ 2 (car chunk)))
+            (setq items (cdr chunk))
+            (setq tbl (vl-catch-all-apply 'vla-addtable
+              (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+
+            (if (vl-catch-all-error-p tbl)
+              (princ (strcat "\nОшибка создания таблицы Заполнения: "
+                             (vl-catch-all-error-message tbl)))
+              (progn
+                (vla-SetColumnWidth tbl 0 col0Width)
+                (vla-SetColumnWidth tbl 1 col1Width)
+                (vla-SetColumnWidth tbl 2 30.0)
+                (vla-SetColumnWidth tbl 3 30.0)
+                (vla-SetColumnWidth tbl 4 30.0)
+                (vla-SetColumnWidth tbl 5 35.0)
+
+                (vla-MergeCells tbl 0 0 0 5)
+                (vla-SetText tbl 0 0 "{\\LЗаполнение}")
+
+                (vla-SetText tbl 1 0 "№")
+                (vla-SetText tbl 1 1 "Тип")
+                (vla-SetText tbl 1 2 "Высота, мм")
+                (vla-SetText tbl 1 3 "Ширина, мм")
+                (vla-SetText tbl 1 4 "Кол-во, шт.")
+                (vla-SetText tbl 1 5 "Площадь, м2")
+
+                (vla-SetCellAlignment tbl 1 0 5)
+                (vla-SetCellAlignment tbl 1 1 5)
+                (vla-SetCellAlignment tbl 1 2 5)
+                (vla-SetCellAlignment tbl 1 3 5)
+                (vla-SetCellAlignment tbl 1 4 5)
+                (vla-SetCellAlignment tbl 1 5 5)
+
+                (setq row 2)
+
+                (foreach item items
+                  (if (eq (car item) 'data)
+                    ;; Строка данных
+                    (progn
+                      (setq groupIdx (cadr item))
+                      (setq tip (caddr item))
+                      (setq h   (cadddr item))
+                      (setq w   (caddr (cddr item)))
+                      (setq cnt (cadddr (cddr item)))
+                      (setq area (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
+
+                      (if (/= groupIdx lastGroupIdx)
+                        (progn
+                          (setq lastGroupIdx groupIdx)
+                          (setq rowInGroup 0)))
+                      (setq rowInGroup (1+ rowInGroup))
+
+                      (vla-SetText tbl row 0
+                        (strcat (itoa groupIdx) "." (itoa rowInGroup)))
+                      (vla-SetText tbl row 1 tip)
+                      (vla-SetText tbl row 2 (itoa h))
+                      (vla-SetText tbl row 3 (itoa w))
+                      (vla-SetText tbl row 4 (itoa cnt))
+                      (vla-SetText tbl row 5 (zapolnenie-format-area area))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 2 5)
+                      (vla-SetCellAlignment tbl row 3 5)
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetCellAlignment tbl row 5 5)
+
+                      (setq row (1+ row)))
+
+                    ;; Подитог группы
+                    (progn
+                      (setq grpName (nth 2 item))
+                      (setq grpCnt  (nth 3 item))
+                      (setq grpArea (nth 4 item))
+
+                      (vla-MergeCells tbl row row 1 3)
+                      (vla-SetText tbl row 0 "")
+                      (vla-SetText tbl row 1
+                        (strcat "   {\\L" grpName "}"))
+                      (vla-SetText tbl row 4 (itoa grpCnt))
+                      (vla-SetText tbl row 5 (zapolnenie-format-area grpArea))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetCellAlignment tbl row 5 5)
+
+                      (setq row (1+ row)))))
+
+                (vla-update tbl)
+                (princ (strcat "\nТаблица Заполнения "
+                               (itoa (1+ chunk-idx)) " создана."))
+                (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
+
+            (setq chunk-idx (1+ chunk-idx)))
+
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          (princ (strcat "\nВсего создано таблиц Заполнения: "
+                         (itoa total-chunks)))
+          T)))))
 
 
 ;; ============================================================
