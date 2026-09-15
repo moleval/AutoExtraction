@@ -473,7 +473,7 @@
 ;; ---------- сборка кусков ----------
 (defun cl-build-block-units (data idealRows / items chunks ch result)
   (setq items (cl-build-flat-items data))
-  (setq chunks (cl-partition-flat items idealRows))
+  (setq chunks (tc-partition-flat items idealRows))
   (setq result '())
   (foreach ch chunks
     (setq result (append result (list (cons (length ch) ch)))))
@@ -485,7 +485,8 @@
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     total-cnt total-area grp layer layerIdx subCnt subArea
     nCols nRows space tbl row itemNum oldEcho doc
-    lastLayerIdx rowInLayer maxLayerLen maxTypeLen layerStr typeStr)
+    lastLayerIdx rowInLayer maxLayerLen maxTypeLen layerStr typeStr
+    maxNumLen layerGroups lg layCnt numStr col0Width r)
   (if (null data)
     (progn (princ "\nНет данных блоков для таблицы.") nil)
     (progn
@@ -512,9 +513,23 @@
               (setq maxLayerLen (strlen layerStr)))
             (if (> (strlen typeStr) maxTypeLen)
               (setq maxTypeLen (strlen typeStr))))
+          ;; Автоподгон ширины первой колонки "№"
+          (setq maxNumLen 3)
+          (setq layerGroups (cl-group-blocks-by-layer data))
+          (setq layerIdx 1)
+          (foreach lg layerGroups
+            (setq layCnt 0)
+            (foreach r (cdr lg)
+              (setq layCnt (+ layCnt (nth 5 r))))
+            (setq numStr (strcat (itoa layerIdx) "." (itoa layCnt)))
+            (if (> (strlen numStr) maxNumLen)
+              (setq maxNumLen (strlen numStr)))
+            (setq layerIdx (1+ layerIdx)))
+          (setq col0Width (max 15.0 (* (+ maxNumLen 1) 3.5)))
           (setq units (cl-build-block-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
           (setq chunk-idx 0 itemNum 0 nCols 7)
+          (setq lastLayerIdx -1 rowInLayer 0)
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
             (setq nRows (+ 2 (car chunk)))
@@ -526,7 +541,7 @@
               (princ (strcat "\nОшибка создания таблицы блоков: "
                              (vl-catch-all-error-message tbl)))
               (progn
-                (vla-SetColumnWidth tbl 0 15.0)
+                (vla-SetColumnWidth tbl 0 col0Width)
                 (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.0))
                 (vla-SetColumnWidth tbl 2 (* maxTypeLen 3.0))
                 (vla-SetColumnWidth tbl 3 30.0)
@@ -550,7 +565,6 @@
                 (vla-SetCellAlignment tbl 1 5 5)
                 (vla-SetCellAlignment tbl 1 6 5)
                 (setq row 2)
-                (setq lastLayerIdx -1 rowInLayer 0)
                 (foreach item items
                   (if (eq (car item) 'data)
                     (progn
@@ -1100,7 +1114,8 @@
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     total-cnt total-area grp layer layerIdx subCnt subArea
     nCols nRows space tbl row itemNum oldEcho doc
-    lastLayerIdx rowInLayer maxLayerLen layerStr)
+    lastLayerIdx rowInLayer maxLayerLen layerStr
+    maxNumLen layerGroups lg layCnt numStr col0Width r)
   (if (null data)
     (progn (princ "\nНет данных для таблицы.") nil)
     (progn
@@ -1124,9 +1139,23 @@
             (setq layerStr (nth 1 grp))
             (if (> (strlen layerStr) maxLayerLen)
               (setq maxLayerLen (strlen layerStr))))
+          ;; Автоподгон ширины первой колонки "№"
+          (setq maxNumLen 3)
+          (setq layerGroups (cl-group-blocks-by-layer data))
+          (setq layerIdx 1)
+          (foreach lg layerGroups
+            (setq layCnt 0)
+            (foreach r (cdr lg)
+              (setq layCnt (+ layCnt (nth 5 r))))
+            (setq numStr (strcat (itoa layerIdx) "." (itoa layCnt)))
+            (if (> (strlen numStr) maxNumLen)
+              (setq maxNumLen (strlen numStr)))
+            (setq layerIdx (1+ layerIdx)))
+          (setq col0Width (max 15.0 (* (+ maxNumLen 1) 3.5)))
           (setq units (cl-build-block-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
           (setq chunk-idx 0 itemNum 0 nCols 6)
+          (setq lastLayerIdx -1 rowInLayer 0)
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
             (setq nRows (+ 2 (car chunk)))
@@ -1138,7 +1167,7 @@
               (princ (strcat "\nОшибка создания таблицы: "
                              (vl-catch-all-error-message tbl)))
               (progn
-                (vla-SetColumnWidth tbl 0 15.0)
+                (vla-SetColumnWidth tbl 0 col0Width)
                 (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.0))
                 (vla-SetColumnWidth tbl 2 30.0)
                 (vla-SetColumnWidth tbl 3 30.0)
@@ -1159,7 +1188,6 @@
                 (vla-SetCellAlignment tbl 1 4 5)
                 (vla-SetCellAlignment tbl 1 5 5)
                 (setq row 2)
-                (setq lastLayerIdx -1 rowInLayer 0)
                 (foreach item items
                   (if (eq (car item) 'data)
                     (progn

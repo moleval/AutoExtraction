@@ -294,5 +294,40 @@
   )
 )
 
+;; ============================================================
+;; КУСКОВАНИЕ ТАБЛИЦ — математика распределения строк
+;; ЭТАЛОННЫЙ алгоритм проекта (перенесён из Облицовки, Этап 2).
+;; Не зависит от AutoCAD: работает со списком тегированных строк,
+;; где тег 'data или 'subtotal.
+;;
+;; Инвариант: разрез допускается ТОЛЬКО перед строкой 'data.
+;; Строка 'subtotal никогда не оказывается первой в кусочке —
+;; она остаётся в том же кусочке, что и последняя строка данных
+;; своей группы.
+;;
+;; На вход:  items     - плоский список физических строк;
+;;           idealRows - целевое число строк на таблицу.
+;; На выход: список кусочков; каждый кусочек - список строк.
+;; ============================================================
+(defun tc-partition-flat (items idealRows / total numTables rowsPerTable
+                            chunks current currentCount item)
+  (setq total (length items))
+  (setq numTables (fix (+ (/ (float total) idealRows) 0.5)))
+  (if (< numTables 1) (setq numTables 1))
+  (setq rowsPerTable (fix (+ (/ (float total) numTables) 0.5)))
+  (if (< rowsPerTable 1) (setq rowsPerTable 1))
+  (setq chunks '() current '() currentCount 0)
+  (foreach item items
+    (if (and (>= currentCount rowsPerTable)
+             (eq (car item) 'data))
+      (progn
+        (setq chunks (append chunks (list current)))
+        (setq current '() currentCount 0)))
+    (setq current (append current (list item)))
+    (setq currentCount (1+ currentCount)))
+  (if current (setq chunks (append chunks (list current))))
+  chunks
+)
+
 (princ "\nTABLE-UTILS.LSP загружен.")
 (princ)
