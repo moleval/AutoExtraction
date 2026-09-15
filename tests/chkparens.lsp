@@ -54,7 +54,10 @@
           (princ (strcat "\n[CHK] " path " ИТОГ: " (itoa bal) " (не закрыто)"))
           (setq problems (1+ problems))
         )
-        (princ (strcat "\n[CHK] " path " ИТОГ: 0 (OK)"))
+        (if (= problems 0)
+          (princ (strcat "\n[CHK] " path " ИТОГ: 0 (OK)"))
+          (princ (strcat "\n[CHK] " path " проблем: " (itoa problems)))
+        )
       )
       problems
     )
