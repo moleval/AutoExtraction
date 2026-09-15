@@ -10,7 +10,19 @@
 - Запуск задач через диалоговое окно (`EXTRACTION`) или из командной строки (`FASONKA`, `SUBSYSTEM`).
 - Поддержка режимов отчёта:
   - **DETAIL** — детальный перечень с промежуточными итогами по группам;
-  - **SUMMARY** — сводный отчёт с общими итогами.
+  - **SUMMARY** — сводный отчёт с общими итогами;
+  Кускование таблиц:
+  Эталон: tc-partition-flat (common/table-utils.lsp)
+  Потребители: Облицовка, Подсистема, Заполнение, Фасонка
+  
+  Модуль          Подготовка строк        Рендер
+  Облицовка       cl-build-flat-items     cl-create-table-detail
+  Подсистема      su-build-flat-items     subsystem-create-table-detail
+  Заполнение      zp-build-flat-items     zapolnenie-create-table-detail
+  Фасонка         fs-build-flat-items     fasonka-create-table-detail
+  
+  Удалено: tu-pack-groups, tbl-fill-detail, DETAIL-ветка tbl-create-report.
+  
 - Экспорт результатов:
   - в Excel (`.xls`) — XML Spreadsheet с формулами;
   - в CSV (`.csv`) — запасной вариант при недоступности Excel;
@@ -67,3 +79,4 @@ python export_code.py . --split-dirs --include-docs
 Исключить каталоги
 bash
 python export_code.py . --split-dirs --exclude .git backups
+
