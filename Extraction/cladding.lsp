@@ -1,9 +1,7 @@
 ;;; ============================================================
-;;; CLADDING.LSP — Облицовка
-;;; Часть 1: полилинии (К1-К3)
-;;; Часть 2: динамические блоки (Б1-Б4)
-;;; РЕДАКЦИЯ 27: выверен баланс скобок; сводная таблица блоков
-;;; в кратком режиме; диспетчер передаёт do-blocks.
+;;; CLADDING.LSP — Облицовка. РЕДАКЦИЯ 29.
+;;; Полилинии К1-К3, блоки Б1-Б4, диспетчер do-blocks.
+;;; Хвосты функций — по одной закрывающей скобке на строку.
 ;;; ============================================================
 
 (vl-load-com)
@@ -149,6 +147,7 @@
         (setq *cladding-check-mismatch* (1+ *cladding-check-mismatch*)))))
 )
 
+;; Запись полилинии: (слой номинал высота ширина площадь)
 (defun cl-poly-record (ent / vb layer area xs ys dx dy nominal
                              minx maxx miny maxy)
   (setq layer (cdr (assoc 8 (entget ent))))
@@ -172,7 +171,8 @@
             (setq nominal "_НЕПРЯМОУГ_")
             (setq nominal (strcat (itoa (fix (+ dx 0.5))) "x"
                                   (itoa (fix (+ dy 0.5))))))
-          (list layer nominal (cl-round3 (/ area 1e6)))))))
+          (list layer nominal (fix (+ dy 0.5)) (fix (+ dx 0.5))
+                (cl-round3 (/ area 1e6)))))))
 )
 
 (defun cl-collect (layers / inserts rec records)
@@ -186,6 +186,8 @@
   (reverse records)
 )
 
+;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
+;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
 (defun cl-aggregate (records detail / acc rec key found out)
   (setq acc '())
   (foreach rec records
@@ -193,9 +195,11 @@
     (setq found (assoc key acc))
     (if found
       (setq acc (subst (list key (car rec) (cadr rec)
-                             (1+ (nth 3 found))
-                             (+ (nth 4 found) (caddr rec))) found acc))
-      (setq acc (cons (list key (car rec) (cadr rec) 1 (caddr rec)) acc))))
+                             (nth 2 rec) (nth 3 rec)
+                             (1+ (nth 5 found))
+                             (+ (nth 6 found) (nth 4 rec))) found acc))
+      (setq acc (cons (list key (car rec) (cadr rec)
+                            (nth 2 rec) (nth 3 rec) 1 (nth 4 rec)) acc))))
   (setq out (vl-sort acc
     '(lambda (a b)
        (if (= (cadr a) (cadr b))
@@ -207,17 +211,17 @@
 (defun cl-report (data report-mode / total-cnt total-area rec cur-layer)
   (setq total-cnt 0 total-area 0.0 cur-layer nil)
   (foreach rec data
-    (setq total-cnt (+ total-cnt (nth 3 rec)))
-    (setq total-area (+ total-area (nth 4 rec)))
+    (setq total-cnt (+ total-cnt (nth 5 rec)))
+    (setq total-area (+ total-area (nth 6 rec)))
     (if (= (strcase report-mode) "DETAIL")
       (progn
         (if (not (equal cur-layer (cadr rec)))
           (progn (setq cur-layer (cadr rec))
                  (princ (strcat "\n  Слой: " cur-layer))))
-        (princ (strcat "\n    " (caddr rec) ": " (itoa (nth 3 rec)) " шт, "
-                       (cl-format-area (cl-round2 (nth 4 rec))) " м2")))
-      (princ (strcat "\n  " (cadr rec) ": " (itoa (nth 3 rec)) " шт, "
-                     (cl-format-area (cl-round2 (nth 4 rec))) " м2"))))
+        (princ (strcat "\n    " (caddr rec) ": " (itoa (nth 5 rec)) " шт, "
+                       (cl-format-area (cl-round2 (nth 6 rec))) " м2")))
+      (princ (strcat "\n  " (cadr rec) ": " (itoa (nth 5 rec)) " шт, "
+                     (cl-format-area (cl-round2 (nth 6 rec))) " м2"))))
   (princ (strcat "\nИтого: " (itoa total-cnt) " шт, "
                  (cl-format-area (cl-round2 total-area)) " м2"))
 )
@@ -272,6 +276,7 @@
   (if found (su-value-to-number found) nil)
 )
 
+;; Запись блока: (слой тип Ширина Высота площадь подрезная D E F G)
 (defun cl-block-record (ent / obj layer name vis display is-target is-cut
                           props B C D E F G area)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
@@ -344,6 +349,7 @@
   (reverse records)
 )
 
+;; Агрегат блоков: (ключ слой тип rC rB кол-во площадь подрезная)
 (defun cl-blocks-aggregate (records / acc rec layer disp c b area is-cut
                              rC rB key found)
   (setq acc '())
@@ -423,7 +429,8 @@
   (reverse result)
 )
 
-;; ---------- Б3: плоский список элементов ----------
+;; ---------- плоский список элементов (универсальный) ----------
+;; элемент данных: (data индексСлоя . строка); подитог: (подитог индексСлоя слой кол-во площадь)
 (defun cl-build-flat-items (data / layerGroups items lg layer rows
                               layCnt layArea r layerIdx)
   (setq layerGroups (cl-group-blocks-by-layer data))
@@ -442,7 +449,7 @@
   items
 )
 
-;; ---------- Б3: равномерное распределение по строкам ----------
+;; ---------- равномерное распределение по строкам ----------
 (defun cl-partition-flat (items idealRows / total numTables rowsPerTable
                             chunks current currentCount item)
   (setq total (length items))
@@ -463,7 +470,7 @@
   chunks
 )
 
-;; ---------- Б3: сборка кусков таблиц ----------
+;; ---------- сборка кусков ----------
 (defun cl-build-block-units (data idealRows / items chunks ch result)
   (setq items (cl-build-flat-items data))
   (setq chunks (cl-partition-flat items idealRows))
@@ -473,7 +480,7 @@
   result
 )
 
-;; ---------- Б3: таблица блоков в AutoCAD (подробный) ----------
+;; ---------- Б3: таблица блоков (подробный, 7 колонок) ----------
 (defun cl-create-blocks-table (data /
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     total-cnt total-area grp layer layerIdx subCnt subArea
@@ -608,10 +615,14 @@
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
           (princ (strcat "\nВсего создано таблиц блоков: "
                          (itoa total-chunks)))
-          T)))))
+          T
+        )
+      )
+    )
+  )
+)
 
-
-;; ---------- Б3: сводная таблица блоков (краткий режим) ----------
+;; ---------- Б3: сводная таблица блоков (краткий, 4 колонки) ----------
 (defun cl-create-blocks-table-summary (data / pt pt_wcs layerGroups lg layer
                                           g cnt area total-cnt total-area
                                           nCols nRows space tbl row oldEcho doc)
@@ -681,8 +692,12 @@
               (princ "\nТаблица блоков (кратко) создана.")))
           (vla-endundomark doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
-          T)))))
-
+          T
+        )
+      )
+    )
+  )
+)
 
 ;; ============================================================
 ;; Б4: ЭКСПОРТ БЛОКОВ В XLS/CSV
@@ -692,7 +707,7 @@
                               layerGroups lg layer layer-cnt layer-area
                               grpCnt grpArea itemNum row-num is-cut
                               layer-start-row layer-end-row subtotal-row
-                              subtotal-rows qsum asum)
+                              subtotal-rows qsum asum r)
   (setq f (open fname "w"))
   (if (null f)
     nil
@@ -798,7 +813,9 @@
       (write-line " </Worksheet>" f)
       (write-line "</Workbook>" f)
       (close f)
-      T))
+      T
+    )
+  )
 )
 
 (defun cl-blocks-write-csv (groups fname / f grp total-cnt total-area
@@ -835,7 +852,9 @@
                           (itoa total-cnt) ";"
                           (cl-format-area (cl-round2 total-area))) f)
       (close f)
-      T))
+      T
+    )
+  )
 )
 
 ;; ============================================================
@@ -846,7 +865,7 @@
 (if (not (boundp '*CLADDING-LAST-MODE*))    (setq *CLADDING-LAST-MODE* nil))
 
 ;; ============================================================
-;; ОСНОВНАЯ ФУНКЦИЯ (сигнатура диспетчера, 7-й параметр do-blocks)
+;; ОСНОВНАЯ ФУНКЦИЯ (7-й параметр do-blocks)
 ;; ============================================================
 (defun cladding-main (layers report-mode export-excel export-txt
                       create-table save-base do-blocks
@@ -855,8 +874,10 @@
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg)
                            "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*ПРЕРВА*")))
-      (princ (strcat "\nОшибка: " msg)))
-    (princ))
+      (princ (strcat "\nОшибка: " msg))
+    )
+    (princ)
+  )
   (princ "\n=== Облицовка: сбор полилиний ===")
   (setq records (cl-collect layers))
   (if records
@@ -870,7 +891,8 @@
       (if export-excel
         (progn
           (setq xls-base
-            (if save-base save-base
+            (if save-base
+              save-base
               (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
                       " Облицовка "
@@ -883,15 +905,25 @@
               (setq csvfile (strcat xls-base ".csv"))
               (if (cl-write-csv data report-mode csvfile)
                 (princ (strcat "\nCSV сохранен: " csvfile))
-                (princ "\nНе удалось создать CSV."))))))
+                (princ "\nНе удалось создать CSV.")
+              )
+            )
+          )
+        )
+      )
       (if export-txt (princ "\nTXT: для облицовки не предусмотрен."))
       (if create-table
         (if (= (strcase report-mode) "DETAIL")
           (cl-create-table-detail data)
-          (cl-create-table-summary data))))
+          (cl-create-table-summary data)
+        )
+      )
+    )
     (progn
       (princ "\nДанных по полилиниям нет.")
-      (cl-warnings)))
+      (cl-warnings)
+    )
+  )
   (if do-blocks
     (progn
       (princ "\n=== Облицовка: сбор блоков ===")
@@ -903,7 +935,9 @@
           (if create-table
             (if (= (strcase report-mode) "DETAIL")
               (cl-create-blocks-table bgroups)
-              (cl-create-blocks-table-summary bgroups)))
+              (cl-create-blocks-table-summary bgroups)
+            )
+          )
           (if export-excel
             (progn
               (setq bxls (strcat (getvar "DWGPREFIX")
@@ -911,17 +945,17 @@
                                  " Облицовка блоки.xls"))
               (if (cl-blocks-write-xls bgroups bxls)
                 (princ (strcat "\nXLS сохранен: " bxls))
-                (progn
-                  (setq bcsv (strcat (getvar "DWGPREFIX")
-                                     (vl-filename-base (getvar "DWGNAME"))
-                                     " Облицовка блоки.csv"))
-                  (if (cl-blocks-write-csv bgroups bcsv)
-                    (princ (strcat "\nCSV сохранен: " bcsv))
-                    (princ "\nНе удалось создать CSV."))))))
-        (princ "\nБлоки облицовки не найдены."))))
+                (princ "\nНе удалось создать XLS.")
+              )
+            )
+          )
+        )
+        (princ "\nБлоки облицовки не найдены.")
+      )
+    )
+  )
   (princ)
 )
-)  
 
 ;; ============================================================
 ;; АВТОНОМНЫЕ КОМАНДЫ
@@ -1017,12 +1051,12 @@
       (vla-SetCellAlignment tbl 1 3 5)
       (setq row 2 total-cnt 0 total-area 0.0)
       (foreach rec data
-        (setq total-cnt (+ total-cnt (nth 3 rec)))
-        (setq total-area (+ total-area (nth 4 rec)))
+        (setq total-cnt (+ total-cnt (nth 5 rec)))
+        (setq total-area (+ total-area (nth 6 rec)))
         (vla-SetText tbl row 0 (itoa (1+ (- row 2))))
         (vla-SetText tbl row 1 (cadr rec))
-        (vla-SetText tbl row 2 (itoa (nth 3 rec)))
-        (vla-SetText tbl row 3 (cl-format-area (cl-round2 (nth 4 rec))))
+        (vla-SetText tbl row 2 (itoa (nth 5 rec)))
+        (vla-SetText tbl row 3 (cl-format-area (cl-round2 (nth 6 rec))))
         (vla-SetCellAlignment tbl row 0 5)
         (vla-SetCellAlignment tbl row 1 4)
         (vla-SetCellAlignment tbl row 2 5)
@@ -1037,93 +1071,150 @@
       (vla-SetCellAlignment tbl row 3 5)
       (vla-update tbl)
       (setvar "CMDECHO" 1)
-      tbl))
+      tbl
+    )
+  )
 )
 
-(defun cl-create-table-detail (data / pt tbl row nRows nCols space
-                                   groups grp rec grpName grpRows
-                                   grpCnt grpArea total-cnt total-area itemNum)
-  (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
-  (if (null pt)
-    (progn (princ "\nТаблица пропущена.") nil)
+;; ---------- К2: таблица полилиний подробная (кускованная, 6 колонок) ----------
+(defun cl-create-table-detail (data /
+    pt pt_wcs units total-chunks chunk-idx is-last chunk items item
+    total-cnt total-area grp layer layerIdx subCnt subArea
+    nCols nRows space tbl row itemNum oldEcho doc
+    lastLayerIdx rowInLayer maxLayerLen layerStr)
+  (if (null data)
+    (progn (princ "\nНет данных для таблицы.") nil)
     (progn
-      (setvar "CMDECHO" 0)
-      (setq groups '())
-      (foreach rec data
-        (setq grp (assoc (cadr rec) groups))
-        (if grp
-          (setq groups (subst (append grp (list (list rec))) grp groups))
-          (setq groups (append groups (list (list (cadr rec) (list rec)))))))
-      (setq nCols 5)
-      (setq nRows (+ 3 (length data) (length groups)))
-      (setq space (vla-get-modelspace
-                    (vla-get-activedocument (vlax-get-acad-object))))
-      (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
-      (vla-SetColumnWidth tbl 0 15.0)
-      (vla-SetColumnWidth tbl 1 60.0)
-      (vla-SetColumnWidth tbl 2 30.0)
-      (vla-SetColumnWidth tbl 3 30.0)
-      (vla-SetColumnWidth tbl 4 35.0)
-      (vla-MergeCells tbl 0 0 0 4)
-      (vla-SetText tbl 0 0 "{\\LОблицовка}")
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Слой")
-      (vla-SetText tbl 1 2 "Номинал")
-      (vla-SetText tbl 1 3 "Кол-во, шт.")
-      (vla-SetText tbl 1 4 "Площадь, м2")
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
-      (vla-SetCellAlignment tbl 1 4 5)
-      (setq row 2 itemNum 0 total-cnt 0 total-area 0.0)
-      (foreach grp groups
-        (setq grpName (car grp) grpRows (cdr grp) grpCnt 0 grpArea 0.0)
-        (foreach rec grpRows
-          (setq rec (car rec))
-          (setq itemNum (1+ itemNum))
-          (setq grpCnt (+ grpCnt (nth 3 rec)))
-          (setq grpArea (+ grpArea (nth 4 rec)))
-          (setq total-cnt (+ total-cnt (nth 3 rec)))
-          (setq total-area (+ total-area (nth 4 rec)))
-          (vla-SetText tbl row 0 (itoa itemNum))
-          (vla-SetText tbl row 1 grpName)
-          (vla-SetText tbl row 2 (caddr rec))
-          (vla-SetText tbl row 3 (itoa (nth 3 rec)))
-          (vla-SetText tbl row 4 (cl-format-area (cl-round2 (nth 4 rec))))
-          (vla-SetCellAlignment tbl row 0 5)
-          (vla-SetCellAlignment tbl row 1 4)
-          (vla-SetCellAlignment tbl row 2 5)
-          (vla-SetCellAlignment tbl row 3 5)
-          (vla-SetCellAlignment tbl row 4 5)
-          (setq row (1+ row)))
-        (vla-MergeCells tbl row row 1 2)
-        (vla-SetText tbl row 0 "")
-        (vla-SetText tbl row 1 (strcat "   {\\L" grpName "}"))
-        (vla-SetText tbl row 3 (itoa grpCnt))
-        (vla-SetText tbl row 4 (cl-format-area (cl-round2 grpArea)))
-        (vla-SetCellAlignment tbl row 0 5)
-        (vla-SetCellAlignment tbl row 1 4)
-        (vla-SetCellAlignment tbl row 3 5)
-        (vla-SetCellAlignment tbl row 4 5)
-        (setq row (1+ row)))
-      (vla-MergeCells tbl row row 0 2)
-      (vla-SetText tbl row 0 "{\\LИтого}")
-      (vla-SetText tbl row 3 (itoa total-cnt))
-      (vla-SetText tbl row 4 (cl-format-area (cl-round2 total-area)))
-      (vla-SetCellAlignment tbl row 0 5)
-      (vla-SetCellAlignment tbl row 3 5)
-      (vla-SetCellAlignment tbl row 4 5)
-      (vla-update tbl)
-      (setvar "CMDECHO" 1)
-      tbl))
+      (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+      (if (null pt)
+        (progn (princ "\nТаблица пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+          (setq total-cnt 0 total-area 0.0)
+          (foreach grp data
+            (setq total-cnt (+ total-cnt (nth 5 grp)))
+            (setq total-area (+ total-area (nth 6 grp))))
+          (setq maxLayerLen 10)
+          (foreach grp data
+            (setq layerStr (nth 1 grp))
+            (if (> (strlen layerStr) maxLayerLen)
+              (setq maxLayerLen (strlen layerStr))))
+          (setq units (cl-build-block-units data *TU-IDEAL-ROWS*))
+          (setq total-chunks (length units))
+          (setq chunk-idx 0 itemNum 0 nCols 6)
+          (foreach chunk units
+            (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
+            (setq nRows (+ 2 (car chunk)))
+            (if is-last (setq nRows (1+ nRows)))
+            (setq items (cdr chunk))
+            (setq tbl (vl-catch-all-apply 'vla-addtable
+              (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+            (if (vl-catch-all-error-p tbl)
+              (princ (strcat "\nОшибка создания таблицы: "
+                             (vl-catch-all-error-message tbl)))
+              (progn
+                (vla-SetColumnWidth tbl 0 15.0)
+                (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.0))
+                (vla-SetColumnWidth tbl 2 30.0)
+                (vla-SetColumnWidth tbl 3 30.0)
+                (vla-SetColumnWidth tbl 4 25.0)
+                (vla-SetColumnWidth tbl 5 30.0)
+                (vla-MergeCells tbl 0 0 0 5)
+                (vla-SetText tbl 0 0 "{\\LОблицовка}")
+                (vla-SetText tbl 1 0 "№")
+                (vla-SetText tbl 1 1 "Слой")
+                (vla-SetText tbl 1 2 "Высота, мм")
+                (vla-SetText tbl 1 3 "Ширина, мм")
+                (vla-SetText tbl 1 4 "Кол-во, шт.")
+                (vla-SetText tbl 1 5 "Площадь, м2")
+                (vla-SetCellAlignment tbl 1 0 5)
+                (vla-SetCellAlignment tbl 1 1 5)
+                (vla-SetCellAlignment tbl 1 2 5)
+                (vla-SetCellAlignment tbl 1 3 5)
+                (vla-SetCellAlignment tbl 1 4 5)
+                (vla-SetCellAlignment tbl 1 5 5)
+                (setq row 2)
+                (setq lastLayerIdx -1 rowInLayer 0)
+                (foreach item items
+                  (if (eq (car item) 'data)
+                    (progn
+                      (setq layerIdx (cadr item))
+                      (setq grp (cddr item))
+                      (if (/= layerIdx lastLayerIdx)
+                        (progn
+                          (setq lastLayerIdx layerIdx)
+                          (setq rowInLayer 0)))
+                      (setq rowInLayer (1+ rowInLayer))
+                      (vla-SetText tbl row 0
+                        (strcat (itoa (1+ layerIdx)) "." (itoa rowInLayer)))
+                      (vla-SetText tbl row 1 (nth 1 grp))
+                      (vla-SetText tbl row 2 (itoa (nth 3 grp)))
+                      (vla-SetText tbl row 3 (itoa (nth 4 grp)))
+                      (vla-SetText tbl row 4 (itoa (nth 5 grp)))
+                      (vla-SetText tbl row 5
+                        (cl-format-area (cl-round2 (nth 6 grp))))
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 2 5)
+                      (vla-SetCellAlignment tbl row 3 5)
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetCellAlignment tbl row 5 5)
+                      (setq row (1+ row)))
+                    (progn
+                      (setq layerIdx (nth 1 item))
+                      (setq layer (nth 2 item))
+                      (setq subCnt (nth 3 item))
+                      (setq subArea (nth 4 item))
+                      (vla-MergeCells tbl row row 1 3)
+                      (vla-SetText tbl row 0
+                        (strcat "{\\fArial|b1|i0|c0|p34;"
+                                (itoa (1+ layerIdx)) "}"))
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetText tbl row 1 (strcat "   Итого: " layer))
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetText tbl row 4 (itoa subCnt))
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetText tbl row 5
+                        (cl-format-area (cl-round2 subArea)))
+                      (vla-SetCellAlignment tbl row 5 5)
+                      (setq row (1+ row)))))
+                (if is-last
+                  (progn
+                    (vla-MergeCells tbl row row 0 3)
+                    (vla-SetText tbl row 0 "        {\\LИтого:}")
+                    (vla-SetCellAlignment tbl row 0 4)
+                    (vla-SetText tbl row 4 (itoa total-cnt))
+                    (vla-SetCellAlignment tbl row 4 5)
+                    (vla-SetText tbl row 5
+                      (cl-format-area (cl-round2 total-area)))
+                    (vla-SetCellAlignment tbl row 5 5)))
+                (vla-update tbl)
+                (princ (strcat "\nТаблица " (itoa (1+ chunk-idx)) " создана."))
+                (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
+            (setq chunk-idx (1+ chunk-idx)))
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          (princ (strcat "\nВсего создано таблиц: " (itoa total-chunks)))
+          T
+        )
+      )
+    )
+  )
 )
 
 ;; ============================================================
-;; ЭКСПОРТ ПОЛИЛИНИЙ (К3)
+;; К3: ЭКСПОРТ ПОЛИЛИНИЙ В XLS/CSV
 ;; ============================================================
 (defun cl-write-xls (data report-mode fname / f brd rec total-cnt total-area
-                          groups grp grpName grpRows grpCnt grpArea detail itemNum)
+                          groups grp grpName grpRows grpCnt grpArea detail itemNum
+                          row-num layer-start-row layer-end-row subtotal-row
+                          subtotal-rows qsum asum r)
   (setq f (open fname "w"))
   (if (null f)
     nil
@@ -1151,6 +1242,8 @@
                 "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
       (write-line (strcat "  <Style ss:ID=\"Data\"><Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
       (write-line (strcat "  <Style ss:ID=\"DataLeft\"><Alignment ss:Horizontal=\"Left\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
+      (write-line (strcat "  <Style ss:ID=\"Cut\"><Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
       (write-line (strcat "  <Style ss:ID=\"Total\"><Font ss:Bold=\"1\"/>"
                 "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
                 "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
@@ -1161,81 +1254,115 @@
         (progn
           (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
           (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
-          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"60\"/>" f)
+          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
           (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-          (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f))
+          (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"6\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Row ss:Height=\"20\">" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\"5\"><Data ss:Type=\"String\">Облицовка</Data></Cell>") f)
+          (write-line "   </Row>" f)
+          (write-line "   <Row>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+          (write-line "   </Row>" f)
+          (setq total-cnt 0 total-area 0.0 itemNum 0 row-num 3 subtotal-rows '())
+          (setq groups (cl-group-blocks-by-layer data))
+          (foreach grp groups
+            (setq grpName (car grp))
+            (setq grpRows (cdr grp))
+            (setq layer-start-row row-num)
+            (setq grpCnt 0 grpArea 0.0)
+            (foreach rec grpRows
+              (setq grpCnt (+ grpCnt (nth 5 rec)))
+              (setq grpArea (+ grpArea (nth 6 rec)))
+              (setq total-cnt (+ total-cnt (nth 5 rec)))
+              (setq total-area (+ total-area (nth 6 rec)))
+              (setq itemNum (1+ itemNum))
+              (write-line "   <Row>" f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (nth 1 rec) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 rec)) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 4 rec)) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 5 rec)) "</Data></Cell>") f)
+              (if (= (caddr rec) "_НЕПРЯМОУГ_")
+                (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
+                (write-line (strcat "    <Cell ss:StyleID=\"Data\" ss:Formula=\"=ROUND(R" (itoa row-num) "C3*R" (itoa row-num) "C4/1000000*R" (itoa row-num) "C5,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
+              )
+              (write-line "   </Row>" f)
+              (setq row-num (1+ row-num))
+            )
+            (setq layer-end-row (1- row-num))
+            (setq subtotal-row row-num)
+            (setq subtotal-rows (append subtotal-rows (list subtotal-row)))
+            (write-line "   <Row>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">  " grpName "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=SUM(R" (itoa layer-start-row) "C5:R" (itoa layer-end-row) "C5)\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=ROUND(SUM(R" (itoa layer-start-row) "C6:R" (itoa layer-end-row) "C6),2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
+            (write-line "   </Row>" f)
+            (setq row-num (1+ row-num))
+          )
+          (setq qsum "=SUM(")
+          (setq asum "=ROUND(SUM(")
+          (foreach r subtotal-rows
+            (setq qsum (strcat qsum "R" (itoa r) "C5,"))
+            (setq asum (strcat asum "R" (itoa r) "C6,"))
+          )
+          (setq qsum (strcat (substr qsum 1 (1- (strlen qsum))) ")"))
+          (setq asum (strcat (substr asum 1 (1- (strlen asum))) "),2)"))
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" qsum "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" asum "\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+        )
         (progn
           (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
           (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"140\"/>" f)
           (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)))
-      (write-line "   <Row ss:Height=\"20\">" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\""
-                (if detail "4" "3") "\"><Data ss:Type=\"String\">Облицовка</Data></Cell>") f)
-      (write-line "   </Row>" f)
-      (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
-      (if detail (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Номинал</Data></Cell>" f))
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
-      (write-line "   </Row>" f)
-      (setq total-cnt 0 total-area 0.0 itemNum 0)
-      (if detail
-        (progn
-          (setq groups '())
+          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Row ss:Height=\"20\">" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Облицовка</Data></Cell>") f)
+          (write-line "   </Row>" f)
+          (write-line "   <Row>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+          (write-line "   </Row>" f)
+          (setq total-cnt 0 total-area 0.0 itemNum 0)
           (foreach rec data
-            (setq grp (assoc (cadr rec) groups))
-            (if grp
-              (setq groups (subst (append grp (list (list rec))) grp groups))
-              (setq groups (append groups (list (list (cadr rec) (list rec)))))))
-          (foreach grp groups
-            (setq grpName (car grp) grpRows (cdr grp) grpCnt 0 grpArea 0.0)
-            (foreach rec grpRows
-              (setq rec (car rec))
-              (setq grpCnt (+ grpCnt (nth 3 rec)))
-              (setq grpArea (+ grpArea (nth 4 rec)))
-              (setq total-cnt (+ total-cnt (nth 3 rec)))
-              (setq total-area (+ total-area (nth 4 rec)))
-              (setq itemNum (1+ itemNum))
-              (write-line "   <Row>" f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (cadr rec) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (caddr rec) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 rec)) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 4 rec)) 2 2) "</Data></Cell>") f)
-              (write-line "   </Row>" f))
-            (write-line "   <Row>" f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">  " grpName "</Data></Cell>") f)
-            (write-line "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"String\"></Data></Cell>" f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
-            (write-line "   </Row>" f)))
-        (progn
-          (foreach rec data
-            (setq total-cnt (+ total-cnt (nth 3 rec)))
-            (setq total-area (+ total-area (nth 4 rec)))
+            (setq total-cnt (+ total-cnt (nth 5 rec)))
+            (setq total-area (+ total-area (nth 6 rec)))
             (setq itemNum (1+ itemNum))
             (write-line "   <Row>" f)
             (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
             (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (cadr rec) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 rec)) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 4 rec)) 2 2) "</Data></Cell>") f)
-            (write-line "   </Row>" f))))
-      (write-line "   <Row>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\""
-                (if detail "2" "1") "\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
-      (write-line "   </Row>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 5 rec)) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
+            (write-line "   </Row>" f)
+          )
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+        )
+      )
       (write-line "  </Table>" f)
       (write-line " </Worksheet>" f)
       (write-line "</Workbook>" f)
       (close f)
-      T))
+      T
+    )
+  )
 )
 
-(defun cl-write-csv (data report-mode fname / f rec detail total-cnt total-area)
+(defun cl-write-csv (data report-mode fname / f rec detail total-cnt total-area
+                          groups grp grpName grpRows grpCnt grpArea)
   (setq f (open fname "w"))
   (if (null f)
     nil
@@ -1243,25 +1370,54 @@
       (setq detail (= (strcase report-mode) "DETAIL"))
       (setq total-cnt 0 total-area 0.0)
       (if detail
-        (write-line "Слой;Номинал;Кол-во, шт;Площадь, м2" f)
-        (write-line "Слой;Кол-во, шт;Площадь, м2" f))
-      (foreach rec data
-        (setq total-cnt (+ total-cnt (nth 3 rec)))
-        (setq total-area (+ total-area (nth 4 rec)))
-        (if detail
-          (write-line (strcat (cadr rec) ";" (caddr rec) ";"
-                              (itoa (nth 3 rec)) ";"
-                              (cl-format-area (cl-round2 (nth 4 rec)))) f)
-          (write-line (strcat (cadr rec) ";" (itoa (nth 3 rec)) ";"
-                              (cl-format-area (cl-round2 (nth 4 rec)))) f)))
+        (write-line "Слой;Высота, мм;Ширина, мм;Кол-во, шт;Площадь, м2" f)
+        (write-line "Слой;Кол-во, шт;Площадь, м2" f)
+      )
       (if detail
-        (write-line (strcat "Итого;;" (itoa total-cnt) ";"
+        (progn
+          (setq groups (cl-group-blocks-by-layer data))
+          (foreach grp groups
+            (setq grpName (car grp))
+            (setq grpRows (cdr grp))
+            (setq grpCnt 0 grpArea 0.0)
+            (foreach rec grpRows
+              (setq grpCnt (+ grpCnt (nth 5 rec)))
+              (setq grpArea (+ grpArea (nth 6 rec)))
+              (setq total-cnt (+ total-cnt (nth 5 rec)))
+              (setq total-area (+ total-area (nth 6 rec)))
+              (write-line (strcat (nth 1 rec) ";"
+                                  (itoa (nth 3 rec)) ";"
+                                  (itoa (nth 4 rec)) ";"
+                                  (itoa (nth 5 rec)) ";"
+                                  (cl-format-area (cl-round2 (nth 6 rec)))) f)
+            )
+            (write-line (strcat "Итого: " grpName ";;;"
+                                (itoa grpCnt) ";"
+                                (cl-format-area (cl-round2 grpArea))) f)
+          )
+        )
+        (progn
+          (foreach rec data
+            (setq total-cnt (+ total-cnt (nth 5 rec)))
+            (setq total-area (+ total-area (nth 6 rec)))
+            (write-line (strcat (cadr rec) ";"
+                                (itoa (nth 5 rec)) ";"
+                                (cl-format-area (cl-round2 (nth 6 rec)))) f)
+          )
+        )
+      )
+      (if detail
+        (write-line (strcat "Итого по всем:;;;"
+                            (itoa total-cnt) ";"
                             (cl-format-area (cl-round2 total-area))) f)
         (write-line (strcat "Итого;" (itoa total-cnt) ";"
-                            (cl-format-area (cl-round2 total-area))) f))
+                            (cl-format-area (cl-round2 total-area))) f)
+      )
       (close f)
-      T))
+      T
+    )
+  )
 )
 
-(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 27). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
+(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 29). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
 (princ)
