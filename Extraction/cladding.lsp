@@ -848,7 +848,7 @@
         (write-line (strcat "        Итого: " layer ";;;;"
                             (itoa layer-cnt) ";"
                             (cl-format-area (cl-round2 layer-area))) f))
-      (write-line (strcat "        Итого по всем блокам:;;;;"
+      (write-line (strcat "        Итого по всем позициям:;;;;"
                           (itoa total-cnt) ";"
                           (cl-format-area (cl-round2 total-area))) f)
       (close f)
@@ -864,13 +864,28 @@
 (if (not (boundp '*CLADDING-LAST-DATA*))    (setq *CLADDING-LAST-DATA* nil))
 (if (not (boundp '*CLADDING-LAST-MODE*))    (setq *CLADDING-LAST-MODE* nil))
 
+;; ---------- подбор свободного имени файла ----------
+;; Проба режимом "a" (не уссекает живой файл). Если имя занято
+;; (открыто в Excel) - подбираем суффикс (1), (2), ...
+;; Возвращает путь, который реально можно открыть на запись.
+(defun cl-free-path (base ext / p i fh)
+  (setq p (strcat base ext) i 1)
+  (setq fh (open p "a"))
+  (while (null fh)
+    (setq p (strcat base " (" (itoa i) ")" ext))
+    (setq i (1+ i))
+    (setq fh (open p "a")))
+  (close fh)
+  p
+)
+
 ;; ============================================================
 ;; ОСНОВНАЯ ФУНКЦИЯ (7-й параметр do-blocks)
 ;; ============================================================
 (defun cladding-main (layers report-mode export-excel export-txt
                       create-table save-base do-blocks
                       / *error* records data xls-base xlsfile csvfile
-                        brec bgroups bxls bcsv)
+                        brec bgroups bxls-base bxls bcsv)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg)
                            "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*ПРЕРВА*")))
@@ -878,6 +893,8 @@
     )
     (princ)
   )
+
+  ;; ---------- Часть 1: полилинии ----------
   (princ "\n=== Облицовка: сбор полилиний ===")
   (setq records (cl-collect layers))
   (if records
@@ -901,14 +918,10 @@
             (princ (strcat "\nXLS сохранен: " xlsfile))
             (progn
               (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
-              (setq csvfile (strcat xls-base ".csv"))
+              (setq csvfile (cl-free-path xls-base ".csv"))
               (if (cl-write-csv data report-mode csvfile)
                 (princ (strcat "\nCSV сохранен: " csvfile))
-                (princ "\nНе удалось создать CSV.")
-              )
-            )
-          )
-        )
+                (princ "\nНе удалось создать CSV.")))))
       )
       (if export-txt (princ "\nTXT: для облицовки не предусмотрен."))
       (if create-table
@@ -923,6 +936,8 @@
       (cl-warnings)
     )
   )
+
+  ;; ---------- Часть 2: блоки (если запрошено диспетчером) ----------
   (if do-blocks
     (progn
       (princ "\n=== Облицовка: сбор блоков ===")
@@ -939,20 +954,25 @@
           )
           (if export-excel
             (progn
-              (setq bxls (strcat (getvar "DWGPREFIX")
-                                 (vl-filename-base (getvar "DWGNAME"))
-                                 " Облицовка динамические блоки.xls"))
+              (setq bxls-base (strcat (getvar "DWGPREFIX")
+                                      (vl-filename-base (getvar "DWGNAME"))
+                                      " Облицовка динамические блоки"))
+              (setq bxls (strcat bxls-base ".xls"))
               (if (cl-blocks-write-xls bgroups bxls)
                 (princ (strcat "\nXLS сохранен: " bxls))
-                (princ "\nНе удалось создать XLS.")
-              )
+                (progn
+                  (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+                  (setq bcsv (cl-free-path bxls-base ".csv"))
+                  (if (cl-blocks-write-csv bgroups bcsv)
+                    (princ (strcat "\nCSV сохранен: " bcsv))
+                    (princ "\nНе удалось создать CSV.")))))
             )
           )
         )
         (princ "\nБлоки облицовки не найдены.")
       )
     )
-  )
+  
   (princ)
 )
 
@@ -1406,7 +1426,7 @@
         )
       )
       (if detail
-        (write-line (strcat "Итого по всем:;;;"
+        (write-line (strcat "Итого по всем позициям:;;;"
                             (itoa total-cnt) ";"
                             (cl-format-area (cl-round2 total-area))) f)
         (write-line (strcat "Итого;" (itoa total-cnt) ";"
