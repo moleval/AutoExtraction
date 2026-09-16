@@ -84,6 +84,14 @@
   (setq *extraction-in-dialog* nil)
 )
 
+(if (not (boundp '*extraction-callback-depth*))
+  (setq *extraction-callback-depth* 0)
+)
+
+(if (not (boundp '*extraction-in-layer-changed*))
+  (setq *extraction-in-layer-changed* nil)
+)
+
 ;; ============================================================
 ;; Слои по умолчанию для каждой задачи
 ;; ============================================================
@@ -787,30 +795,40 @@
 ;; ИЗМЕНЕНИЕ ВЫБОРА В СПИСКЕ
 ;; ============================================================
 (defun extraction-layer-selection-changed ( / selected)
-  (setq selected (extraction-selected-names))
-  (setq *EXTRACTION-SELECTED-LAYERS* selected)
+  ;; Защита от вложенных вызовов: если уже выполняется — выходим
+  (if *extraction-in-layer-changed*
+    nil
+    (progn
+      (setq *extraction-in-layer-changed* T)
 
-  (if (not *extraction-syncing-layers*)
-    (cond
-      ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-       (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
-       (extraction-sync-checks-from-layers))
+      (setq selected (extraction-selected-names))
+      (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
-      ((eq *EXTRACTION-TASK-ID* 'FASONKA)
-       (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected))
+      (if (not *extraction-syncing-layers*)
+        (cond
+          ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+           (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+           (extraction-sync-checks-from-layers))
 
-      ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
-       (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected))
+          ((eq *EXTRACTION-TASK-ID* 'FASONKA)
+           (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected))
 
-      ((eq *EXTRACTION-TASK-ID* 'CLADDING)
-       (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected))
+          ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
+           (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected))
 
-      ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
-       (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected))
+          ((eq *EXTRACTION-TASK-ID* 'CLADDING)
+           (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected))
+
+          ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
+           (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected))
+        )
+      )
+
+      (extraction-update-select-buttons)
+
+      (setq *extraction-in-layer-changed* nil)
     )
   )
-
-  (extraction-update-select-buttons)
 )
 
 
@@ -1205,6 +1223,7 @@
     ;; --- Сброс флагов синхронизации — ВСЕГДА ---
     (setq *extraction-syncing-layers* nil)
     (setq *extraction-syncing-checks* nil)
+    (setq *extraction-in-layer-changed* nil)
 
     ;; --- Выгрузка DCL ---
     ;; Если мы ВНУТРИ start_dialog (в callback) — НЕ выгружаем,
@@ -1226,7 +1245,7 @@
     ;; --- Сообщение об ошибке ---
     (if (and msg
              (not (wcmatch (strcase msg)
-                    "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+                    "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*ПРЕРВА*,*ОТМЕН*")))
       (princ (strcat "\n[EX ERROR] " msg))
     )
     (princ)
