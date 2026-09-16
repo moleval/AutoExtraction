@@ -187,17 +187,22 @@
 )
 
 ;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
-;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
 (defun cl-aggregate (records detail / acc rec key found out)
   (setq acc '())
   (foreach rec records
     (setq key (if detail (strcat (car rec) "|" (cadr rec)) (car rec)))
     (setq found (assoc key acc))
     (if found
-      (setq acc (subst (list key (car rec) (cadr rec)
-                             (nth 2 rec) (nth 3 rec)
-                             (1+ (nth 5 found))
-                             (+ (nth 6 found) (nth 4 rec))) found acc))
+      (if (= (cadr rec) "_НЕПРЯМОУГ_")
+        (setq acc (subst (list key (car rec) (cadr rec)
+                               (max (nth 3 found) (nth 2 rec))
+                               (max (nth 4 found) (nth 3 rec))
+                               (1+ (nth 5 found))
+                               (+ (nth 6 found) (nth 4 rec))) found acc))
+        (setq acc (subst (list key (car rec) (cadr rec)
+                               (nth 2 rec) (nth 3 rec)
+                               (1+ (nth 5 found))
+                               (+ (nth 6 found) (nth 4 rec))) found acc)))
       (setq acc (cons (list key (car rec) (cadr rec)
                             (nth 2 rec) (nth 3 rec) 1 (nth 4 rec)) acc))))
   (setq out (vl-sort acc
@@ -212,7 +217,7 @@
   (setq total-cnt 0 total-area 0.0 cur-layer nil)
   (foreach rec data
     (setq total-cnt (+ total-cnt (nth 5 rec)))
-    (setq total-area (+ total-area (nth 6 rec)))
+    (setq total-area (+ total-area (cl-round2 (nth 6 rec))))
     (if (= (strcase report-mode) "DETAIL")
       (progn
         (if (not (equal cur-layer (cadr rec)))
@@ -388,7 +393,7 @@
   (setq total-cnt 0 total-area 0.0 cur-layer nil)
   (foreach grp groups
     (setq total-cnt (+ total-cnt (nth 5 grp)))
-    (setq total-area (+ total-area (nth 6 grp)))
+    (setq total-area (+ total-area (cl-round2 (nth 6 grp))))
     (if (not (equal cur-layer (nth 1 grp)))
       (progn (setq cur-layer (nth 1 grp))
              (princ (strcat "\nСлой \"" cur-layer "\":"))))
@@ -440,7 +445,7 @@
     (setq layCnt 0 layArea 0.0)
     (foreach r rows
       (setq layCnt (+ layCnt (nth 5 r)))
-      (setq layArea (+ layArea (nth 6 r))))
+      (setq layArea (+ layArea (cl-round2 (nth 6 r)))))
     (foreach r rows
       (setq items (append items (list (cons 'data (cons layerIdx r))))))
     (setq items (append items
@@ -501,10 +506,6 @@
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
           (vla-startundomark doc)
-          (setq total-cnt 0 total-area 0.0)
-          (foreach grp data
-            (setq total-cnt (+ total-cnt (nth 5 grp)))
-            (setq total-area (+ total-area (nth 6 grp))))
           (setq maxLayerLen 10 maxTypeLen 10)
           (foreach grp data
             (setq layerStr (nth 1 grp))
@@ -513,14 +514,17 @@
               (setq maxLayerLen (strlen layerStr)))
             (if (> (strlen typeStr) maxTypeLen)
               (setq maxTypeLen (strlen typeStr))))
-          ;; Автоподгон ширины первой колонки "№"
-          (setq maxNumLen 3)
+          ;; Итоги и автоподгон — один проход по слоям
+          (setq total-cnt 0 total-area 0.0 maxNumLen 3)
           (setq layerGroups (cl-group-blocks-by-layer data))
           (setq layerIdx 1)
           (foreach lg layerGroups
-            (setq layCnt 0)
+            (setq layCnt 0 layArea 0.0)
             (foreach r (cdr lg)
-              (setq layCnt (+ layCnt (nth 5 r))))
+              (setq layCnt (+ layCnt (nth 5 r)))
+              (setq layArea (+ layArea (cl-round2 (nth 6 r)))))
+            (setq total-cnt (+ total-cnt layCnt))
+            (setq total-area (+ total-area (cl-round2 layArea)))
             (setq numStr (strcat (itoa layerIdx) "." (itoa layCnt)))
             (if (> (strlen numStr) maxNumLen)
               (setq maxNumLen (strlen numStr)))
@@ -548,22 +552,9 @@
                 (vla-SetColumnWidth tbl 4 30.0)
                 (vla-SetColumnWidth tbl 5 25.0)
                 (vla-SetColumnWidth tbl 6 30.0)
-                (vla-MergeCells tbl 0 0 0 6)
-                (vla-SetText tbl 0 0 "{\\LОблицовка (динамические блоки)}")
-                (vla-SetText tbl 1 0 "№")
-                (vla-SetText tbl 1 1 "Слой")
-                (vla-SetText tbl 1 2 "Тип")
-                (vla-SetText tbl 1 3 "Высота, мм")
-                (vla-SetText tbl 1 4 "Ширина, мм")
-                (vla-SetText tbl 1 5 "Кол-во, шт.")
-                (vla-SetText tbl 1 6 "Площадь, м2")
-                (vla-SetCellAlignment tbl 1 0 5)
-                (vla-SetCellAlignment tbl 1 1 5)
-                (vla-SetCellAlignment tbl 1 2 5)
-                (vla-SetCellAlignment tbl 1 3 5)
-                (vla-SetCellAlignment tbl 1 4 5)
-                (vla-SetCellAlignment tbl 1 5 5)
-                (vla-SetCellAlignment tbl 1 6 5)
+                (ts-ac-title tbl 0 "Облицовка (динамические блоки)" 7)
+                (ts-ac-header tbl 1
+                  '("№" "Слой" "Тип" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
                 (setq row 2)
                 (foreach item items
                   (if (eq (car item) 'data)
@@ -597,13 +588,8 @@
                       (setq layer (nth 2 item))
                       (setq subCnt (nth 3 item))
                       (setq subArea (nth 4 item))
-                      (vla-MergeCells tbl row row 1 4)
-                      (vla-SetText tbl row 0
-                        (strcat "{\\fArial|b1|i0|c0|p34;"
-                                (itoa (1+ layerIdx)) "}"))
-                      (vla-SetCellAlignment tbl row 0 5)
-                      (vla-SetText tbl row 1 (strcat "   Итого: " layer))
-                      (vla-SetCellAlignment tbl row 1 4)
+                      (ts-ac-subtotal tbl row (1+ layerIdx)
+                        (strcat "   Итого: " layer) 1 4)
                       (vla-SetText tbl row 5 (itoa subCnt))
                       (vla-SetCellAlignment tbl row 5 5)
                       (vla-SetText tbl row 6
@@ -665,25 +651,17 @@
               (vla-SetColumnWidth tbl 1 150.0)
               (vla-SetColumnWidth tbl 2 25.0)
               (vla-SetColumnWidth tbl 3 30.0)
-              (vla-MergeCells tbl 0 0 0 3)
-              (vla-SetText tbl 0 0 "{\\LОблицовка (динамические блоки)}")
-              (vla-SetText tbl 1 0 "№")
-              (vla-SetText tbl 1 1 "Слой")
-              (vla-SetText tbl 1 2 "Кол-во, шт.")
-              (vla-SetText tbl 1 3 "Площадь, м2")
-              (vla-SetCellAlignment tbl 1 0 5)
-              (vla-SetCellAlignment tbl 1 1 5)
-              (vla-SetCellAlignment tbl 1 2 5)
-              (vla-SetCellAlignment tbl 1 3 5)
+              (ts-ac-title tbl 0 "Облицовка (динамические блоки)" 4)
+              (ts-ac-header tbl 1 '("№" "Слой" "Кол-во, шт." "Площадь, м2"))
               (setq row 2 total-cnt 0 total-area 0.0)
               (foreach lg layerGroups
                 (setq layer (car lg))
                 (setq cnt 0 area 0.0)
                 (foreach g (cdr lg)
                   (setq cnt  (+ cnt  (nth 5 g)))
-                  (setq area (+ area (nth 6 g))))
+                  (setq area (+ area (cl-round2 (nth 6 g)))))
                 (setq total-cnt  (+ total-cnt  cnt))
-                (setq total-area (+ total-area area))
+                (setq total-area (+ total-area (cl-round2 area)))
                 (vla-SetText tbl row 0 (itoa (- row 1)))
                 (vla-SetText tbl row 1 layer)
                 (vla-SetText tbl row 2 (itoa cnt))
@@ -693,9 +671,7 @@
                 (vla-SetCellAlignment tbl row 2 5)
                 (vla-SetCellAlignment tbl row 3 5)
                 (setq row (1+ row)))
-              (vla-MergeCells tbl row row 0 1)
-              (vla-SetText tbl row 0 "        {\\LИтого по всем позициям:}")
-              (vla-SetCellAlignment tbl row 0 4)
+              (ts-ac-total tbl row "        {\\LИтого по всем позициям:}" 0 1 4)
               (vla-SetText tbl row 2 (itoa total-cnt))
               (vla-SetCellAlignment tbl row 2 5)
               (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
@@ -714,16 +690,16 @@
 ;; ============================================================
 ;; Б4: ЭКСПОРТ БЛОКОВ В XLS/CSV
 ;; ============================================================
-
-(defun cl-blocks-write-xls (groups fname / f brd grp total-cnt total-area
+(defun cl-blocks-write-xls (groups report-mode fname / f brd grp total-cnt total-area
                               layerGroups lg layer layer-cnt layer-area
                               grpCnt grpArea itemNum row-num is-cut
                               layer-start-row layer-end-row subtotal-row
-                              subtotal-rows qsum asum r)
+                              subtotal-rows qsum psum r detail)
   (setq f (open fname "w"))
   (if (null f)
     nil
     (progn
+      (setq detail (= (strcase report-mode) "DETAIL"))
       (setq brd (strcat "<Borders>"
         "<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
         "<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>"
@@ -751,76 +727,126 @@
       (write-line (strcat "  <Style ss:ID=\"Total\"><Font ss:Bold=\"1\"/>"
                 "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
                 "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
+      (write-line (strcat "  <Style ss:ID=\"Num\"><NumberFormat ss:Format=\"0.00\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
+      (write-line (strcat "  <Style ss:ID=\"TotalNum\"><Font ss:Bold=\"1\"/>"
+                "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<NumberFormat ss:Format=\"0.00\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
       (write-line " </Styles>" f)
       (write-line " <Worksheet ss:Name=\"Облицовка (блоки)\">" f)
       (write-line "  <Table>" f)
-      (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-      (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
-      (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"80\"/>" f)
-      (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-      (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-      (write-line "   <Column ss:Index=\"6\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
-      (write-line "   <Column ss:Index=\"7\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
-      (write-line "   <Row ss:Height=\"20\">" f)
-      (write-line "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\"6\"><Data ss:Type=\"String\">Облицовка (динамические блоки)</Data></Cell>" f)
-      (write-line "   </Row>" f)
-      (write-line "   <Row>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
-      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
-      (write-line "   </Row>" f)
-      (setq total-cnt 0 total-area 0.0 itemNum 0 row-num 3 subtotal-rows '())
-      (setq layerGroups (cl-group-blocks-by-layer groups))
-      (foreach lg layerGroups
-        (setq layer (car lg))
-        (setq layer-cnt 0 layer-area 0.0)
-        (setq layer-start-row row-num)
-        (foreach grp (cdr lg)
-          (setq itemNum (1+ itemNum))
-          (setq grpCnt (nth 5 grp))
-          (setq grpArea (nth 6 grp))
-          (setq is-cut (nth 7 grp))
-          (setq layer-cnt (+ layer-cnt grpCnt))
-          (setq layer-area (+ layer-area grpArea))
-          (setq total-cnt (+ total-cnt grpCnt))
-          (setq total-area (+ total-area grpArea))
-          (write-line "   <Row>" f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (nth 1 grp) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (cl-clean-type-name (nth 2 grp)) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 4 grp)) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 grp)) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
-          (if is-cut
-            (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Data\" ss:Formula=\"=ROUND(R" (itoa row-num) "C4*R" (itoa row-num) "C5/1000000*R" (itoa row-num) "C6,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f))
+
+      (if detail
+        ;; ========== ПОДРОБНЫЙ ==========
+        (progn
+          (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"120\"/>" f)
+          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"5\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"6\" ss:AutoFitWidth=\"0\" ss:Width=\"30\"/>" f)
+          (write-line "   <Column ss:Index=\"7\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Row ss:Height=\"20\">" f)
+          (write-line "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\"6\"><Data ss:Type=\"String\">Облицовка (динамические блоки)</Data></Cell>" f)
           (write-line "   </Row>" f)
-          (setq row-num (1+ row-num)))
-        (setq layer-end-row (1- row-num))
-        (setq subtotal-row row-num)
-        (setq subtotal-rows (append subtotal-rows (list subtotal-row)))
-        (write-line "   <Row>" f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">        Итого: " layer "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=SUM(R" (itoa layer-start-row) "C6:R" (itoa layer-end-row) "C6)\"><Data ss:Type=\"Number\">" (itoa layer-cnt) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=ROUND(SUM(R" (itoa layer-start-row) "C7:R" (itoa layer-end-row) "C7),2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 layer-area) 2 2) "</Data></Cell>") f)
-        (write-line "   </Row>" f)
-        (setq row-num (1+ row-num)))
-      (setq qsum "=SUM(")
-      (setq asum "=ROUND(SUM(")
-      (foreach r subtotal-rows
-        (setq qsum (strcat qsum "R" (itoa r) "C6,"))
-        (setq asum (strcat asum "R" (itoa r) "C7,")))
-      (setq qsum (strcat (substr qsum 1 (1- (strlen qsum))) ")"))
-      (setq asum (strcat (substr asum 1 (1- (strlen asum))) "),2)"))
-      (write-line "   <Row>" f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">        Итого по всем позициям:</Data></Cell>") f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" qsum "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
-      (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" asum "\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
-      (write-line "   </Row>" f)
+          (write-line "   <Row>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+          (write-line "   </Row>" f)
+          (setq total-cnt 0 total-area 0.0 itemNum 0 row-num 3 subtotal-rows '())
+          (setq layerGroups (cl-group-blocks-by-layer groups))
+          (foreach lg layerGroups
+            (setq layer (car lg))
+            (setq layer-cnt 0 layer-area 0.0)
+            (setq layer-start-row row-num)
+            (foreach grp (cdr lg)
+              (setq itemNum (1+ itemNum))
+              (setq grpCnt (nth 5 grp))
+              (setq grpArea (nth 6 grp))
+              (setq is-cut (nth 7 grp))
+              (setq layer-cnt (+ layer-cnt grpCnt))
+              (setq layer-area (+ layer-area (cl-round2 grpArea)))
+              (setq total-cnt (+ total-cnt grpCnt))
+              (write-line "   <Row>" f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (nth 1 grp) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (cl-clean-type-name (nth 2 grp)) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 4 grp)) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 grp)) "</Data></Cell>") f)
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
+              (if is-cut
+                (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
+                (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(R" (itoa row-num) "C4*R" (itoa row-num) "C5/1000000*R" (itoa row-num) "C6,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f))
+              (write-line "   </Row>" f)
+              (setq row-num (1+ row-num)))
+            (setq total-area (+ total-area (cl-round2 layer-area)))
+            (setq layer-end-row (1- row-num))
+            (setq subtotal-row row-num)
+            (setq subtotal-rows (append subtotal-rows (list subtotal-row)))
+            (write-line "   <Row>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">        Итого: " layer "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=SUM(R" (itoa layer-start-row) "C6:R" (itoa layer-end-row) "C6)\"><Data ss:Type=\"Number\">" (itoa layer-cnt) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"TotalNum\" ss:Formula=\"=ROUND(SUM(R" (itoa layer-start-row) "C7:R" (itoa layer-end-row) "C7),2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 layer-area) 2 2) "</Data></Cell>") f)
+            (write-line "   </Row>" f)
+            (setq row-num (1+ row-num)))
+          (setq qsum "=SUM(")
+          (setq psum "=ROUND(SUM(")
+          (foreach r subtotal-rows
+            (setq qsum (strcat qsum "R" (itoa r) "C6,"))
+            (setq psum (strcat psum "R" (itoa r) "C7,")))
+          (setq qsum (strcat (substr qsum 1 (1- (strlen qsum))) ")"))
+          (setq psum (strcat (substr psum 1 (1- (strlen psum))) "),2)"))
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">        Итого по всем позициям:</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" qsum "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"TotalNum\" ss:Formula=\"" psum "\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f))
+
+        ;; ========== КРАТКИЙ ==========
+        (progn
+          (write-line "   <Column ss:Index=\"1\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"2\" ss:AutoFitWidth=\"0\" ss:Width=\"150\"/>" f)
+          (write-line "   <Column ss:Index=\"3\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Column ss:Index=\"4\" ss:AutoFitWidth=\"0\" ss:Width=\"40\"/>" f)
+          (write-line "   <Row ss:Height=\"20\">" f)
+          (write-line "    <Cell ss:StyleID=\"Title\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Облицовка (динамические блоки)</Data></Cell>" f)
+          (write-line "   </Row>" f)
+          (write-line "   <Row>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Слой</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт</Data></Cell>" f)
+          (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+          (write-line "   </Row>" f)
+          (setq total-cnt 0 total-area 0.0 itemNum 0 row-num 3)
+          (setq layerGroups (cl-group-blocks-by-layer groups))
+          (foreach lg layerGroups
+            (setq layer (car lg))
+            (setq layer-cnt 0 layer-area 0.0)
+            (foreach grp (cdr lg)
+              (setq layer-cnt (+ layer-cnt (nth 5 grp)))
+              (setq layer-area (+ layer-area (cl-round2 (nth 6 grp)))))
+            (setq total-cnt (+ total-cnt layer-cnt))
+            (setq total-area (+ total-area (cl-round2 layer-area)))
+            (setq itemNum (1+ itemNum))
+            (write-line "   <Row>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" layer "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa layer-cnt) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (cl-round2 layer-area) 2 2) "</Data></Cell>") f)
+            (write-line "   </Row>" f)
+            (setq row-num (1+ row-num)))
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">Итого по всем позициям:</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Total\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"TotalNum\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)))
+
       (write-line "  </Table>" f)
       (write-line " </Worksheet>" f)
       (write-line "</Workbook>" f)
@@ -921,10 +947,12 @@
         (progn
           (setq xls-base
             (if save-base
-              save-base
+              (strcat save-base " "
+                (if (= (strcase report-mode) "DETAIL") "подробный" "краткий"))
               (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
-                      " Облицовка полилинии")))
+                      " Облицовка полилинии "
+                      (if (= (strcase report-mode) "DETAIL") "подробный" "краткий"))))
           (setq xlsfile (strcat xls-base ".xls"))
           (if (cl-write-xls data report-mode xlsfile)
             (princ (strcat "\nXLS сохранен: " xlsfile))
@@ -968,9 +996,10 @@
             (progn
               (setq bxls-base (strcat (getvar "DWGPREFIX")
                                       (vl-filename-base (getvar "DWGNAME"))
-                                      " Облицовка динамические блоки"))
+                                      " Облицовка динамические блоки "
+                                      (if (= (strcase report-mode) "DETAIL") "подробный" "краткий")))
               (setq bxls (strcat bxls-base ".xls"))
-              (if (cl-blocks-write-xls bgroups bxls)
+              (if (cl-blocks-write-xls bgroups report-mode bxls)
                 (princ (strcat "\nXLS сохранен: " bxls))
                 (progn
                   (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
@@ -1040,7 +1069,7 @@
                     (vl-filename-base (getvar "DWGNAME"))
                     " Облицовка динамические блоки"))
           (setq xlsfile (strcat xls-base ".xls"))
-          (if (cl-blocks-write-xls groups xlsfile)
+          (if (cl-blocks-write-xls groups "DETAIL" xlsfile)
             (princ (strcat "\nXLS сохранен: " xlsfile))
             (progn
               (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
@@ -1075,7 +1104,7 @@
       (setq row 2 total-cnt 0 total-area 0.0)
       (foreach rec data
         (setq total-cnt (+ total-cnt (nth 5 rec)))
-        (setq total-area (+ total-area (nth 6 rec)))
+        (setq total-area (+ total-area (cl-round2 (nth 6 rec))))
         (vla-SetText tbl row 0 (itoa (1+ (- row 2))))
         (vla-SetText tbl row 1 (cadr rec))
         (vla-SetText tbl row 2 (itoa (nth 5 rec)))
@@ -1118,23 +1147,22 @@
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
           (vla-startundomark doc)
-          (setq total-cnt 0 total-area 0.0)
-          (foreach grp data
-            (setq total-cnt (+ total-cnt (nth 5 grp)))
-            (setq total-area (+ total-area (nth 6 grp))))
           (setq maxLayerLen 10)
           (foreach grp data
             (setq layerStr (nth 1 grp))
             (if (> (strlen layerStr) maxLayerLen)
               (setq maxLayerLen (strlen layerStr))))
-          ;; Автоподгон ширины первой колонки "№"
-          (setq maxNumLen 3)
+          ;; Итоги и автоподгон — один проход по слоям
+          (setq total-cnt 0 total-area 0.0 maxNumLen 3)
           (setq layerGroups (cl-group-blocks-by-layer data))
           (setq layerIdx 1)
           (foreach lg layerGroups
-            (setq layCnt 0)
+            (setq layCnt 0 layArea 0.0)
             (foreach r (cdr lg)
-              (setq layCnt (+ layCnt (nth 5 r))))
+              (setq layCnt (+ layCnt (nth 5 r)))
+              (setq layArea (+ layArea (cl-round2 (nth 6 r)))))
+            (setq total-cnt (+ total-cnt layCnt))
+            (setq total-area (+ total-area (cl-round2 layArea)))
             (setq numStr (strcat (itoa layerIdx) "." (itoa layCnt)))
             (if (> (strlen numStr) maxNumLen)
               (setq maxNumLen (strlen numStr)))
@@ -1264,6 +1292,12 @@
       (write-line (strcat "  <Style ss:ID=\"Total\"><Font ss:Bold=\"1\"/>"
                 "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
                 "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
+      (write-line (strcat "  <Style ss:ID=\"Num\"><NumberFormat ss:Format=\"0.00\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
+      (write-line (strcat "  <Style ss:ID=\"TotalNum\"><Font ss:Bold=\"1\"/>"
+                "<Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>"
+                "<NumberFormat ss:Format=\"0.00\"/>"
+                "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" brd "</Style>") f)
       (write-line " </Styles>" f)
       (write-line " <Worksheet ss:Name=\"Облицовка\">" f)
       (write-line "  <Table>" f)
@@ -1295,19 +1329,26 @@
             (setq grpCnt 0 grpArea 0.0)
             (foreach rec grpRows
               (setq grpCnt (+ grpCnt (nth 5 rec)))
-              (setq grpArea (+ grpArea (nth 6 rec)))
+              (setq grpArea (+ grpArea (cl-round2 (nth 6 rec))))
               (setq total-cnt (+ total-cnt (nth 5 rec)))
-              (setq total-area (+ total-area (nth 6 rec)))
+              (setq total-area (+ total-area (cl-round2 (nth 6 rec))))
               (setq itemNum (1+ itemNum))
               (write-line "   <Row>" f)
               (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
               (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (nth 1 rec) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 rec)) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 4 rec)) "</Data></Cell>") f)
-              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 5 rec)) "</Data></Cell>") f)
+              ;; Высота и ширина: для _НЕПРЯМОУГ_ со звёздочкой и серый
               (if (= (caddr rec) "_НЕПРЯМОУГ_")
-                (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
-                (write-line (strcat "    <Cell ss:StyleID=\"Data\" ss:Formula=\"=ROUND(R" (itoa row-num) "C3*R" (itoa row-num) "C4/1000000*R" (itoa row-num) "C5,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
+                (progn
+                  (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"String\">" (itoa (nth 3 rec)) "*</Data></Cell>") f)
+                  (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"String\">" (itoa (nth 4 rec)) "*</Data></Cell>") f))
+                (progn
+                  (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 rec)) "</Data></Cell>") f)
+                  (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 4 rec)) "</Data></Cell>") f)))
+              (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 5 rec)) "</Data></Cell>") f)
+              ;; Площадь: для _НЕПРЯМОУГ_ без формулы серый, для обычных формула
+              (if (= (caddr rec) "_НЕПРЯМОУГ_")
+                (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
+                (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(R" (itoa row-num) "C3*R" (itoa row-num) "C4/1000000*R" (itoa row-num) "C5,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 (nth 6 rec)) 2 2) "</Data></Cell>") f)
               )
               (write-line "   </Row>" f)
               (setq row-num (1+ row-num))
@@ -1318,7 +1359,7 @@
             (write-line "   <Row>" f)
             (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">  " grpName "</Data></Cell>") f)
             (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=SUM(R" (itoa layer-start-row) "C5:R" (itoa layer-end-row) "C5)\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"=ROUND(SUM(R" (itoa layer-start-row) "C6:R" (itoa layer-end-row) "C6),2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"TotalNum\" ss:Formula=\"=ROUND(SUM(R" (itoa layer-start-row) "C6:R" (itoa layer-end-row) "C6),2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
             (write-line "   </Row>" f)
             (setq row-num (1+ row-num))
           )
@@ -1326,14 +1367,13 @@
           (setq asum "=ROUND(SUM(")
           (foreach r subtotal-rows
             (setq qsum (strcat qsum "R" (itoa r) "C5,"))
-            (setq asum (strcat asum "R" (itoa r) "C6,"))
-          )
+            (setq asum (strcat asum "R" (itoa r) "C6,")))
           (setq qsum (strcat (substr qsum 1 (1- (strlen qsum))) ")"))
           (setq asum (strcat (substr asum 1 (1- (strlen asum))) "),2)"))
           (write-line "   <Row>" f)
           (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Итого по всем позициям:</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" qsum "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Total\" ss:Formula=\"" asum "\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"TotalNum\" ss:Formula=\"" asum "\"><Data ss:Type=\"Number\">" (rtos (cl-round2 total-area) 2 2) "</Data></Cell>") f)
           (write-line "   </Row>" f)
         )
         (progn
@@ -1353,7 +1393,7 @@
           (setq total-cnt 0 total-area 0.0 itemNum 0)
           (foreach rec data
             (setq total-cnt (+ total-cnt (nth 5 rec)))
-            (setq total-area (+ total-area (nth 6 rec)))
+            (setq total-area (+ total-area (cl-round2 (nth 6 rec))))
             (setq itemNum (1+ itemNum))
             (write-line "   <Row>" f)
             (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
