@@ -588,20 +588,10 @@
                 (vla-SetColumnWidth tbl 3 25.0)
                 (vla-SetColumnWidth tbl 4 30.0)
 
-                (vla-MergeCells tbl 0 0 0 4)
-                (vla-SetText tbl 0 0 "{\\LПодсистема}")
+                (ts-ac-title tbl 0 "Подсистема" 5)
 
-                (vla-SetText tbl 1 0 "№")
-                (vla-SetText tbl 1 1 "Наименование")
-                (vla-SetText tbl 1 2 "Длина, мм")
-                (vla-SetText tbl 1 3 "Кол-во, шт.")
-                (vla-SetText tbl 1 4 "Сумма, м.п.")
-
-                (vla-SetCellAlignment tbl 1 0 5)
-                (vla-SetCellAlignment tbl 1 1 5)
-                (vla-SetCellAlignment tbl 1 2 5)
-                (vla-SetCellAlignment tbl 1 3 5)
-                (vla-SetCellAlignment tbl 1 4 5)
+                (ts-ac-header tbl 1
+                  '("№" "Наименование" "Длина, мм" "Кол-во, шт." "Сумма, м.п."))
 
                 (setq row 2)
 
@@ -650,12 +640,8 @@
                       (setq groupName (nth 2 item))
                       (setq totalSum  (nth 3 item))
 
-                      (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0
-                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
-                      (vla-SetText tbl row 1
-                        (strcat "{\\L" groupName "}"))
-                      (vla-SetCellAlignment tbl row 1 4)
+                      (ts-ac-subtotal tbl row groupIdx
+                        (strcat "{\\L" groupName "}") 1 3)
                       (vla-SetText tbl row 4 (rtos totalSum 2 2))
                       (vla-SetCellAlignment tbl row 4 5)
 
@@ -726,18 +712,9 @@
       (vla-SetColumnWidth tbl 2 25.0)
       (vla-SetColumnWidth tbl 3 30.0)
 
-      (vla-MergeCells tbl 0 0 0 3)
-      (vla-SetText tbl 0 0 "{\\LПодсистема}")
+      (ts-ac-title tbl 0 "Подсистема" 4)
 
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Наименование")
-      (vla-SetText tbl 1 2 "Кол-во, шт.")
-      (vla-SetText tbl 1 3 "Сумма, м.п.")
-
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
+      (ts-ac-header tbl 1 '("№" "Наименование" "Кол-во, шт." "Сумма, м.п."))
 
       (setq row 2)
 
