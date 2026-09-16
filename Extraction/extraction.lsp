@@ -72,6 +72,10 @@
   (setq *extraction-syncing-layers* nil)
 )
 
+(if (not (boundp '*EXTRACTION-MODULES-LOADED*))
+  (setq *EXTRACTION-MODULES-LOADED* nil)
+)
+
 ;; ============================================================
 ;; Слои по умолчанию для каждой задачи
 ;; ============================================================
@@ -1163,11 +1167,38 @@
 ;; ============================================================
 
 (defun c:extraction
-       ( / dcl-file save-base modules-dir r)
+       ( / *error* dcl-file save-base modules-dir r)
 
   (vl-load-com)
+  
+    ;; ----------------------------------------------------------
+  ;; Локальный обработчик ошибок: гарантированная выгрузка DCL
+  ;; ----------------------------------------------------------
+  (defun *error* (msg)
+    (if (and *EXTRACTION-DCL-ID*
+             (>= *EXTRACTION-DCL-ID* 0))
+      (progn
+        (unload_dialog *EXTRACTION-DCL-ID*)
+        (setq *EXTRACTION-DCL-ID* nil)
+      )
+    )
+    (setq *extraction-syncing-layers* nil)
+    (setq *extraction-syncing-checks* nil)
+    (if (and msg
+             (not (wcmatch (strcase msg)
+                    "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+      (princ (strcat "\nОшибка диспетчера: " msg))
+    )
+    (princ)
+  )
 
-  (extraction-load-all)
+  ;; Загрузка модулей только при первом запуске за сессию
+  (if (not *EXTRACTION-MODULES-LOADED*)
+    (progn
+      (extraction-load-all)
+      (setq *EXTRACTION-MODULES-LOADED* T)
+    )
+  )
 
   (setq *extraction-preselected-set* (ssget "_I"))
 
@@ -1374,9 +1405,15 @@
                 )
               )
 
+              ;; Гарантированная выгрузка на штатном пути
               (unload_dialog *EXTRACTION-DCL-ID*)
+              (setq *EXTRACTION-DCL-ID* nil)
             )
-            (alert "Не удалось открыть диалог EXTRACTION.")
+            (progn
+              (unload_dialog *EXTRACTION-DCL-ID*)
+              (setq *EXTRACTION-DCL-ID* nil)
+              (alert "Не удалось открыть диалог EXTRACTION.")
+            )
           )
         )
       )
