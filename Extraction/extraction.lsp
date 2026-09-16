@@ -3,6 +3,15 @@
 ;;;
 ;;; ДОБАВЛЕНО (Б4): в ветке CLADDING функции run-task передаётся
 ;;; седьмым аргументом T — диспетчер собирает и полилинии, и блоки.
+;;;
+;;; АРХИТЕКТУРА ЗАЩИТЫ:
+;;; Два флага:
+;;;   *extraction-in-dialog*    — lifecycle DCL (нужен для *error*)
+;;;   *extraction-updating-ui*  — единая защита от re-entrancy
+;;;
+;;; Принцип: когда программа модифицирует DCL (set_tile, start_list,
+;;; mode_tile), устанавливается *extraction-updating-ui* = T.
+;;; Callback'и, возникающие во время этого, не запускают бизнес-логику.
 ;;; ============================================================
 
 (vl-load-com)
@@ -64,14 +73,6 @@
   (setq *extraction-preselected-set* nil)
 )
 
-(if (not (boundp '*extraction-syncing-checks*))
-  (setq *extraction-syncing-checks* nil)
-)
-
-(if (not (boundp '*extraction-syncing-layers*))
-  (setq *extraction-syncing-layers* nil)
-)
-
 (if (not (boundp '*EXTRACTION-MODULES-LOADED*))
   (setq *EXTRACTION-MODULES-LOADED* nil)
 )
@@ -84,12 +85,8 @@
   (setq *extraction-in-dialog* nil)
 )
 
-(if (not (boundp '*extraction-in-layer-changed*))
-  (setq *extraction-in-layer-changed* nil)
-)
-
-(if (not (boundp '*extraction-dcl-busy*))
-  (setq *extraction-dcl-busy* nil)
+(if (not (boundp '*extraction-updating-ui*))
+  (setq *extraction-updating-ui* nil)
 )
 
 ;; ============================================================
@@ -163,7 +160,6 @@
 
 ;; ============================================================
 ;; БЕЗОПАСНОЕ ЗАПОЛНЕНИЕ СПИСКА
-;; Простой вид без лямбды в vl-catch-all-apply.
 ;; Гарантия end_list обеспечивается локальным *error*
 ;; через флаг *extraction-list-open*.
 ;; ============================================================
@@ -445,10 +441,34 @@
 
 
 ;; ============================================================
+;; ОБНОВЛЕНИЕ АКТИВНОСТИ КНОПОК ВЫБОРА
+;; Защищено флагом *extraction-updating-ui*
+;; ============================================================
+
+(defun extraction-update-select-buttons ()
+  (setq *extraction-updating-ui* T)
+  (if (extraction-all-layers-selected-p)
+    (progn
+      (mode_tile "btn_select_all" 1)
+      (mode_tile "btn_clear_all" 0)
+    )
+    (progn
+      (mode_tile "btn_select_all" 0)
+      (mode_tile "btn_clear_all" 1)
+    )
+  )
+  (setq *extraction-updating-ui* nil)
+)
+
+
+;; ============================================================
 ;; ПЕРЕСТРОЕНИЕ СПИСКА СЛОЁВ
+;; Защищено флагом *extraction-updating-ui*
 ;; ============================================================
 
 (defun extraction-rebuild-layer-list ( / vis keywords)
+  (setq *extraction-updating-ui* T)
+
   (setq *EXTRACTION-SELECTED-INDICES* '())
   (setq keywords '())
 
@@ -483,6 +503,8 @@
   (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
   (extraction-update-select-buttons)
+
+  (setq *extraction-updating-ui* nil)
 )
 
 
@@ -491,6 +513,8 @@
 ;; ============================================================
 
 (defun extraction-subsystem-layer-list ()
+  (setq *extraction-updating-ui* T)
+
   (setq *EXTRACTION-VISIBLE-LAYERS*
     '("Подсистема"
       "Подсистема алюминиевая"
@@ -499,6 +523,8 @@
   (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
   (extraction-update-select-buttons)
+
+  (setq *extraction-updating-ui* nil)
 )
 
 
@@ -513,10 +539,36 @@
 
 
 ;; ============================================================
+;; СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ ПОДСИСТЕМЫ
+;; Защищено флагом *extraction-updating-ui*
+;; ============================================================
+
+(defun extraction-sync-checks-from-layers ( / selected)
+  (setq *extraction-updating-ui* T)
+
+  (setq selected (extraction-selected-names))
+
+  (set_tile "chk_subsystem_1"
+    (if (member "Подсистема" selected) "1" "0"))
+
+  (set_tile "chk_subsystem_2"
+    (if (member "Подсистема алюминиевая" selected) "1" "0"))
+
+  (set_tile "chk_subsystem_3"
+    (if (member "Подсистема оцинкованная" selected) "1" "0"))
+
+  (setq *extraction-updating-ui* nil)
+)
+
+
+;; ============================================================
 ;; УСТАНОВКА ВЫДЕЛЕНИЯ СЛОЁВ
+;; Защищено флагом *extraction-updating-ui*
 ;; ============================================================
 (defun extraction-select-layers-in-list
        (layers-to-select / i item selected str after-set)
+
+  (setq *extraction-updating-ui* T)
 
   (setq selected '())
   (setq i 0)
@@ -556,11 +608,12 @@
     )
   )
 
-  (setq *extraction-syncing-layers* T)
+  ;; layer-selection-changed проверяет updating-ui и пропустит бизнес-логику
   (extraction-layer-selection-changed)
-  (setq *extraction-syncing-layers* nil)
 
   (extraction-update-select-buttons)
+
+  (setq *extraction-updating-ui* nil)
 )
 
 
@@ -572,24 +625,6 @@
   (setq selected (extraction-selected-names))
   (setq total (length *EXTRACTION-VISIBLE-LAYERS*))
   (and selected (= (length selected) total))
-)
-
-
-;; ============================================================
-;; ОБНОВЛЕНИЕ АКТИВНОСТИ КНОПОК ВЫБОРА
-;; ============================================================
-
-(defun extraction-update-select-buttons ()
-  (if (extraction-all-layers-selected-p)
-    (progn
-      (mode_tile "btn_select_all" 1)
-      (mode_tile "btn_clear_all" 0)
-    )
-    (progn
-      (mode_tile "btn_select_all" 0)
-      (mode_tile "btn_clear_all" 1)
-    )
-  )
 )
 
 
@@ -625,42 +660,17 @@
 
 
 ;; ============================================================
-;; СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ ПОДСИСТЕМЫ
-;; ============================================================
-
-(defun extraction-sync-checks-from-layers ( / selected)
-  (if *extraction-syncing-checks*
-    nil
-    (progn
-      (setq selected (extraction-selected-names))
-
-      (set_tile "chk_subsystem_1"
-        (if (member "Подсистема" selected) "1" "0"))
-
-      (set_tile "chk_subsystem_2"
-        (if (member "Подсистема алюминиевая" selected) "1" "0"))
-
-      (set_tile "chk_subsystem_3"
-        (if (member "Подсистема оцинкованная" selected) "1" "0"))
-    )
-  )
-)
-
-
-;; ============================================================
 ;; ИЗМЕНЕНИЕ ЧЕКБОКСА ПОДСИСТЕМЫ
-;; Защита от множественных модификаций тайлов через *extraction-dcl-busy*
+;; Пользовательский callback: проверяет *extraction-updating-ui*
 ;; ============================================================
 
 (defun extraction-subsystem-check-changed
        (key / val layers-to-select current-selection)
 
-  (if *extraction-dcl-busy*
+  ;; Если это программное обновление UI — пропускаем
+  (if *extraction-updating-ui*
     nil
     (progn
-      (setq *extraction-dcl-busy* T)
-      (setq *extraction-syncing-checks* T)
-
       (setq val
         (= (get_tile
              (strcat "chk_subsystem_" (itoa key))) "1"))
@@ -696,9 +706,6 @@
         (append current-selection layers-to-select))
 
       (extraction-select-layers-in-list current-selection)
-
-      (setq *extraction-syncing-checks* nil)
-      (setq *extraction-dcl-busy* nil)
     )
   )
 )
@@ -706,94 +713,89 @@
 
 ;; ============================================================
 ;; ПЕРЕКЛЮЧЕНИЕ ЗАДАЧИ И ВОССТАНОВЛЕНИЕ СЛОЁВ
+;; Пользовательский callback: проверяет *extraction-updating-ui*
 ;; ============================================================
 (defun extraction-toggle-subsystem-layers ( / layers-to-select)
-  (cond
-    ((= (get_tile "rb_task_subsystem") "1")
-     (mode_tile "box_subsystem_layers" 0)
-     (mode_tile "chk_subsystem_1" 0)
-     (mode_tile "chk_subsystem_2" 0)
-     (mode_tile "chk_subsystem_3" 0)
 
-     (extraction-rebuild-layer-list)
+  ;; Если это программное обновление UI — пропускаем
+  (if *extraction-updating-ui*
+    nil
+    (progn
+      (setq *extraction-updating-ui* T)
 
-     (setq layers-to-select *EXTRACTION-LAST-SUBSYSTEM-LAYERS*)
+      ;; Включение/выключение блока подсистемы
+      (cond
+        ((= (get_tile "rb_task_subsystem") "1")
+         (mode_tile "box_subsystem_layers" 0)
+         (mode_tile "chk_subsystem_1" 0)
+         (mode_tile "chk_subsystem_2" 0)
+         (mode_tile "chk_subsystem_3" 0)
+        )
+        (T
+         (mode_tile "box_subsystem_layers" 1)
+         (mode_tile "chk_subsystem_1" 1)
+         (mode_tile "chk_subsystem_2" 1)
+         (mode_tile "chk_subsystem_3" 1)
+        )
+      )
 
-     (if (null layers-to-select)
-       (progn
-         (setq layers-to-select '())
-         (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-           (setq layers-to-select (cons "Подсистема" layers-to-select)))
-         (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-           (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
-         (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-           (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
-       )
-     )
+      (setq *extraction-updating-ui* nil)
 
-     (extraction-select-layers-in-list layers-to-select)
-     (extraction-sync-checks-from-layers)
-    )
+      ;; Перестроение списка и восстановление выбора
+      (cond
+        ((= (get_tile "rb_task_subsystem") "1")
+         (extraction-rebuild-layer-list)
 
-    ((= (get_tile "rb_task_fasonka") "1")
-     (mode_tile "box_subsystem_layers" 1)
-     (mode_tile "chk_subsystem_1" 1)
-     (mode_tile "chk_subsystem_2" 1)
-     (mode_tile "chk_subsystem_3" 1)
+         (setq layers-to-select *EXTRACTION-LAST-SUBSYSTEM-LAYERS*)
 
-     (extraction-rebuild-layer-list)
+         (if (null layers-to-select)
+           (progn
+             (setq layers-to-select '())
+             (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+               (setq layers-to-select (cons "Подсистема" layers-to-select)))
+             (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+               (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
+             (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+               (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
+           )
+         )
 
-     (if *EXTRACTION-LAST-FASONKA-LAYERS*
-       (extraction-select-layers-in-list *EXTRACTION-LAST-FASONKA-LAYERS*)
-     )
-    )
+         (extraction-select-layers-in-list layers-to-select)
+         (extraction-sync-checks-from-layers)
+        )
 
-    ((= (get_tile "rb_task_zapolnenie") "1")
-     (mode_tile "box_subsystem_layers" 1)
-     (mode_tile "chk_subsystem_1" 1)
-     (mode_tile "chk_subsystem_2" 1)
-     (mode_tile "chk_subsystem_3" 1)
+        ((= (get_tile "rb_task_fasonka") "1")
+         (extraction-rebuild-layer-list)
+         (if *EXTRACTION-LAST-FASONKA-LAYERS*
+           (extraction-select-layers-in-list *EXTRACTION-LAST-FASONKA-LAYERS*)
+         )
+        )
 
-     (extraction-rebuild-layer-list)
+        ((= (get_tile "rb_task_zapolnenie") "1")
+         (extraction-rebuild-layer-list)
+         (if *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*
+           (extraction-select-layers-in-list *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*)
+         )
+        )
 
-     (if *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*
-       (extraction-select-layers-in-list *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*)
-     )
-    )
+        ((= (get_tile "rb_task_cladding") "1")
+         (extraction-rebuild-layer-list)
+         (if *EXTRACTION-LAST-CLADDING-LAYERS*
+           (extraction-select-layers-in-list *EXTRACTION-LAST-CLADDING-LAYERS*)
+         )
+        )
 
-    ((= (get_tile "rb_task_cladding") "1")
-     (mode_tile "box_subsystem_layers" 1)
-     (mode_tile "chk_subsystem_1" 1)
-     (mode_tile "chk_subsystem_2" 1)
-     (mode_tile "chk_subsystem_3" 1)
+        ((= (get_tile "rb_task_vitrazh") "1")
+         (extraction-rebuild-layer-list)
+         (if *EXTRACTION-LAST-VITRAZH-LAYERS*
+           (extraction-select-layers-in-list *EXTRACTION-LAST-VITRAZH-LAYERS*)
+         )
+        )
 
-     (extraction-rebuild-layer-list)
-
-     (if *EXTRACTION-LAST-CLADDING-LAYERS*
-       (extraction-select-layers-in-list *EXTRACTION-LAST-CLADDING-LAYERS*)
-     )
-    )
-
-    ((= (get_tile "rb_task_vitrazh") "1")
-     (mode_tile "box_subsystem_layers" 1)
-     (mode_tile "chk_subsystem_1" 1)
-     (mode_tile "chk_subsystem_2" 1)
-     (mode_tile "chk_subsystem_3" 1)
-
-     (extraction-rebuild-layer-list)
-
-     (if *EXTRACTION-LAST-VITRAZH-LAYERS*
-       (extraction-select-layers-in-list *EXTRACTION-LAST-VITRAZH-LAYERS*)
-     )
-    )
-
-    (T
-     (mode_tile "box_subsystem_layers" 1)
-     (mode_tile "chk_subsystem_1" 1)
-     (mode_tile "chk_subsystem_2" 1)
-     (mode_tile "chk_subsystem_3" 1)
-
-     (extraction-rebuild-layer-list)
+        (T
+         (extraction-rebuild-layer-list)
+        )
+      )
     )
   )
 )
@@ -801,40 +803,36 @@
 
 ;; ============================================================
 ;; ИЗМЕНЕНИЕ ВЫБОРА В СПИСКЕ
-;; Защита от вложенных вызовов через *extraction-in-layer-changed*
+;; Пользовательский callback: проверяет *extraction-updating-ui*
 ;; ============================================================
 (defun extraction-layer-selection-changed ( / selected)
-  (if *extraction-in-layer-changed*
+
+  ;; Если это программное обновление UI — пропускаем бизнес-логику
+  (if *extraction-updating-ui*
     nil
     (progn
-      (setq *extraction-in-layer-changed* T)
-
       (setq selected (extraction-selected-names))
       (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
-      (if (not *extraction-syncing-layers*)
-        (cond
-          ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-           (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
-           (extraction-sync-checks-from-layers))
+      (cond
+        ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+         (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+         (extraction-sync-checks-from-layers))
 
-          ((eq *EXTRACTION-TASK-ID* 'FASONKA)
-           (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected))
+        ((eq *EXTRACTION-TASK-ID* 'FASONKA)
+         (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected))
 
-          ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
-           (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected))
+        ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
+         (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected))
 
-          ((eq *EXTRACTION-TASK-ID* 'CLADDING)
-           (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected))
+        ((eq *EXTRACTION-TASK-ID* 'CLADDING)
+         (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected))
 
-          ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
-           (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected))
-        )
+        ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
+         (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected))
       )
 
       (extraction-update-select-buttons)
-
-      (setq *extraction-in-layer-changed* nil)
     )
   )
 )
@@ -1139,14 +1137,13 @@
 
 ;; ============================================================
 ;; ФИЛЬТРЫ
-;; Защита от множественных модификаций тайлов через *extraction-dcl-busy*
+;; Пользовательские callback'и: проверяют *extraction-updating-ui*
 ;; ============================================================
 
 (defun extraction-filter-facades ()
-  (if *extraction-dcl-busy*
+  (if *extraction-updating-ui*
     nil
     (progn
-      (setq *extraction-dcl-busy* T)
       (setq *EXTRACTION-FILTER-FACADES*
         (= (get_tile "chk_filter_facades") "1"))
 
@@ -1163,18 +1160,15 @@
           (extraction-select-layers-in-list
             *EXTRACTION-LAST-FASONKA-LAYERS*))
       )
-
-      (setq *extraction-dcl-busy* nil)
     )
   )
 )
 
 
 (defun extraction-filter-vitrazh ()
-  (if *extraction-dcl-busy*
+  (if *extraction-updating-ui*
     nil
     (progn
-      (setq *extraction-dcl-busy* T)
       (setq *EXTRACTION-FILTER-VITRAZH*
         (= (get_tile "chk_filter_vitrazh") "1"))
 
@@ -1191,18 +1185,15 @@
           (extraction-select-layers-in-list
             *EXTRACTION-LAST-FASONKA-LAYERS*))
       )
-
-      (setq *extraction-dcl-busy* nil)
     )
   )
 )
 
 
 (defun extraction-filter-fonar ()
-  (if *extraction-dcl-busy*
+  (if *extraction-updating-ui*
     nil
     (progn
-      (setq *extraction-dcl-busy* T)
       (setq *EXTRACTION-FILTER-FONAR*
         (= (get_tile "chk_filter_fonar") "1"))
 
@@ -1219,8 +1210,6 @@
           (extraction-select-layers-in-list
             *EXTRACTION-LAST-FASONKA-LAYERS*))
       )
-
-      (setq *extraction-dcl-busy* nil)
     )
   )
 )
@@ -1249,10 +1238,7 @@
     )
 
     ;; --- Сброс всех флагов — ВСЕГДА ---
-    (setq *extraction-syncing-layers* nil)
-    (setq *extraction-syncing-checks* nil)
-    (setq *extraction-in-layer-changed* nil)
-    (setq *extraction-dcl-busy* nil)
+    (setq *extraction-updating-ui* nil)
 
     ;; --- Выгрузка DCL ---
     ;; Если мы ВНУТРИ start_dialog (в callback) — НЕ выгружаем,
@@ -1333,6 +1319,11 @@
           (if (new_dialog "extraction_dialog" *EXTRACTION-DCL-ID*)
             (progn
 
+              ;; --- Начальная инициализация UI ---
+              ;; Оборачиваем в updating-ui, чтобы set_tile
+              ;; не вызывали callback'и
+              (setq *extraction-updating-ui* T)
+
               (set_tile "rb_detail"
                 (if (= *EXTRACTION-LAST-REPORT-MODE* "DETAIL") "1" "0"))
               (set_tile "rb_summary"
@@ -1380,28 +1371,30 @@
                   (mode_tile "chk_subsystem_1" 0)
                   (mode_tile "chk_subsystem_2" 0)
                   (mode_tile "chk_subsystem_3" 0)
-
-                  (extraction-rebuild-layer-list)
-
-                  (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-                    (extraction-select-layers-in-list
-                      *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-
-                  (extraction-sync-checks-from-layers)
                 )
                 (progn
                   (mode_tile "box_subsystem_layers" 1)
                   (mode_tile "chk_subsystem_1" 1)
                   (mode_tile "chk_subsystem_2" 1)
                   (mode_tile "chk_subsystem_3" 1)
-
-                  (extraction-rebuild-layer-list)
-
-                  (if *EXTRACTION-LAST-FASONKA-LAYERS*
-                    (extraction-select-layers-in-list
-                      *EXTRACTION-LAST-FASONKA-LAYERS*))
                 )
               )
+
+              (setq *extraction-updating-ui* nil)
+
+              ;; --- Заполнение списка слоёв и восстановление выбора ---
+              (extraction-rebuild-layer-list)
+
+              (if (eq *EXTRACTION-LAST-TASK* 'SUBSYSTEM)
+                (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
+                  (extraction-select-layers-in-list
+                    *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
+                (if *EXTRACTION-LAST-FASONKA-LAYERS*
+                  (extraction-select-layers-in-list
+                    *EXTRACTION-LAST-FASONKA-LAYERS*))
+              )
+
+              (extraction-sync-checks-from-layers)
 
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
@@ -1500,8 +1493,6 @@
               )
 
               ;; --- Гарантированная выгрузка на штатном пути ---
-              ;; Защита от двойного unload_dialog:
-              ;; если *error* уже выгрузил — не выгружаем повторно
               (if (and *EXTRACTION-DCL-ID*
                        (numberp *EXTRACTION-DCL-ID*)
                        (>= *EXTRACTION-DCL-ID* 0))
@@ -1514,7 +1505,6 @@
             ;; --- Конец progn успешной ветки new_dialog ---
 
             (progn
-              ;; Защита от двойного unload_dialog
               (if (and *EXTRACTION-DCL-ID*
                        (numberp *EXTRACTION-DCL-ID*)
                        (>= *EXTRACTION-DCL-ID* 0))
