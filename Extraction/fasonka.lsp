@@ -104,20 +104,10 @@
                 (vla-SetColumnWidth tbl 3 25.0)
                 (vla-SetColumnWidth tbl 4 30.0)
 
-                (vla-MergeCells tbl 0 0 0 4)
-                (vla-SetText tbl 0 0 "{\\LФасонное железо}")
+                (ts-ac-title tbl 0 "Фасонное железо" 5)
 
-                (vla-SetText tbl 1 0 "№")
-                (vla-SetText tbl 1 1 "Тип фасонки")
-                (vla-SetText tbl 1 2 "Длина, мм")
-                (vla-SetText tbl 1 3 "Кол-во, шт.")
-                (vla-SetText tbl 1 4 "Сумма, м.п.")
-
-                (vla-SetCellAlignment tbl 1 0 5)
-                (vla-SetCellAlignment tbl 1 1 5)
-                (vla-SetCellAlignment tbl 1 2 5)
-                (vla-SetCellAlignment tbl 1 3 5)
-                (vla-SetCellAlignment tbl 1 4 5)
+                (ts-ac-header tbl 1
+                  '("№" "Тип фасонки" "Длина, мм" "Кол-во, шт." "Сумма, м.п."))
 
                 (setq row 2)
 
@@ -158,12 +148,8 @@
                       (setq gName    (nth 2 item))
                       (setq totalSum (nth 3 item))
 
-                      (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0
-                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa gIdx) "}"))
-                      (vla-SetCellAlignment tbl row 0 5)
-                      (vla-SetText tbl row 1 (strcat "{\\L" gName "}"))
-                      (vla-SetCellAlignment tbl row 1 4)
+                      (ts-ac-subtotal tbl row gIdx
+                        (strcat "{\\L" gName "}") 1 3)
                       (vla-SetText tbl row 4 (rtos totalSum 2 2))
                       (vla-SetCellAlignment tbl row 4 5)
 
@@ -439,7 +425,7 @@
           (if create-table
             (if (= report-type "DETAIL")
               (fasonka-create-table-detail report-data)
-              (tbl-create-report report-type report-data)
+              (tbl-create-summary report-type report-data)
             )
           )
         )
