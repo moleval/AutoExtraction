@@ -76,6 +76,10 @@
   (setq *EXTRACTION-MODULES-LOADED* nil)
 )
 
+(if (not (boundp '*extraction-list-open*))
+  (setq *extraction-list-open* nil)
+)
+
 ;; ============================================================
 ;; Слои по умолчанию для каждой задачи
 ;; ============================================================
@@ -145,6 +149,24 @@
   (reverse out)
 )
 
+;; ============================================================
+;; БЕЗОПАСНОЕ ЗАПОЛНЕНИЕ СПИСКА
+;; Гарантирует, что end_list будет вызван даже при ошибке
+;; ============================================================
+
+(defun extraction-safe-fill-list (tile_name items / item)
+  (setq *extraction-list-open* T)
+  (start_list tile_name)
+  (if (listp items)
+    (foreach item items
+      (if (= (type item) 'STR)
+        (add_list item)
+      )
+    )
+  )
+  (end_list)
+  (setq *extraction-list-open* nil)
+)
 
 ;; ============================================================
 ;; ОЧИСТКА СПИСКА СЛОЁВ ДЛЯ РАСКРОЯ
@@ -444,9 +466,7 @@
           '()))
       '(lambda (a b) (< (strcase a) (strcase b)))))
 
-  (start_list "lst_layers")
-  (mapcar 'add_list *EXTRACTION-VISIBLE-LAYERS*)
-  (end_list)
+  (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
   (extraction-update-select-buttons)
 )
@@ -462,9 +482,7 @@
       "Подсистема алюминиевая"
       "Подсистема оцинкованная"))
 
-  (start_list "lst_layers")
-  (mapcar 'add_list *EXTRACTION-VISIBLE-LAYERS*)
-  (end_list)
+  (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
   (extraction-update-select-buttons)
 )
@@ -527,9 +545,7 @@
 
   (if (/= str after-set)
     (progn
-      (start_list "lst_layers")
-      (mapcar 'add_list *EXTRACTION-VISIBLE-LAYERS*)
-      (end_list)
+      (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
       (set_tile "lst_layers" str)
       (setq after-set (get_tile "lst_layers"))
     )
@@ -1180,6 +1196,13 @@
       (progn
         (unload_dialog *EXTRACTION-DCL-ID*)
         (setq *EXTRACTION-DCL-ID* nil)
+      )
+    )
+    ;; Если список остался открытым — закрыть
+    (if *extraction-list-open*
+      (progn
+        (vl-catch-all-apply 'end_list '())
+        (setq *extraction-list-open* nil)
       )
     )
     (setq *extraction-syncing-layers* nil)
