@@ -186,35 +186,16 @@
 ;; ts-ac-total    Ч общий итог (объединение + подчЄркивание)
 ;; ============================================================
 
-;; ------------------------------------------------------------
-;; ts-ac-title Ч заголовок таблицы
-;;
-;; ќбъедин€ет все колонки строки, устанавливает подчЄркнутый
-;; текст, центрирует.
-;;
-;; ¬ход:
-;;   tbl    Ч VLA-объект таблицы
-;;   row    Ч номер строки (обычно 0)
-;;   text   Ч текст заголовка (без форматировани€)
-;;   nCols  Ч количество колонок в таблице
-;; ------------------------------------------------------------
+;; ============================================================
+;; ќ‘ќ–ћЋ≈Ќ»≈ “јЅЋ»÷ Ч единый визуальный стандарт
+;; ============================================================
+
 (defun ts-ac-title (tbl row text nCols)
   (vla-MergeCells tbl row row 0 (1- nCols))
   (vla-SetText tbl row 0 (strcat "{\\L" text "}"))
   (vla-SetCellAlignment tbl row 0 5)
 )
 
-;; ------------------------------------------------------------
-;; ts-ac-header Ч шапка таблицы
-;;
-;; «аполн€ет €чейки строки текстами из списка headers,
-;; центрирует каждую €чейку.
-;;
-;; ¬ход:
-;;   tbl     Ч VLA-объект таблицы
-;;   row     Ч номер строки (обычно 1)
-;;   headers Ч список строк, например '("є" "“ип" " ол-во")
-;; ------------------------------------------------------------
 (defun ts-ac-header (tbl row headers / i h)
   (setq i 0)
   (foreach h headers
@@ -224,47 +205,23 @@
   )
 )
 
-;; ------------------------------------------------------------
-;; ts-ac-subtotal Ч подитог группы
-;;
-;; ќбъедин€ет колонки от mergeStart до mergeEnd, устанавливает
-;; жирный номер группы в колонке 0 и подчЄркнутое им€ группы
-;; в колонке mergeStart.
-;;
-;; ¬ход:
-;;   tbl        Ч VLA-объект таблицы
-;;   row        Ч номер строки подитога
-;;   groupIdx   Ч номер группы (целое число)
-;;   groupName  Ч им€ группы (строка)
-;;   mergeStart Ч перва€ колонка объединени€ (обычно 1)
-;;   mergeEnd   Ч последн€€ колонка объединени€ (обычно 3)
-;; ------------------------------------------------------------
-(defun ts-ac-subtotal (tbl row groupIdx groupName mergeStart mergeEnd)
+(defun ts-ac-subtotal (tbl row groupIdx labelText mergeStart mergeEnd)
   (vla-MergeCells tbl row row mergeStart mergeEnd)
-  (vla-SetText tbl row 0
-    (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
-  (vla-SetCellAlignment tbl row 0 5)
-  (vla-SetText tbl row mergeStart (strcat "{\\L" groupName "}"))
+  (if groupIdx
+    (progn
+      (vla-SetText tbl row 0
+        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
+      (vla-SetCellAlignment tbl row 0 5))
+    (vla-SetText tbl row 0 "")
+  )
+  (vla-SetText tbl row mergeStart labelText)
   (vla-SetCellAlignment tbl row mergeStart 4)
 )
 
-;; ------------------------------------------------------------
-;; ts-ac-total Ч общий итог
-;;
-;; ќбъедин€ет колонки от mergeStart до mergeEnd, устанавливает
-;; подчЄркнутый текст метки.
-;;
-;; ¬ход:
-;;   tbl        Ч VLA-объект таблицы
-;;   row        Ч номер строки итога
-;;   label      Ч текст метки (например "»того по всем позици€м:")
-;;   mergeStart Ч перва€ колонка объединени€ (обычно 0)
-;;   mergeEnd   Ч последн€€ колонка объединени€ (обычно 3)
-;; ------------------------------------------------------------
-(defun ts-ac-total (tbl row label mergeStart mergeEnd)
+(defun ts-ac-total (tbl row labelText mergeStart mergeEnd align)
   (vla-MergeCells tbl row row mergeStart mergeEnd)
-  (vla-SetText tbl row 0 (strcat "{\\L" label "}"))
-  (vla-SetCellAlignment tbl row 0 5)
+  (vla-SetText tbl row 0 labelText)
+  (vla-SetCellAlignment tbl row 0 align)
 )
 
 (princ "\nTABLE-UTILS.LSP загружен.")

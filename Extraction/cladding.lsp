@@ -449,6 +449,27 @@
   items
 )
 
+;; ---------- равномерное распределение по строкам ----------
+(defun cl-partition-flat (items idealRows / total numTables rowsPerTable
+                            chunks current currentCount item)
+  (setq total (length items))
+  (setq numTables (fix (+ (/ (float total) idealRows) 0.5)))
+  (if (< numTables 1) (setq numTables 1))
+  (setq rowsPerTable (fix (+ (/ (float total) numTables) 0.5)))
+  (if (< rowsPerTable 1) (setq rowsPerTable 1))
+  (setq chunks '() current '() currentCount 0)
+  (foreach item items
+    (if (and (>= currentCount rowsPerTable)
+             (eq (car item) 'data))
+      (progn
+        (setq chunks (append chunks (list current)))
+        (setq current '() currentCount 0)))
+    (setq current (append current (list item)))
+    (setq currentCount (1+ currentCount)))
+  (if current (setq chunks (append chunks (list current))))
+  chunks
+)
+
 ;; ---------- сборка кусков ----------
 (defun cl-build-block-units (data idealRows / items chunks ch result)
   (setq items (cl-build-flat-items data))
@@ -591,9 +612,7 @@
                       (setq row (1+ row)))))
                 (if is-last
                   (progn
-                    (vla-MergeCells tbl row row 0 4)
-                    (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
-                    (vla-SetCellAlignment tbl row 0 4)
+                    (ts-ac-total tbl row "           {\\LИтого по всем позициям:}" 0 4 4)
                     (vla-SetText tbl row 5 (itoa total-cnt))
                     (vla-SetCellAlignment tbl row 5 5)
                     (vla-SetText tbl row 6
@@ -675,7 +694,7 @@
                 (vla-SetCellAlignment tbl row 3 5)
                 (setq row (1+ row)))
               (vla-MergeCells tbl row row 0 1)
-              (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
+              (vla-SetText tbl row 0 "        {\\LИтого по всем позициям:}")
               (vla-SetCellAlignment tbl row 0 4)
               (vla-SetText tbl row 2 (itoa total-cnt))
               (vla-SetCellAlignment tbl row 2 5)
@@ -1051,16 +1070,8 @@
       (vla-SetColumnWidth tbl 1 90.0)
       (vla-SetColumnWidth tbl 2 30.0)
       (vla-SetColumnWidth tbl 3 35.0)
-      (vla-MergeCells tbl 0 0 0 3)
-      (vla-SetText tbl 0 0 "{\\LОблицовка (полилинии)}")
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Слой")
-      (vla-SetText tbl 1 2 "Кол-во, шт.")
-      (vla-SetText tbl 1 3 "Площадь, м2")
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
+      (ts-ac-title tbl 0 "Облицовка (полилинии)" 4)
+      (ts-ac-header tbl 1 '("№" "Слой" "Кол-во, шт." "Площадь, м2"))
       (setq row 2 total-cnt 0 total-area 0.0)
       (foreach rec data
         (setq total-cnt (+ total-cnt (nth 5 rec)))
@@ -1074,12 +1085,10 @@
         (vla-SetCellAlignment tbl row 2 5)
         (vla-SetCellAlignment tbl row 3 5)
         (setq row (1+ row)))
-      (vla-MergeCells tbl row row 0 1)
-      (vla-SetText tbl row 0 "{\\LИтого по всем позициям:}")
+      (ts-ac-total tbl row "{\\LИтого по всем позициям:}" 0 1 5)
       (vla-SetText tbl row 2 (itoa total-cnt))
-      (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
-      (vla-SetCellAlignment tbl row 0 5)
       (vla-SetCellAlignment tbl row 2 5)
+      (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
       (vla-SetCellAlignment tbl row 3 5)
       (vla-update tbl)
       (setvar "CMDECHO" 1)
@@ -1152,20 +1161,9 @@
                 (vla-SetColumnWidth tbl 3 30.0)
                 (vla-SetColumnWidth tbl 4 25.0)
                 (vla-SetColumnWidth tbl 5 30.0)
-                (vla-MergeCells tbl 0 0 0 5)
-                (vla-SetText tbl 0 0 "{\\LОблицовка (полилинии)}")
-                (vla-SetText tbl 1 0 "№")
-                (vla-SetText tbl 1 1 "Слой")
-                (vla-SetText tbl 1 2 "Высота, мм")
-                (vla-SetText tbl 1 3 "Ширина, мм")
-                (vla-SetText tbl 1 4 "Кол-во, шт.")
-                (vla-SetText tbl 1 5 "Площадь, м2")
-                (vla-SetCellAlignment tbl 1 0 5)
-                (vla-SetCellAlignment tbl 1 1 5)
-                (vla-SetCellAlignment tbl 1 2 5)
-                (vla-SetCellAlignment tbl 1 3 5)
-                (vla-SetCellAlignment tbl 1 4 5)
-                (vla-SetCellAlignment tbl 1 5 5)
+                (ts-ac-title tbl 0 "Облицовка (полилинии)" 6)
+                (ts-ac-header tbl 1
+                  '("№" "Слой" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
                 (setq row 2)
                 (foreach item items
                   (if (eq (car item) 'data)
@@ -1197,13 +1195,8 @@
                       (setq layer (nth 2 item))
                       (setq subCnt (nth 3 item))
                       (setq subArea (nth 4 item))
-                      (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0
-                        (strcat "{\\fArial|b1|i0|c0|p34;"
-                                (itoa (1+ layerIdx)) "}"))
-                      (vla-SetCellAlignment tbl row 0 5)
-                      (vla-SetText tbl row 1 (strcat "   Итого: " layer))
-                      (vla-SetCellAlignment tbl row 1 4)
+                      (ts-ac-subtotal tbl row (1+ layerIdx)
+                        (strcat "   Итого: " layer) 1 3)
                       (vla-SetText tbl row 4 (itoa subCnt))
                       (vla-SetCellAlignment tbl row 4 5)
                       (vla-SetText tbl row 5
@@ -1212,9 +1205,7 @@
                       (setq row (1+ row)))))
                 (if is-last
                   (progn
-                    (vla-MergeCells tbl row row 0 3)
-                    (vla-SetText tbl row 0 "      {\\LИтого по всем позициям:}")
-                    (vla-SetCellAlignment tbl row 0 4)
+                    (ts-ac-total tbl row "           {\\LИтого по всем позициям:}" 0 3 4)
                     (vla-SetText tbl row 4 (itoa total-cnt))
                     (vla-SetCellAlignment tbl row 4 5)
                     (vla-SetText tbl row 5
