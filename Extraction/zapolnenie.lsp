@@ -332,6 +332,13 @@
           (setq col0Width (max 15.0 (* (+ maxNumLen 1) 3.5)))
           (setq col1Width (max 75.0 (* maxNameLen 3.0)))
 
+          (setq total-cnt 0 total-area 0.0)
+          (foreach item data
+            (setq total-cnt (+ total-cnt (cadddr item)))
+            (setq total-area (+ total-area
+              (zapolnenie-round2
+                (/ (* (cadr item) (caddr item) (cadddr item)) 1000000.0)))))
+
           (setq units (zp-build-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
           (setq chunk-idx 0 nCols 6)
@@ -341,6 +348,7 @@
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
             (setq nRows (+ 2 (car chunk)))
+            (if is-last (setq nRows (1+ nRows)))
             (setq items (cdr chunk))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
@@ -356,22 +364,10 @@
                 (vla-SetColumnWidth tbl 4 30.0)
                 (vla-SetColumnWidth tbl 5 35.0)
 
-                (vla-MergeCells tbl 0 0 0 5)
-                (vla-SetText tbl 0 0 "{\\LЗаполнение}")
+                (ts-ac-title tbl 0 "Заполнение" 6)
 
-                (vla-SetText tbl 1 0 "№")
-                (vla-SetText tbl 1 1 "Тип")
-                (vla-SetText tbl 1 2 "Высота, мм")
-                (vla-SetText tbl 1 3 "Ширина, мм")
-                (vla-SetText tbl 1 4 "Кол-во, шт.")
-                (vla-SetText tbl 1 5 "Площадь, м2")
-
-                (vla-SetCellAlignment tbl 1 0 5)
-                (vla-SetCellAlignment tbl 1 1 5)
-                (vla-SetCellAlignment tbl 1 2 5)
-                (vla-SetCellAlignment tbl 1 3 5)
-                (vla-SetCellAlignment tbl 1 4 5)
-                (vla-SetCellAlignment tbl 1 5 5)
+                (ts-ac-header tbl 1
+                  '("№" "Тип" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
 
                 (setq row 2)
 
@@ -414,11 +410,8 @@
                       (setq grpCnt  (nth 3 item))
                       (setq grpArea (nth 4 item))
 
-                      (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0
-                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
-                      (vla-SetText tbl row 1
-                        (strcat "   {\\L" grpName "}"))
+                      (ts-ac-subtotal tbl row groupIdx
+                        (strcat "   {\\L" grpName "}") 1 3)
                       (vla-SetText tbl row 4 (itoa grpCnt))
                       (vla-SetText tbl row 5
                         (zapolnenie-format-area grpArea))
@@ -429,6 +422,16 @@
                       (vla-SetCellAlignment tbl row 5 5)
 
                       (setq row (1+ row)))))
+
+                (if is-last
+                  (progn
+                    (ts-ac-total tbl row
+                      "           {\\LИтого по всем позициям:}" 0 3 4)
+                    (vla-SetText tbl row 4 (itoa total-cnt))
+                    (vla-SetCellAlignment tbl row 4 5)
+                    (vla-SetText tbl row 5
+                      (zapolnenie-format-area total-area))
+                    (vla-SetCellAlignment tbl row 5 5)))
 
                 (vla-update tbl)
                 (princ (strcat "\nТаблица Заполнения "
@@ -465,18 +468,9 @@
       (vla-SetColumnWidth tbl 2 30.0)
       (vla-SetColumnWidth tbl 3 35.0)
 
-      (vla-MergeCells tbl 0 0 0 3)
-      (vla-SetText tbl 0 0 "{\\LЗаполнение}")
+      (ts-ac-title tbl 0 "Заполнение" 4)
 
-      (vla-SetText tbl 1 0 "№")
-      (vla-SetText tbl 1 1 "Тип")
-      (vla-SetText tbl 1 2 "Кол-во, шт.")
-      (vla-SetText tbl 1 3 "Площадь, м2")
-
-      (vla-SetCellAlignment tbl 1 0 5)
-      (vla-SetCellAlignment tbl 1 1 5)
-      (vla-SetCellAlignment tbl 1 2 5)
-      (vla-SetCellAlignment tbl 1 3 5)
+      (ts-ac-header tbl 1 '("№" "Тип" "Кол-во, шт." "Площадь, м2"))
 
       (setq row 2 total-cnt 0 total-area 0.0)
 
@@ -503,8 +497,7 @@
 
         (setq row (1+ row)))
 
-      (vla-MergeCells tbl row row 0 1)
-      (vla-SetText tbl row 0 "{   \\LИтого по всем позициям:}")
+      (ts-ac-total tbl row "{   \\LИтого по всем позициям:}" 0 1 5)
       (vla-SetText tbl row 2 (itoa total-cnt))
       (vla-SetText tbl row 3 (zapolnenie-format-area total-area))
 
