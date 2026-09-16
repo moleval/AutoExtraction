@@ -76,8 +76,60 @@
   chunks
 )
 
+;; ============================================================
+;; ОФОРМЛЕНИЕ ТАБЛИЦ — единый визуальный стандарт
+;;
+;; Четыре функции покрывают все паттерны оформления,
+;; используемые в модулях Облицовка, Подсистема, Заполнение,
+;; Фасонка. Модуль-потребитель вызывает эти функции вместо
+;; инлайн-вызовов vla-MergeCells / vla-SetText / vla-SetCellAlignment.
+;;
+;; ts-ac-title    — заголовок таблицы (объединение + подчёркивание)
+;; ts-ac-header   — шапка (заполнение + центрирование)
+;; ts-ac-subtotal — подитог группы (жирный номер + текст)
+;; ts-ac-total    — общий итог (объединение + текст)
+;; ============================================================
+
+(defun ts-ac-title (tbl row text nCols)
+  (vla-MergeCells tbl row row 0 (1- nCols))
+  (vla-SetText tbl row 0 (strcat "{\\L" text "}"))
+  (vla-SetCellAlignment tbl row 0 5)
+)
+
+(defun ts-ac-header (tbl row headers / i h)
+  (setq i 0)
+  (foreach h headers
+    (vla-SetText tbl row i h)
+    (vla-SetCellAlignment tbl row i 5)
+    (setq i (1+ i))
+  )
+)
+
+(defun ts-ac-subtotal (tbl row groupIdx labelText mergeStart mergeEnd)
+  (vla-MergeCells tbl row row mergeStart mergeEnd)
+  (if groupIdx
+    (progn
+      (vla-SetText tbl row 0
+        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
+      (vla-SetCellAlignment tbl row 0 5))
+    (vla-SetText tbl row 0 "")
+  )
+  (vla-SetText tbl row mergeStart labelText)
+  (vla-SetCellAlignment tbl row mergeStart 4)
+)
+
+(defun ts-ac-total (tbl row labelText mergeStart mergeEnd align)
+  (vla-MergeCells tbl row row mergeStart mergeEnd)
+  (vla-SetText tbl row 0 labelText)
+  (vla-SetCellAlignment tbl row 0 align)
+)
+
+;; ============================================================
+;; SUMMARY Фасонки
+;; ============================================================
+
 ;; ------------------------------------------------------------
-;; Функция заполнения SUMMARY-таблицы Фасонки
+;; Заполнение SUMMARY-таблицы Фасонки
 ;; ------------------------------------------------------------
 (defun tbl-fill-summary (table groups / row i name count sum totalCount totalSum)
   (vla-SetColumnWidth table 0 10.0)
@@ -116,12 +168,10 @@
 
 ;; ------------------------------------------------------------
 ;; Создание SUMMARY-таблицы Фасонки
-;; (переименована из tbl-create-report, DETAIL-ветка удалена)
 ;; ------------------------------------------------------------
 (defun tbl-create-summary (report-type report-data / acad doc space pt pt_wcs
                           tableIndex createdTables
                           tableObj neededRows oldEcho)
-
   (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
   (if pt
     (progn
@@ -129,13 +179,10 @@
             doc (vla-get-activedocument acad)
             space (vla-get-modelspace doc)
             pt_wcs (trans pt 1 0))
-
       (setq oldEcho (getvar "CMDECHO"))
       (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
       (vla-startundomark doc)
-
       (setq createdTables '() tableIndex 0)
-
       (setq neededRows (+ 3 (length report-data)))
       (setq tableObj (vl-catch-all-apply 'vla-addtable
         (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
@@ -150,7 +197,6 @@
           (princ "\nТаблица SUMMARY создана.")
         )
       )
-
       (vla-endundomark doc)
       (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
       (if createdTables
@@ -160,58 +206,6 @@
     )
     (princ "\nТочка не указана.")
   )
-)
-
-;; ============================================================
-;; ОФОРМЛЕНИЕ ТАБЛИЦ — единый визуальный стандарт
-;;
-;; Четыре функции покрывают все паттерны оформления,
-;; используемые в модулях Облицовка, Подсистема, Заполнение,
-;; Фасонка. Модуль-потребитель вызывает эти функции вместо
-;; инлайн-вызовов vla-MergeCells / vla-SetText / vla-SetCellAlignment.
-;;
-;; ts-ac-title    — заголовок таблицы (объединение + подчёркивание)
-;; ts-ac-header   — шапка (заполнение + центрирование)
-;; ts-ac-subtotal — подитог группы (жирный номер + подчёркивание)
-;; ts-ac-total    — общий итог (объединение + подчёркивание)
-;; ============================================================
-
-;; ============================================================
-;; ОФОРМЛЕНИЕ ТАБЛИЦ — единый визуальный стандарт
-;; ============================================================
-
-(defun ts-ac-title (tbl row text nCols)
-  (vla-MergeCells tbl row row 0 (1- nCols))
-  (vla-SetText tbl row 0 (strcat "{\\L" text "}"))
-  (vla-SetCellAlignment tbl row 0 5)
-)
-
-(defun ts-ac-header (tbl row headers / i h)
-  (setq i 0)
-  (foreach h headers
-    (vla-SetText tbl row i h)
-    (vla-SetCellAlignment tbl row i 5)
-    (setq i (1+ i))
-  )
-)
-
-(defun ts-ac-subtotal (tbl row groupIdx labelText mergeStart mergeEnd)
-  (vla-MergeCells tbl row row mergeStart mergeEnd)
-  (if groupIdx
-    (progn
-      (vla-SetText tbl row 0
-        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
-      (vla-SetCellAlignment tbl row 0 5))
-    (vla-SetText tbl row 0 "")
-  )
-  (vla-SetText tbl row mergeStart labelText)
-  (vla-SetCellAlignment tbl row mergeStart 4)
-)
-
-(defun ts-ac-total (tbl row labelText mergeStart mergeEnd align)
-  (vla-MergeCells tbl row row mergeStart mergeEnd)
-  (vla-SetText tbl row 0 labelText)
-  (vla-SetCellAlignment tbl row 0 align)
 )
 
 (princ "\nTABLE-UTILS.LSP загружен.")
