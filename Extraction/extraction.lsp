@@ -80,6 +80,10 @@
   (setq *extraction-list-open* nil)
 )
 
+(if (not (boundp '*extraction-in-dialog*))
+  (setq *extraction-in-dialog* nil)
+)
+
 ;; ============================================================
 ;; Слои по умолчанию для каждой задачи
 ;; ============================================================
@@ -649,6 +653,7 @@
 (defun extraction-subsystem-check-changed
        (key / val layers-to-select current-selection)
 
+  (princ (strcat "\n[EX] SUBSYSTEM CHECK " (itoa key) " BEGIN"))
   (setq *extraction-syncing-checks* T)
 
   (setq val
@@ -687,6 +692,7 @@
 
   (extraction-select-layers-in-list current-selection)
 
+  (princ (strcat "\n[EX] SUBSYSTEM CHECK " (itoa key) " END"))
   (setq *extraction-syncing-checks* nil)
 )
 
@@ -790,6 +796,7 @@
 ;; ИЗМЕНЕНИЕ ВЫБОРА В СПИСКЕ
 ;; ============================================================
 (defun extraction-layer-selection-changed ( / selected)
+  (princ "\n[EX] LAYER CHANGED BEGIN")
   (setq selected (extraction-selected-names))
   (setq *EXTRACTION-SELECTED-LAYERS* selected)
 
@@ -813,6 +820,7 @@
     )
   )
 
+  (princ "\n[EX] LAYER CHANGED END")
   (extraction-update-select-buttons)
 )
 
@@ -1024,21 +1032,29 @@
 ;; ============================================================
 
 (defun extraction-save ()
+  (princ "\n[EX] SAVE BEGIN")
   (if (extraction-read-params)
     (progn
+      (princ "\n[EX] READ PARAMS OK")
       (setq *EXTRACTION-ACTION* 'SAVE)
+      (princ "\n[EX] DONE_DIALOG")
       (done_dialog 1)
     )
+    (princ "\n[EX] READ PARAMS FAILED")
   )
 )
 
 
 (defun extraction-saveas ()
+  (princ "\n[EX] SAVEAS BEGIN")
   (if (extraction-read-params)
     (progn
+      (princ "\n[EX] READ PARAMS OK")
       (setq *EXTRACTION-ACTION* 'SAVEAS)
+      (princ "\n[EX] DONE_DIALOG")
       (done_dialog 1)
     )
+    (princ "\n[EX] READ PARAMS FAILED")
   )
 )
 
@@ -1190,23 +1206,59 @@
     ;; ----------------------------------------------------------
   ;; Локальный обработчик ошибок: гарантированная выгрузка DCL
   ;; ----------------------------------------------------------
+  ;; ----------------------------------------------------------
+  ;; Локальный обработчик ошибок
+  ;; ----------------------------------------------------------
   (defun *error* (msg)
-    (if (and *EXTRACTION-DCL-ID*
-             (>= *EXTRACTION-DCL-ID* 0))
-      (progn
-        (unload_dialog *EXTRACTION-DCL-ID*)
-        (setq *EXTRACTION-DCL-ID* nil)
-      )
-    )
-    ;; Если список остался открытым — закрыть
+
+    ;; --- Диагностика: состояние в момент ошибки ---
+    (princ "\n[EX ERROR] ====================================")
+    (if msg
+      (princ (strcat "\n[EX ERROR] msg = " msg)))
+    (princ (strcat "\n[EX ERROR] in-dialog   = "
+           (if *extraction-in-dialog* "T" "nil")))
+    (princ (strcat "\n[EX ERROR] dcl-id      = "
+           (if (and *EXTRACTION-DCL-ID* (numberp *EXTRACTION-DCL-ID*))
+             (itoa *EXTRACTION-DCL-ID*)
+             "nil")))
+    (princ (strcat "\n[EX ERROR] list-open   = "
+           (if *extraction-list-open* "T" "nil")))
+    (princ (strcat "\n[EX ERROR] sync-layers = "
+           (if *extraction-syncing-layers* "T" "nil")))
+    (princ (strcat "\n[EX ERROR] sync-checks = "
+           (if *extraction-syncing-checks* "T" "nil")))
+    (princ "\n[EX ERROR] ====================================")
+
+    ;; --- Если список слоёв остался открытым — закрыть ---
     (if *extraction-list-open*
       (progn
         (vl-catch-all-apply 'end_list '())
         (setq *extraction-list-open* nil)
       )
     )
+
+    ;; --- Сброс флагов синхронизации — ВСЕГДА ---
     (setq *extraction-syncing-layers* nil)
     (setq *extraction-syncing-checks* nil)
+
+    ;; --- Выгрузка DCL ---
+    ;; Если мы ВНУТРИ start_dialog (в callback) — НЕ выгружаем,
+    ;; иначе уничтожим диалог изнутри его цикла обработки событий.
+    ;; Если мы ВНЕ диалога — выгружаем штатно.
+    (if (not *extraction-in-dialog*)
+      (progn
+        (if (and *EXTRACTION-DCL-ID*
+                 (numberp *EXTRACTION-DCL-ID*)
+                 (>= *EXTRACTION-DCL-ID* 0))
+          (progn
+            (unload_dialog *EXTRACTION-DCL-ID*)
+            (setq *EXTRACTION-DCL-ID* nil)
+          )
+        )
+      )
+    )
+
+    ;; --- Сообщение об ошибке ---
     (if (and msg
              (not (wcmatch (strcase msg)
                     "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
@@ -1215,7 +1267,9 @@
     (princ)
   )
 
+  ;; ----------------------------------------------------------
   ;; Загрузка модулей только при первом запуске за сессию
+  ;; ----------------------------------------------------------
   (if (not *EXTRACTION-MODULES-LOADED*)
     (progn
       (extraction-load-all)
@@ -1226,7 +1280,6 @@
   (setq *extraction-preselected-set* (ssget "_I"))
 
   (setq dcl-file nil)
-
   (setq modules-dir (extraction-modules-dir))
 
   (if modules-dir
@@ -1376,8 +1429,14 @@
               (action_tile "lst_blocks"           "(blockrename-selected)")
               (action_tile "btn_block_rename"     "(blockrename-rename)")
 
+              ;; --- Запуск модального диалога ---
+              (princ "\n[EX] START_DIALOG BEGIN")
+              (setq *extraction-in-dialog* T)
               (start_dialog)
+              (setq *extraction-in-dialog* nil)
+              (princ "\n[EX] START_DIALOG RETURN")
 
+              ;; --- Обработка результата ---
               (cond
 
                 ((eq *EXTRACTION-ACTION* 'SAVE)
@@ -1428,23 +1487,34 @@
                 )
               )
 
-              ;; Гарантированная выгрузка на штатном пути
+              ;; --- Гарантированная выгрузка на штатном пути ---
+              (princ "\n[EX] UNLOAD DCL BEGIN")
               (unload_dialog *EXTRACTION-DCL-ID*)
               (setq *EXTRACTION-DCL-ID* nil)
+              (princ "\n[EX] UNLOAD DCL OK")
             )
+            ;; --- Конец progn успешной ветки new_dialog ---
+
             (progn
               (unload_dialog *EXTRACTION-DCL-ID*)
               (setq *EXTRACTION-DCL-ID* nil)
               (alert "Не удалось открыть диалог EXTRACTION.")
             )
+            ;; --- Конец progn ветки new_dialog failed ---
           )
+          ;; --- Конец if new_dialog ---
         )
+        ;; --- Конец progn load_dialog OK ---
       )
+      ;; --- Конец if load_dialog ---
     )
+    ;; --- Конец progn dcl-file found ---
   )
+  ;; --- Конец if dcl-file ---
 
   (princ)
 )
+;; --- Конец defun c:extraction ---
 
 
 ;; ============================================================
