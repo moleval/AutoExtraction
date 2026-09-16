@@ -84,12 +84,12 @@
   (setq *extraction-in-dialog* nil)
 )
 
-(if (not (boundp '*extraction-callback-depth*))
-  (setq *extraction-callback-depth* 0)
-)
-
 (if (not (boundp '*extraction-in-layer-changed*))
   (setq *extraction-in-layer-changed* nil)
+)
+
+(if (not (boundp '*extraction-dcl-busy*))
+  (setq *extraction-dcl-busy* nil)
 )
 
 ;; ============================================================
@@ -649,50 +649,58 @@
 
 ;; ============================================================
 ;; ИЗМЕНЕНИЕ ЧЕКБОКСА ПОДСИСТЕМЫ
+;; Защита от множественных модификаций тайлов через *extraction-dcl-busy*
 ;; ============================================================
 
 (defun extraction-subsystem-check-changed
        (key / val layers-to-select current-selection)
 
-  (setq *extraction-syncing-checks* T)
+  (if *extraction-dcl-busy*
+    nil
+    (progn
+      (setq *extraction-dcl-busy* T)
+      (setq *extraction-syncing-checks* T)
 
-  (setq val
-    (= (get_tile
-         (strcat "chk_subsystem_" (itoa key))) "1"))
+      (setq val
+        (= (get_tile
+             (strcat "chk_subsystem_" (itoa key))) "1"))
 
-  (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS*
-    (list
-      (if (= key 1) val (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
-      (if (= key 2) val (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
-      (if (= key 3) val (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))))
+      (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS*
+        (list
+          (if (= key 1) val (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
+          (if (= key 2) val (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))
+          (if (= key 3) val (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*))))
 
-  (setq layers-to-select '())
+      (setq layers-to-select '())
 
-  (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-    (setq layers-to-select (cons "Подсистема" layers-to-select)))
+      (if (car *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+        (setq layers-to-select (cons "Подсистема" layers-to-select)))
 
-  (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-    (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
+      (if (cadr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+        (setq layers-to-select (cons "Подсистема алюминиевая" layers-to-select)))
 
-  (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
-    (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
+      (if (caddr *EXTRACTION-LAST-SUBSYSTEM-CHECKS*)
+        (setq layers-to-select (cons "Подсистема оцинкованная" layers-to-select)))
 
-  (setq current-selection (extraction-selected-names))
+      (setq current-selection (extraction-selected-names))
 
-  (setq current-selection
-    (vl-remove-if
-      '(lambda (x)
-         (or (= (strcase x) "ПОДСИСТЕМА")
-             (= (strcase x) "ПОДСИСТЕМА АЛЮМИНИЕВАЯ")
-             (= (strcase x) "ПОДСИСТЕМА ОЦИНКОВАННАЯ")))
-      current-selection))
+      (setq current-selection
+        (vl-remove-if
+          '(lambda (x)
+             (or (= (strcase x) "ПОДСИСТЕМА")
+                 (= (strcase x) "ПОДСИСТЕМА АЛЮМИНИЕВАЯ")
+                 (= (strcase x) "ПОДСИСТЕМА ОЦИНКОВАННАЯ")))
+          current-selection))
 
-  (setq current-selection
-    (append current-selection layers-to-select))
+      (setq current-selection
+        (append current-selection layers-to-select))
 
-  (extraction-select-layers-in-list current-selection)
+      (extraction-select-layers-in-list current-selection)
 
-  (setq *extraction-syncing-checks* nil)
+      (setq *extraction-syncing-checks* nil)
+      (setq *extraction-dcl-busy* nil)
+    )
+  )
 )
 
 
@@ -793,9 +801,9 @@
 
 ;; ============================================================
 ;; ИЗМЕНЕНИЕ ВЫБОРА В СПИСКЕ
+;; Защита от вложенных вызовов через *extraction-in-layer-changed*
 ;; ============================================================
 (defun extraction-layer-selection-changed ( / selected)
-  ;; Защита от вложенных вызовов: если уже выполняется — выходим
   (if *extraction-in-layer-changed*
     nil
     (progn
@@ -1131,64 +1139,89 @@
 
 ;; ============================================================
 ;; ФИЛЬТРЫ
+;; Защита от множественных модификаций тайлов через *extraction-dcl-busy*
 ;; ============================================================
 
 (defun extraction-filter-facades ()
-  (setq *EXTRACTION-FILTER-FACADES*
-    (= (get_tile "chk_filter_facades") "1"))
+  (if *extraction-dcl-busy*
+    nil
+    (progn
+      (setq *extraction-dcl-busy* T)
+      (setq *EXTRACTION-FILTER-FACADES*
+        (= (get_tile "chk_filter_facades") "1"))
 
-  (setq *EXTRACTION-LAST-FILTER-FACADES*
-    *EXTRACTION-FILTER-FACADES*)
+      (setq *EXTRACTION-LAST-FILTER-FACADES*
+        *EXTRACTION-FILTER-FACADES*)
 
-  (extraction-rebuild-layer-list)
+      (extraction-rebuild-layer-list)
 
-  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-    (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-    (if *EXTRACTION-LAST-FASONKA-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-FASONKA-LAYERS*))
+      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
+        (if *EXTRACTION-LAST-FASONKA-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-FASONKA-LAYERS*))
+      )
+
+      (setq *extraction-dcl-busy* nil)
+    )
   )
 )
 
 
 (defun extraction-filter-vitrazh ()
-  (setq *EXTRACTION-FILTER-VITRAZH*
-    (= (get_tile "chk_filter_vitrazh") "1"))
+  (if *extraction-dcl-busy*
+    nil
+    (progn
+      (setq *extraction-dcl-busy* T)
+      (setq *EXTRACTION-FILTER-VITRAZH*
+        (= (get_tile "chk_filter_vitrazh") "1"))
 
-  (setq *EXTRACTION-LAST-FILTER-VITRAZH*
-    *EXTRACTION-FILTER-VITRAZH*)
+      (setq *EXTRACTION-LAST-FILTER-VITRAZH*
+        *EXTRACTION-FILTER-VITRAZH*)
 
-  (extraction-rebuild-layer-list)
+      (extraction-rebuild-layer-list)
 
-  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-    (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-    (if *EXTRACTION-LAST-FASONKA-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-FASONKA-LAYERS*))
+      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
+        (if *EXTRACTION-LAST-FASONKA-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-FASONKA-LAYERS*))
+      )
+
+      (setq *extraction-dcl-busy* nil)
+    )
   )
 )
 
 
 (defun extraction-filter-fonar ()
-  (setq *EXTRACTION-FILTER-FONAR*
-    (= (get_tile "chk_filter_fonar") "1"))
+  (if *extraction-dcl-busy*
+    nil
+    (progn
+      (setq *extraction-dcl-busy* T)
+      (setq *EXTRACTION-FILTER-FONAR*
+        (= (get_tile "chk_filter_fonar") "1"))
 
-  (setq *EXTRACTION-LAST-FILTER-FONAR*
-    *EXTRACTION-FILTER-FONAR*)
+      (setq *EXTRACTION-LAST-FILTER-FONAR*
+        *EXTRACTION-FILTER-FONAR*)
 
-  (extraction-rebuild-layer-list)
+      (extraction-rebuild-layer-list)
 
-  (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-    (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-    (if *EXTRACTION-LAST-FASONKA-LAYERS*
-      (extraction-select-layers-in-list
-        *EXTRACTION-LAST-FASONKA-LAYERS*))
+      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
+        (if *EXTRACTION-LAST-FASONKA-LAYERS*
+          (extraction-select-layers-in-list
+            *EXTRACTION-LAST-FASONKA-LAYERS*))
+      )
+
+      (setq *extraction-dcl-busy* nil)
+    )
   )
 )
 
@@ -1207,11 +1240,6 @@
   ;; ----------------------------------------------------------
   (defun *error* (msg)
 
-    ;; --- Сброс флага "внутри диалога" ---
-    ;; Без этого после ошибки в callback следующий запуск
-    ;; не сможет выгрузить DCL через *error*
-    (setq *extraction-in-dialog* nil)
-
     ;; --- Если список слоёв остался открытым — закрыть ---
     (if *extraction-list-open*
       (progn
@@ -1220,27 +1248,29 @@
       )
     )
 
-    ;; --- Сброс флагов синхронизации — ВСЕГДА ---
+    ;; --- Сброс всех флагов — ВСЕГДА ---
     (setq *extraction-syncing-layers* nil)
     (setq *extraction-syncing-checks* nil)
     (setq *extraction-in-layer-changed* nil)
+    (setq *extraction-dcl-busy* nil)
 
     ;; --- Выгрузка DCL ---
     ;; Если мы ВНУТРИ start_dialog (в callback) — НЕ выгружаем,
     ;; иначе уничтожим диалог изнутри его цикла обработки событий.
     ;; Если мы ВНЕ диалога — выгружаем штатно.
     (if (not *extraction-in-dialog*)
-      (progn
-        (if (and *EXTRACTION-DCL-ID*
-                 (numberp *EXTRACTION-DCL-ID*)
-                 (>= *EXTRACTION-DCL-ID* 0))
-          (progn
-            (unload_dialog *EXTRACTION-DCL-ID*)
-            (setq *EXTRACTION-DCL-ID* nil)
-          )
+      (if (and *EXTRACTION-DCL-ID*
+               (numberp *EXTRACTION-DCL-ID*)
+               (>= *EXTRACTION-DCL-ID* 0))
+        (progn
+          (unload_dialog *EXTRACTION-DCL-ID*)
+          (setq *EXTRACTION-DCL-ID* nil)
         )
       )
     )
+
+    ;; --- Сбрасываем флаг после проверки выгрузки ---
+    (setq *extraction-in-dialog* nil)
 
     ;; --- Сообщение об ошибке ---
     (if (and msg
