@@ -415,7 +415,8 @@
                       (setq grpArea (nth 4 item))
 
                       (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0 "")
+                      (vla-SetText tbl row 0
+                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
                       (vla-SetText tbl row 1
                         (strcat "   {\\L" grpName "}"))
                       (vla-SetText tbl row 4 (itoa grpCnt))

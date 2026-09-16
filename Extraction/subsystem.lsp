@@ -620,8 +620,10 @@
                           (setq rowInGroup 0)))
                       (setq rowInGroup (1+ rowInGroup))
 
-                      (vla-SetText tbl row 0
-                        (strcat (itoa groupIdx) "." (itoa rowInGroup)))
+                      (if (= groupIdx 1)
+                        (vla-SetText tbl row 0 (itoa rowInGroup))
+                        (vla-SetText tbl row 0
+                          (strcat (itoa groupIdx) "." (itoa rowInGroup))))
                       (vla-SetText tbl row 1 name)
 
                       (if len
@@ -649,7 +651,8 @@
                       (setq totalSum  (nth 3 item))
 
                       (vla-MergeCells tbl row row 1 3)
-                      (vla-SetText tbl row 0 "")
+                      (vla-SetText tbl row 0
+                        (strcat "{\\fArial|b1|i0|c0|p34;" (itoa groupIdx) "}"))
                       (vla-SetText tbl row 1
                         (strcat "{\\L" groupName "}"))
                       (vla-SetCellAlignment tbl row 1 4)
