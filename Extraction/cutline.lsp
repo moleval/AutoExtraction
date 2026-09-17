@@ -1,33 +1,16 @@
 ;;; ============================================================
 ;;; CUTLINE.LSP — модуль линейного раскроя мерного материала
 ;;; Команда: CUTLINE / РАСКРОЙХЛЫСТА
-;;; Объекты: LINE, MLINE, динамические блоки с свойством "Длина"
+;;; Объекты: LINE, MLINE, динамические блоки со свойством "Длина"
 ;;; Алгоритм: First-Fit Decreasing (FFD)
-;;
-;;; ПОДДЕРЖИВАЕМЫЕ ТИПЫ:
-;;;   LINE      — обычные линии
-;;;   MLINE     — мультилинии (только прямые горизонтальные/
-;;;               вертикальные; тип = имя MLINESTYLE)
-;;;   DYNBLOCK  — динамические блоки со свойством "Длина"
-;;
-;;; ЭТАПЫ:
-;;;   2.1-2.4: динамические блоки (анализ, выбор, раскрой, диалог)
-;;;   3.1-3.3: список типов блоков, пересчёт счётчика, косметика
-;;;   Р1-Р4:   ремонт кода (см. историю коммитов)
-;;;   M1:      типы мультилиний (имя MLINESTYLE) в select-utils
-;;;   M2:      диалог: список "Тип мультилинии", фильтр набора,
-;;;            длина MLINE по координатам, допуск осевости
-;;
-;;; ПРАВИЛА ДЛЯ MLINE (редакция 2):
-;;;   - тип = имя MLINESTYLE (DXF 2)
-;;;   - длина по координатам (Coordinates)
-;;;   - кроются только прямые (2 вершины) горизонтальные/
-;;;     вертикальные; ломаные и диагональные отсеиваются
-;;;     со счётчиками в консоль
-;;
-;;; ТИПЫ РАСКРОЯ (диалог):
-;;;   Только линии / Только мультилинии /
-;;;   Динамические блоки / Все типы
+;;;
+;;; ЗАЛИВКА ДЕТАЛЕЙ:
+;;;   - SOLID + ActiveX EntityTransparency (0..90%)
+;;;   - TRANSPARENCYDISPLAY включается автоматически
+;;;
+;;; ШАПКА КАРТЫ РАСКРОЯ:
+;;;   - заголовок, подзаголовок, линейка с метками 0 и stock
+;;;   - рисуется над первым хлыстом
 ;;; ============================================================
 (vl-load-com)
 
@@ -38,11 +21,17 @@
 (setq *CUTLINE-DEFAULT-STOCK* 6000.0)
 (setq *CUTLINE-DEFAULT-KERF*   0.0)
 
-(setq *NEST-TRANSPARENCY* 70)
+;; ЗАЛИВКА: прозрачность 0.0..1.0 (где 1.0 = 90% прозрачности)
+(setq *CUTLINE-PART-TRANSPARENCY* 0.70)
+(setq *CUTLINE-WASTE-TRANSPARENCY* 0.3)
+
 (setq *NEST-PALETTE* '(1 2 3 4 5 6 30 210 140 90))
 (setq *NEST-STYLE-NAME* "Раскрой Italic")
 (setq *NEST-ITALIC-ANGLE* 0.26)
 (setq *NEST-TEXT-STYLE* nil)
+;; Жирный стиль текста
+(setq *NEST-BOLD-STYLE-NAME* "Основной стиль (надписи без наклона)")
+(setq *NEST-BOLD-TEXT-STYLE* nil)
 (setq *NEST-COLOR-OUTLINE* 7)
 (setq *NEST-COLOR-LABEL*   7)
 (setq *NEST-COLOR-WASTE*   8)
@@ -50,7 +39,26 @@
 (setq *NEST-COLOR-HEADER*  3)
 (setq *NEST-COLOR-VALUE*   7)
 (setq *NEST-COLOR-KPD*     1)
-;; =============================================
+;; Цвет текста длины детали (жёлтый)
+(setq *NEST-COLOR-PART-TEXT* 2)
+
+;; ================= ПАРАМЕТРЫ ШАПКИ КАРТЫ РАСКРОЯ =================
+(setq *CUTLINE-ROW-H*          200.0)   ;; высота строки шапки
+(setq *CUTLINE-TEXT-H*          75.0)   ;; высота подзаголовка и меток
+(setq *CUTLINE-TITLE-H*        100.0)   ;; высота заголовка
+(setq *CUTLINE-OUTLINE-COLOR*     7)    ;; цвет линейки
+(setq *CUTLINE-TITLE-COLOR*       5)    ;; цвет заголовка
+(setq *CUTLINE-HEADER-COLOR*      3)    ;; цвет подзаголовка
+(setq *CUTLINE-VALUE-COLOR*       7)    ;; цвет меток линейки
+;; ====================================================================
+
+;; ================= РАМКА ВОКРУГ КАРТЫ РАСКРОЯ =================
+(setq *CUTLINE-FRAME-LAYER*       "Невидимые")   ;; слой рамки
+(setq *CUTLINE-FRAME-PAD-LEFT*     300.0)        ;; отступ слева (мм)
+(setq *CUTLINE-FRAME-PAD-RIGHT*    125.0)        ;; отступ справа
+(setq *CUTLINE-FRAME-PAD-TOP*      125.0)        ;; отступ сверху
+(setq *CUTLINE-FRAME-PAD-BOTTOM*   200.0)        ;; отступ снизу
+;; =================================================================
 
 (if (not (boundp '*n1-tmp-choice*))
   (setq *n1-tmp-choice* 'ALL))
@@ -60,28 +68,22 @@
 (if (not (boundp '*n1-tmp-chk-xls*)) (setq *n1-tmp-chk-xls* T))
 (if (not (boundp '*n1-tmp-chk-acad*)) (setq *n1-tmp-chk-acad* T))
 
-;; Выбранный тип динамического блока ("" = все типы)
 (if (not (boundp '*n1-tmp-dynblock-type*))
   (setq *n1-tmp-dynblock-type* "")
 )
 
-;; Список уникальных типов динамических блоков
 (if (not (boundp '*n1-dynblock-types-list*))
   (setq *n1-dynblock-types-list* '())
 )
 
-;; ДОБАВЛЕНО (Этап M2): выбранный тип мультилинии (имя MLINESTYLE)
-;; "" означает "Все типы мультилиний"
 (if (not (boundp '*n1-tmp-mline-type*))
   (setq *n1-tmp-mline-type* "")
 )
 
-;; ДОБАВЛЕНО (Этап M2): список уникальных типов мультилиний
 (if (not (boundp '*n1-mline-types-list*))
   (setq *n1-mline-types-list* '())
 )
 
-;; Набор для пересчёта счётчиков при выборе типа
 (if (not (boundp '*n1-cutline-ss*))
   (setq *n1-cutline-ss* nil)
 )
@@ -106,10 +108,6 @@
   (reverse result)
 )
 
-(defun n1-trans-value (percent)
-  (fix (* 255.0 (/ (- 100.0 (float percent)) 100.0)))
-)
-
 (defun n1-ensure-italic-style ( / result)
   (if (tblsearch "STYLE" *NEST-STYLE-NAME*)
     (progn
@@ -124,6 +122,36 @@
       (if (and result (tblsearch "STYLE" *NEST-STYLE-NAME*))
         (setq *NEST-TEXT-STYLE* *NEST-STYLE-NAME*)
         (setq *NEST-TEXT-STYLE* nil)
+      )
+    )
+  )
+)
+
+;; ============================================================
+;; СОЗДАНИЕ ЖИРНОГО СТИЛЯ ТЕКСТА
+;; "Основной стиль (надписи без наклона)" со шрифтом arialbd.ttf
+;; ============================================================
+(defun n1-ensure-bold-style ( / result)
+  (if (tblsearch "STYLE" *NEST-BOLD-STYLE-NAME*)
+    (setq *NEST-BOLD-TEXT-STYLE* *NEST-BOLD-STYLE-NAME*)
+    (progn
+      (setq result
+        (entmake
+          (list '(0 . "STYLE")
+                '(100 . "AcDbSymbolTableRecord")
+                '(100 . "AcDbTextStyleTableRecord")
+                (cons 2 *NEST-BOLD-STYLE-NAME*)
+                '(70 . 0)
+                '(40 . 0.0)
+                '(41 . 1.0)
+                '(50 . 0.0)
+                '(71 . 0)
+                '(42 . 2.5)
+                '(3 . "arialbd.ttf")
+                '(4 . ""))))
+      (if (and result (tblsearch "STYLE" *NEST-BOLD-STYLE-NAME*))
+        (setq *NEST-BOLD-TEXT-STYLE* *NEST-BOLD-STYLE-NAME*)
+        (setq *NEST-BOLD-TEXT-STYLE* nil)
       )
     )
   )
@@ -167,6 +195,102 @@
                  (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
 
+;; ============================================================
+;; ЖИРНЫЙ ТЕКСТ С ПОВОРОТОМ
+;; angle: угол поворота в ГРАДУСАХ (конвертируется в радианы)
+;; ============================================================
+(defun n1-draw-text-bold (pt h str color angle / c style angle-rad)
+  (setq c (if (and color (numberp color)) color 7))
+  (n1-ensure-bold-style)
+  (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
+                *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 angle-rad)))
+)
+
+;; ============================================================
+;; ЖИРНЫЙ ТЕКСТ С ПОВОРОТОМ И ЦЕНТРИРОВАНИЕМ
+;; Текст центрируется относительно точки вставки (коды 72=1, 73=2, 11)
+;; ============================================================
+(defun n1-draw-text-bold-center (pt h str color angle / c style angle-rad)
+  (setq c (if (and color (numberp color)) color 7))
+  (n1-ensure-bold-style)
+  (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
+                *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 11 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 angle-rad)
+                 (cons 72 1)
+                 (cons 73 2)))
+)
+
+;; ============================================================
+;; ТЕКСТ С ВЫРАВНИВАНИЕМ ПО ПРАВОМУ КРАЮ И ВЕРТИКАЛЬНОЙ СЕРЕДИНЕ
+;; Используется для меток хлыста слева (не наезжают на хлыст)
+;; ============================================================
+(defun n1-draw-text-right (pt h str color / c style)
+  (setq c (if (and color (numberp color)) color 7))
+  (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
+                *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 11 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 0.0)
+                 (cons 72 2)    ;; горизонтальное: по правому краю
+                 (cons 73 2)))  ;; вертикальное: середина
+)
+
+;; ============================================================
+;; ЖИРНЫЙ ТЕКСТ С ВЫРАВНИВАНИЕМ ПО ПРАВОМУ КРАЮ И ВЕРТИКАЛЬНОЙ СЕРЕДИНЕ
+;; Стиль Arial Bold, используется для меток шапки слева
+;; ============================================================
+(defun n1-draw-text-bold-right (pt h str color angle / c style angle-rad)
+  (setq c (if (and color (numberp color)) color 7))
+  (n1-ensure-bold-style)
+  (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
+                *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 11 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 angle-rad)
+                 (cons 72 2)    ;; горизонтальное: по правому краю
+                 (cons 73 2)))  ;; вертикальное: середина
+)
+
+;; ============================================================
+;; ЖИРНЫЙ ТЕКСТ С ВЫРАВНИВАНИЕМ ПО ЛЕВОМУ КРАЮ И ВЕРТИКАЛЬНОЙ СЕРЕДИНЕ
+;; Стиль Arial Bold. Зеркально n1-draw-text-bold-right.
+;; Используется для меток справа (правее хлыста / линейки).
+;; ============================================================
+(defun n1-draw-text-bold-left (pt h str color angle / c style angle-rad)
+  (setq c (if (and color (numberp color)) color 7))
+  (n1-ensure-bold-style)
+  (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
+                *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
+  (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
+  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 11 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 str) (cons 50 angle-rad)
+                 (cons 72 0)    ;; горизонтальное: по левому краю
+                 (cons 73 2)))  ;; вертикальное: середина
+)
+
+;; ============================================================
+;; ДВОЙНАЯ ВЕРТИКАЛЬНАЯ ЛИНИЯ РЕЗА
+;; Рисует две параллельные линии со сдвигом ±offset
+;; ============================================================
+(defun n1-draw-cut-line (x y0 barHeight color / offset)
+  (setq offset (* barHeight 0.05))
+  (n1-draw-line (list (- x offset) y0) (list (- x offset) (+ y0 barHeight)) color)
+  (n1-draw-line (list (+ x offset) y0) (list (+ x offset) (+ y0 barHeight)) color)
+)
+
 (defun n1-draw-line (p1 p2 color)
   (entmake (list (cons 0 "LINE") (cons 62 color)
                  (cons 10 (list (car p1) (cadr p1) 0.0))
@@ -182,17 +306,192 @@
                  (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
 )
 
-(defun n1-draw-hatch (p1 p2 color trans / x1 y1 x2 y2)
-  (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (entmake (list (cons 0 "HATCH") (cons 100 "AcDbEntity")
-                 (cons 62 color) (cons 440 trans) (cons 100 "AcDbHatch")
-                 (cons 10 (list 0.0 0.0 0.0)) (cons 210 (list 0.0 0.0 1.0))
-                 (cons 2 "SOLID") (cons 70 1) (cons 71 0) (cons 91 1) (cons 92 2)
-                 (cons 72 0) (cons 73 1) (cons 93 4)
-                 (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
-                 (cons 10 (list x2 y2)) (cons 10 (list x1 y2))
-                 (cons 75 0) (cons 76 1) (cons 47 1.0) (cons 78 0) (cons 98 0)))
+;; ============================================================
+;; ЗАЛИВКА С ПРОЗРАЧНОСТЬЮ
+;; SOLID + ActiveX EntityTransparency (0..90)
+;; ============================================================
+
+(defun n1-apply-transparency (ent val90 / obj r)
+  (if ent
+    (progn
+      (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+      (if (not (vl-catch-all-error-p obj))
+        (progn
+          (setq r (vl-catch-all-apply 'vlax-put-property
+                    (list obj 'EntityTransparency val90)))
+          (if (vl-catch-all-error-p r)
+            (vl-catch-all-apply 'vlax-put-property
+              (list obj 'Transparency val90)))
+        )
+      )
+    )
+  )
+  ent
 )
+
+(defun n1-draw-filled-rect (p1 p2 color transparency / x1 y1 x2 y2 ent res aci)
+  (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
+  (setq aci (fix (+ 0.5 (* transparency 90.0))))
+  (if (> aci 90) (setq aci 90))
+  (if (< aci 0) (setq aci 0))
+
+  (setq res
+    (entmake
+      (list
+        (cons 0 "SOLID")
+        (cons 100 "AcDbEntity")
+        (cons 100 "AcDbTrace")
+        (cons 10 (list x1 y1 0.0))
+        (cons 11 (list x2 y1 0.0))
+        (cons 12 (list x1 y2 0.0))
+        (cons 13 (list x2 y2 0.0))
+        (cons 62 color)
+        (cons 39 0.0)
+      )
+    )
+  )
+
+  (if res
+    (progn
+      (setq ent (entlast))
+      (n1-apply-transparency ent aci)
+      ent
+    )
+    nil
+  )
+)
+
+(defun n1-enable-transparency-display ( / )
+  (vl-catch-all-apply 'setvar (list "TRANSPARENCYDISPLAY" 1))
+)
+
+(defun n1-disable-transparency-display (old-val / )
+  (if (and old-val (numberp old-val))
+    (vl-catch-all-apply 'setvar (list "TRANSPARENCYDISPLAY" old-val))
+  )
+)
+
+;; ============================================================
+;; СОЗДАНИЕ СЛОЯ РАМКИ (если не существует)
+;; ============================================================
+(defun n1-ensure-frame-layer ( / )
+  (if (not (tblsearch "LAYER" *CUTLINE-FRAME-LAYER*))
+    (entmake
+      (list '(0 . "LAYER")
+            '(100 . "AcDbSymbolTableRecord")
+            '(100 . "AcDbLayerTableRecord")
+            (cons 2 *CUTLINE-FRAME-LAYER*)
+            '(70 . 0)
+            '(62 . 7)
+            '(6 . "Continuous")
+            '(370 . -3)))
+  )
+)
+
+;; ============================================================
+;; РАМКА ВОКРУГ КАРТЫ РАСКРОЯ (LWPOLYLINE на слое *CUTLINE-FRAME-LAYER*)
+;; bbox: ((x1 y1) (x2 y2)) — границы шапки+хлыстов
+;; Отступы задаются константами *CUTLINE-FRAME-PAD-*
+;; Возвращает bbox рамки (с учётом отступов)
+;; ============================================================
+(defun n1-draw-frame (bbox / x1 y1 x2 y2)
+  (n1-ensure-frame-layer)
+  (setq x1 (- (car  (car  bbox)) *CUTLINE-FRAME-PAD-LEFT*))
+  (setq y1 (- (cadr (car  bbox)) *CUTLINE-FRAME-PAD-BOTTOM*))
+  (setq x2 (+ (car  (cadr bbox)) *CUTLINE-FRAME-PAD-RIGHT*))
+  (setq y2 (+ (cadr (cadr bbox)) *CUTLINE-FRAME-PAD-TOP*))
+  (entmake
+    (list '(0 . "LWPOLYLINE")
+          '(100 . "AcDbEntity")
+          (cons 8 *CUTLINE-FRAME-LAYER*)
+          '(100 . "AcDbPolyline")
+          '(90 . 4)
+          '(70 . 1)
+          (cons 10 (list x1 y1))
+          (cons 10 (list x2 y1))
+          (cons 10 (list x2 y2))
+          (cons 10 (list x1 y2))))
+  (list (list x1 y1) (list x2 y2))
+)
+
+;; ============================================================
+;; ШАПКА КАРТЫ РАСКРОЯ
+;; - заголовок "КАРТА РАСКРОЯ ХЛЫСТОВ" (жирный);
+;; - подзаголовок "Заготовка: X мм || Пропил: Y мм" (шрифт как у "Хлыст N");
+;; - линейка с одинарными засечками;
+;; - метки 0 (справа-налево) и stock (слева-направо) — зеркально.
+;; ============================================================
+(defun n1-draw-header (insPt stock kerf / x0 y0 rowH txtH titleH barHeight
+                       labelX labelX-right tick-half tick-base layout-txtH)
+  (setq x0        (car insPt)
+        y0        (cadr insPt)
+        rowH      *CUTLINE-ROW-H*
+        txtH      *CUTLINE-TEXT-H*
+        titleH    *CUTLINE-TITLE-H*
+        barHeight (/ stock 45.0))
+
+  ;; Высота шрифта как у метки "Хлыст N" в n1-draw-layout
+  (setq layout-txtH (* (/ stock 30.0) 0.30))
+
+  ;; Позиции меток (отступ = barHeight * 0.6, как у "Хлыст 1")
+  (setq labelX       (- x0 (* barHeight 0.6)))
+  (setq labelX-right (+ x0 stock (* barHeight 0.6)))
+
+  ;; Параметры одинарных засечек (небольшой размер)
+  (setq tick-half (* rowH 0.12))
+  (setq tick-base (+ y0 (* rowH 2.0)))
+
+  ;; 1. Заголовок (жирный)
+  (n1-draw-text-bold
+    (list x0 (+ y0 (* rowH 3.4)))
+    titleH
+    "КАРТА РАСКРОЯ ХЛЫСТОВ"
+    *CUTLINE-TITLE-COLOR* 0.0)
+
+  ;; 2. Подзаголовок с || — высота шрифта как у "Хлыст N"
+  (n1-draw-text
+    (list x0 (+ y0 (* rowH 2.7)))
+    layout-txtH
+    (strcat "Заготовка: " (rtos stock 2 0)
+            " мм   ||   Пропил: " (rtos kerf 2 1) " мм")
+    *CUTLINE-HEADER-COLOR*)
+
+  ;; 3. Линейка
+  (n1-draw-line
+    (list x0 tick-base)
+    (list (+ x0 stock) tick-base)
+    *CUTLINE-OUTLINE-COLOR*)
+
+  ;; 4. Одинарные вертикальные засечки
+  (n1-draw-line (list x0 (- tick-base tick-half))
+                (list x0 (+ tick-base tick-half))
+                *CUTLINE-OUTLINE-COLOR*)
+  (n1-draw-line (list (+ x0 stock) (- tick-base tick-half))
+                (list (+ x0 stock) (+ tick-base tick-half))
+                *CUTLINE-OUTLINE-COLOR*)
+
+  ;; 5. Левая метка "0" — выровнена по правому краю
+  (n1-draw-text-bold-right
+    (list labelX tick-base)
+    (* layout-txtH 1.1)
+    "0"
+    *CUTLINE-VALUE-COLOR* 0.0)
+
+  ;; 6. Правая метка stock — ПРАВЕЕ линейки, выровнена по левому краю
+  ;;    (зеркально метке "0", та же высота шрифта)
+  (n1-draw-text-bold-left
+    (list labelX-right tick-base)
+    (* layout-txtH 1.1)
+    (rtos stock 2 0)
+    *CUTLINE-VALUE-COLOR* 0.0)
+
+  ;; BBox шапки (расширен вправо для метки stock)
+  (list
+    (list (- x0 (* barHeight 2.0)) (+ y0 (* rowH 2.0)))
+    (list (+ x0 stock (* barHeight 2.0)) (+ y0 (* rowH 3.9))))
+)
+
+;; ============================================================
 
 (defun n1-expand (pieces / sorted-groups out rec len cnt i)
   (setq sorted-groups (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
@@ -221,12 +520,6 @@
 
 ;; ============================================================
 ;; Алгоритм раскроя FFD
-;; МОДЕЛЬ РЕЗА (хот-фикс Р1.3):
-;;   керф — пропил МЕЖДУ соседними деталями;
-;;   новый хлыст: остаток = stock - p (рез не вычитается);
-;;   существующий: требуется остаток >= kerf + p,
-;;                 новый остаток = остаток - kerf - p;
-;;   неразмещаемая: p > stock.
 ;; ============================================================
 (defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip)
   (setq bars '())
@@ -398,8 +691,6 @@
 
 ;; ============================================================
 ;; Фильтрация набора по типу мультилинии
-;; ДОБАВЛЕНО (Этап M2): зеркально n1-filter-ss-by-type-and-name
-;; type-name nil/"" — оставить все MLINE; иные типы отбросить
 ;; ============================================================
 (defun n1-filter-ss-by-mline-type (ss type-name / i ent new-ss)
   (setq new-ss (ssadd) i 0)
@@ -469,7 +760,6 @@
 
 ;; ============================================================
 ;; Отображение списка слоёв
-;; Текст "Групповой фильтр..." только при автоматическом выборе
 ;; ============================================================
 (defun n1-layer-display-list (layers / fname suffix)
   (setq fname (n1-filter-name-str))
@@ -506,7 +796,6 @@
 
 ;; ============================================================
 ;; Ручное управление радиокнопками
-;; ОБНОВЛЕНО (Этап M2): блокировка/разблокировка двух списков
 ;; ============================================================
 (defun n1-select-radio (selected / keys k)
   (setq keys '("rb_line" "rb_mline" "rb_dynblock" "rb_both"))
@@ -520,7 +809,6 @@
     ((= selected "rb_both")     (setq *n1-tmp-choice* 'ALL))
   )
 
-  ;; Список типов блоков: активен только при "Динамические блоки"
   (if (= selected "rb_dynblock")
     (n1-safe-mode-tile "popup_dynblock_type" 0)
     (progn
@@ -529,7 +817,6 @@
     )
   )
 
-  ;; Список типов мультилиний: активен только при "Только мультилинии"
   (if (= selected "rb_mline")
     (n1-safe-mode-tile "popup_mline_type" 0)
     (progn
@@ -564,7 +851,6 @@
 
 ;; ============================================================
 ;; Обработчик выбора типа мультилинии
-;; ДОБАВЛЕНО (Этап M2): зеркально n1-on-dynblock-type-changed
 ;; ============================================================
 (defun n1-on-mline-type-changed (value / idx type-name new-count)
   (setq idx (atoi value))
@@ -588,8 +874,6 @@
 
 ;; ============================================================
 ;; Диалог параметров раскроя
-;; ОБНОВЛЕНО (Этап M2): список типов мультилиний,
-;; результат из 8 элементов
 ;; ============================================================
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           ss-for-types
@@ -641,7 +925,6 @@
 
               (setq *n1-cutline-ss* ss-for-types)
 
-              ;; ---- Заполнение списка типов блоков ----
               (setq *n1-tmp-dynblock-type* "")
               (setq *n1-dynblock-types-list*
                 (su-collect-dynblock-types ss-for-types 'su-is-valid-stock-block))
@@ -660,8 +943,6 @@
                 (n1-safe-mode-tile "popup_dynblock_type" 1)
               )
 
-              ;; ---- Заполнение списка типов мультилиний ----
-              ;; ДОБАВЛЕНО (Этап M2)
               (setq *n1-tmp-mline-type* "")
               (setq *n1-mline-types-list*
                 (su-collect-mline-types ss-for-types))
@@ -680,7 +961,6 @@
                 (n1-safe-mode-tile "popup_mline_type" 1)
               )
 
-              ;; ---- Слои ----
               (setq base-layers (n1-layer-display-list layers))
               (vl-catch-all-apply
                 '(lambda ()
@@ -689,7 +969,6 @@
                    (end_list))
                 nil)
 
-              ;; ---- Радиокнопки: начальное состояние ----
               (cond
                 ((and (> line-cnt 0) (> mline-cnt 0))
                  (n1-safe-set-tile "rb_both" "1")
@@ -719,27 +998,22 @@
               (if (<= dynblock-cnt 0) (n1-safe-mode-tile "rb_dynblock" 1))
               (if (<= all-cnt 0)      (n1-safe-mode-tile "rb_both" 1))
 
-              ;; ---- Параметры ----
               (n1-safe-set-tile "edt_stock" (rtos default-stock 2 0))
               (n1-safe-set-tile "edt_kerf"  (rtos default-kerf 2 0))
 
-              ;; ---- Экспорт ----
               (n1-safe-set-tile "chk_xls"  (if default-xls  "1" "0"))
               (n1-safe-set-tile "chk_acad" (if default-acad "1" "0"))
 
-              ;; ---- Обработчики радиокнопок ----
               (n1-safe-action-tile "rb_line"     "(n1-select-radio \"rb_line\")")
               (n1-safe-action-tile "rb_mline"    "(n1-select-radio \"rb_mline\")")
               (n1-safe-action-tile "rb_dynblock" "(n1-select-radio \"rb_dynblock\")")
               (n1-safe-action-tile "rb_both"     "(n1-select-radio \"rb_both\")")
 
-              ;; ---- Обработчики списков типов ----
               (n1-safe-action-tile "popup_dynblock_type"
                 "(n1-on-dynblock-type-changed $value)")
               (n1-safe-action-tile "popup_mline_type"
                 "(n1-on-mline-type-changed $value)")
 
-              ;; ---- Обработка десятичной запятой (Р2.4) ----
               (n1-safe-action-tile "edt_stock"
                 "(setq *n1-tmp-stock* (atof (vl-string-translate \",\" \".\" $value)))")
               (n1-safe-action-tile "edt_kerf"
@@ -757,7 +1031,6 @@
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
 
-              ;; Результат: 8 элементов (M2: добавлен тип мультилинии)
               (if (= result 1)
                 (list
                   *n1-tmp-choice*
@@ -781,9 +1054,6 @@
 
 ;; ============================================================
 ;; Извлечение длин
-;; ОБНОВЛЕНО (Этап M2, редакция 2): MLINE — длина по координатам,
-;; допуск только прямые горизонталь/вертикаль; ломаные и
-;; диагональные отсеиваются со счётчиками
 ;; ============================================================
 (defun n1-extract-pieces (ss tol min-len max-len /
                             i ent typ len key pieces total geom
@@ -797,7 +1067,6 @@
     (setq typ (cdr (assoc 0 (entget ent))))
 
     (cond
-      ;; MLINE: геометрия по координатам (M2, редакция 2)
       ((= typ "MLINE")
        (setq geom (su-mline-cut-geom ent))
        (if geom
@@ -870,7 +1139,7 @@
 )
 
 ;; ============================================================
-;; Вывод неразмещённых деталей (сортировка по убыванию)
+;; Вывод неразмещённых деталей
 ;; ============================================================
 (defun n1-report-oversized (oversized stock / rec total-cnt sorted)
   (if oversized
@@ -893,7 +1162,7 @@
 )
 
 ;; ============================================================
-;; Преобразование списка длин в строку (Р2.1: параметр sep)
+;; Преобразование списка длин в строку
 ;; ============================================================
 (defun n1-list-to-str (lst sep / s x)
   (if (null sep) (setq sep " "))
@@ -908,61 +1177,92 @@
 ;; Раскладка хлыстов
 ;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
-    barHeight gap txtH x0 y0 maxy miny i bar pieces waste used util
-    curx p halfw str col labelX labelY1 labelY2)
-  (setq barHeight (/ stock 30.0) gap (* barHeight 0.7) txtH (* barHeight 0.30))
+    barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util
+    curx p str col labelX labelY1 labelY2 centerY
+    waste-txt-h waste-center-y waste-x)
+
+  ;; ============================================================
+  ;; ПАРАМЕТРЫ РАСКЛАДКИ (РЕГУЛИРОВАТЬ ЗДЕСЬ)
+  ;; ============================================================
+  ;; ОСЕВОЕ РАССТОЯНИЕ между хлыстами. Регулировать здесь.
+  (setq axisStep (* (/ stock 30.0) 1.7))
+  ;; ВЫСОТА ХЛЫСТА. Делитель: чем больше, тем тоньше хлыст.
+  (setq barHeight (/ stock 45.0))
+  ;; Зазор между хлыстами вычисляется автоматически
+  (setq gap (- axisStep barHeight))
+  ;; ВЫСОТА ТЕКСТА (фиксирована, НЕ зависит от высоты хлыста)
+  (setq txtH (* (/ stock 30.0) 0.30))
+  ;; ============================================================
+
   (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
   (foreach bar bars
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)) miny y0)
     (setq curx x0)
+
+    ;; ЗАЛИВКА ДЕТАЛЕЙ
     (foreach p pieces
       (setq col (n1-get-color color-map p))
-      (n1-draw-hatch (list curx y0) (list (+ curx p) (+ y0 barHeight))
-                     col (n1-trans-value *NEST-TRANSPARENCY*))
+      (n1-draw-filled-rect (list curx y0) (list (+ curx p) (+ y0 barHeight))
+                           col *CUTLINE-PART-TRANSPARENCY*)
       (setq curx (+ curx p kerf))
     )
+
+    ;; ЗАЛИВКА ОТХОДА
     (if (> waste 0.0)
-      (n1-draw-hatch (list (- (+ x0 stock) waste) y0)
-                     (list (+ x0 stock) (+ y0 barHeight))
-                     *NEST-COLOR-WASTE* (n1-trans-value *NEST-TRANSPARENCY*))
+      (n1-draw-filled-rect (list (- (+ x0 stock) waste) y0)
+                           (list (+ x0 stock) (+ y0 barHeight))
+                           *NEST-COLOR-WASTE* *CUTLINE-WASTE-TRANSPARENCY*)
     )
+
+    ;; Обводка хлыста
     (n1-draw-rect (list x0 y0) (list (+ x0 stock) (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
+
+    ;; ВЕРТИКАЛЬНЫЕ ЛИНИИ РЕЗА (две на деталь: граница детали + граница реза)
     (setq curx x0)
     (foreach p pieces
       (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
+      (n1-draw-line (list (+ curx p) y0) (list (+ curx p) (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
       (setq curx (+ curx p kerf))
     )
     (n1-draw-line (list curx y0) (list curx (+ y0 barHeight)) *NEST-COLOR-OUTLINE*)
 
-    (setq labelX (- x0 (* barHeight 2.75)))
-    (setq labelY1 (+ y0 (* barHeight 0.65)))
-    (setq labelY2 (+ y0 (* barHeight 0.20)))
-    (n1-draw-text (list labelX labelY1) txtH
-                  (strcat "Хлыст " (itoa i))
-                  *NEST-COLOR-LABEL*)
-    (n1-draw-text (list labelX labelY2) txtH
-                  (strcat "[" (rtos util 2 1) "%]")
-                  *NEST-COLOR-LABEL*)
+    ;; Метки хлыста: выравнивание по правому краю, вертикально от центра хлыста
+    ;; 0.6 — отступ левее от хлыста
+    ;; 1.0 — половина расстояния между метками
+    (setq labelX (- x0 (* barHeight 0.6)))
+    (setq centerY (+ y0 (* barHeight 0.5)))
+    (setq labelY1 (+ centerY (* txtH 1.0)))
+    (setq labelY2 (- centerY (* txtH 1.0)))
+    (n1-draw-text-right (list labelX labelY1) txtH
+                        (strcat "Хлыст " (itoa i))
+                        *NEST-COLOR-LABEL*)
+    (n1-draw-text-right (list labelX labelY2) txtH
+                        (strcat "[" (rtos util 2 1) "%]")
+                        *NEST-COLOR-LABEL*)
 
+    ;; ТЕКСТ ВНУТРИ ДЕТАЛЕЙ (жирный, жёлтый, середина)
     (setq curx x0)
     (foreach p pieces
-      (setq str (itoa (fix p)) halfw (* (strlen str) txtH 0.4)
-            col (n1-get-color color-map p))
-      (n1-draw-text (list (+ curx (* p 0.5) (- halfw)) (+ y0 (* barHeight 0.35)))
-                    txtH str col)
+      (setq str (itoa (fix p)))
+      (n1-draw-text-bold-center (list (+ curx (* p 0.5)) (+ y0 (* barHeight 0.5)))
+                                (* txtH 1.1) str *NEST-COLOR-PART-TEXT* 0.0)
       (setq curx (+ curx p kerf))
     )
+
+    ;; ТЕКСТ ОТХОДА (длина, поворот 90°, по центру хлыста, отступ 0.75)
     (if (> waste 0.0)
       (progn
-        (setq str (strcat "Отход " (itoa (fix waste)))
-              halfw (* (strlen str) txtH 0.4))
-        (n1-draw-text (list (+ (- (+ x0 stock) waste) (* waste 0.5) (- halfw))
-                            (+ y0 (* barHeight 0.35)))
-                      txtH str *NEST-COLOR-WASTE*)
+        (setq str (itoa (fix waste)))
+        (setq waste-txt-h (* txtH 1.25))
+        (setq waste-center-y (+ y0 (* barHeight 0.5)))
+        (setq waste-x (+ x0 stock (* barHeight 0.75)))
+        (n1-draw-text-bold-center (list waste-x waste-center-y)
+                                  waste-txt-h str *NEST-COLOR-WASTE* 90.0)
       )
     )
+    ;; Переход к следующему хлысту (осевое расстояние = barHeight + gap = axisStep)
     (setq y0 (- y0 barHeight gap))
   )
   (list (list (- x0 (* barHeight 2.0)) miny) (list (+ x0 stock) maxy))
@@ -1213,23 +1513,6 @@
       (write-line "   </Borders>" f)
       (write-line "  </Style>" f)
 
-      (write-line "  <Style ss:ID=\"Bold\">" f)
-      (write-line "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>" f)
-      (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
-      (write-line "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>" f)
-      (write-line "   <Borders>" f)
-      (write-line "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" f)
-      (write-line "   </Borders>" f)
-      (write-line "  </Style>" f)
-
-      (write-line "  <Style ss:ID=\"Label\">" f)
-      (write-line "   <Font ss:Bold=\"1\"/>" f)
-      (write-line "   <Alignment ss:Vertical=\"Center\"/>" f)
-      (write-line "  </Style>" f)
-
       (write-line "  <Style ss:ID=\"ReportTitle\">" f)
       (write-line "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>" f)
       (write-line "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>" f)
@@ -1477,7 +1760,7 @@
             (write-line "   <Row>" f)
             (write-line (strcat "    <Cell ss:Index=\"2\" ss:StyleID=\"SkipDataLeft\"><Data ss:Type=\"Number\">" (itoa (fix (car rec))) "</Data></Cell>") f)
             (write-line (strcat "    <Cell ss:StyleID=\"SkipDataMid\"><Data ss:Type=\"Number\">" (itoa (cadr rec)) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:Index=\"3\" ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
             (write-line "   </Row>" f)
           )
 
@@ -1551,12 +1834,11 @@
 
 ;; ============================================================
 ;; Главная функция
-;; ОБНОВЛЕНО (Этап M2): тип мультилинии в фильтре
 ;; ============================================================
 (defun cutline-main (layers-from-caller / ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
                        sorted bars
-                       bbox1 bbox2 bbox3 bbox p1 p2 color-map
+                       bbox0 bbox1 bbox2 bbox3 bbox-frame bbox p1 p2 color-map
                        barHeight sumInsPt num-bars stock-total-mm
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
@@ -1566,11 +1848,11 @@
                        export-xls export-acad
                        default-xls default-acad
                        default-stock default-kerf
-                       dialog-result r xls-ok)
+                       dialog-result r xls-ok
+                       old-transparency-display)
 
   (princ "\n=== Линейный раскрой мерного материала ===")
 
-  ;; 1. Слои
   (if (eq layers-from-caller 'ASK)
     (progn
       (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
@@ -1585,7 +1867,6 @@
 
   (princ (strcat "\n" (car (n1-layer-display-list layers))))
 
-  ;; 2. Выбор объектов
   (princ "\nВыберите объекты — исходные детали:")
   (princ "\n(принимаются LINE, MLINE и динамические блоки с длиной)")
   (princ "\n(если объекты уже выделены — Enter)")
@@ -1615,7 +1896,6 @@
     )
   )
 
-  ;; 2б. Диалог
   (setq default-stock *CUTLINE-LAST-STOCK*)
   (setq default-kerf  *CUTLINE-LAST-KERF*)
   (setq default-xls   *CUTLINE-LAST-XLS*)
@@ -1650,7 +1930,6 @@
     (T (setq dialog-result r))
   )
 
-  ;; Результат диалога: 8 элементов (M2: тип мультилинии)
   (setq user-filter   (car dialog-result)
         tol           (cadr dialog-result)
         stock         (caddr dialog-result)
@@ -1667,7 +1946,6 @@
 
   (princ "\nПараметры приняты из окна диалога.")
 
-  ;; 2в. Фильтрация
   (cond
     ((eq user-filter 'LINE)
      (setq ss (n1-filter-ss-by-type ss "LINE"))
@@ -1700,7 +1978,6 @@
                  (if export-xls  ".xls" "без .xls") ", "
                  (if export-acad "таблица AutoCAD" "без таблицы")))
 
-  ;; 3. Извлечение
   (setq pieces (n1-extract-pieces ss tol
                                   *CUTLINE-MIN-LENGTH* *CUTLINE-MAX-LENGTH*))
   (if (null pieces)
@@ -1711,7 +1988,6 @@
   (princ (strcat "\nВсего деталей: " (itoa (length pieces))
                  ", общее количество: " (itoa total-cnt)))
 
-  ;; 4. Разделение
   (setq split (n1-split-by-stock pieces stock))
   (setq pieces-ok (car split) pieces-oversized (cadr split))
 
@@ -1724,12 +2000,10 @@
     )
   )
 
-  ;; 5. Раскрой
   (setq sorted (n1-expand pieces-ok))
   (setq bars (n1-ffd sorted stock kerf))
   (n1-report bars stock kerf)
 
-  ;; 6. Сводка
   (setq num-bars (length bars))
   (setq stock-total-mm (* num-bars stock))
   (setq total-cnt 0 total-product-mm 0.0)
@@ -1747,7 +2021,6 @@
                  (rtos (/ stock-total-mm 1000.0) 2 2) " м.п."))
   (princ (strcat "\nКПД использования: " (rtos kpd 2 1) " %"))
 
-  ;; 7. Экспорт файла
   (if export-xls
     (progn
       (setq xls-ok
@@ -1763,12 +2036,14 @@
     (princ "\nГалочка .xls снята — файл не создается.")
   )
 
-  ;; 8. Раскладка AutoCAD
   (if export-acad
     (progn
       (setq insPt (getpoint "\nУкажите точку вставки раскладки: "))
       (if insPt
         (progn
+          (setq old-transparency-display (getvar "TRANSPARENCYDISPLAY"))
+          (n1-enable-transparency-display)
+
           (n1-ensure-italic-style)
           (setq color-map (n1-build-color-map pieces-ok))
           (setq baseName (vl-filename-base (getvar "DWGNAME")))
@@ -1785,10 +2060,19 @@
 
           (setq lastEnt (entlast))
 
+          ;; ШАПКА КАРТЫ РАСКРОЯ (над первым хлыстом)
+          (setq bbox0 (n1-draw-header insPt stock kerf))
+
+          ;; Раскладка хлыстов
           (setq bbox1 (n1-draw-layout bars stock kerf insPt color-map))
           (setq barHeight (/ stock 30.0))
-          (setq sumInsPt (list (+ (car (cadr bbox1)) (* barHeight 2.0))
-                               (cadr (cadr bbox1))))
+
+          ;; РАМКА вокруг шапки и хлыстов (без таблиц)
+          (setq bbox-frame (n1-draw-frame (n1-combine-bbox bbox0 bbox1)))
+
+          ;; Таблицы сдвинуты правее рамки, чтобы не пересекаться
+          (setq sumInsPt (list (+ (car (cadr bbox-frame)) (* barHeight 2.0))
+                               (cadr (cadr bbox-frame))))
           (setq bbox2 (n1-draw-summary bars pieces-ok stock sumInsPt color-map
                                         pieces-oversized))
           (setq bbox3
@@ -1820,7 +2104,8 @@
             (princ "\nНет объектов для создания блока.")
           )
 
-          (setq bbox (n1-combine-bbox bbox1
+          ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
+          (setq bbox (n1-combine-bbox bbox-frame
                         (if bbox3 (n1-combine-bbox bbox2 bbox3) bbox2)))
           (setq p1 (vlax-3d-point (list (car (car bbox)) (cadr (car bbox)) 0.0)))
           (setq p2 (vlax-3d-point (list (car (cadr bbox)) (cadr (cadr bbox)) 0.0)))
@@ -1832,6 +2117,8 @@
               (setq uMark nil)
             )
           )
+
+          (n1-disable-transparency-display old-transparency-display)
         )
         (princ "\nРаскладка пропущена.")
       )
