@@ -163,6 +163,20 @@
   (blockrename-visible-p name)
 )
 
+;; ============================================================
+;; ГЕНЕРАЦИЯ УНИКАЛЬНОГО ИМЕНИ БЛОКА
+;; Формат: <baseName>_1, <baseName>_2, ...
+;; ============================================================
+
+(defun blockrename-generate-unique-name (baseName / n testName)
+  (setq n 1)
+  (setq testName (strcat baseName "_" (itoa n)))
+  (while (tblsearch "BLOCK" testName)
+    (setq n (1+ n))
+    (setq testName (strcat baseName "_" (itoa n)))
+  )
+  testName
+)
 
 ;; ============================================================
 ;; ПОЛУЧЕНИЕ ВСЕХ ОПРЕДЕЛЕНИЙ БЛОКОВ
@@ -587,6 +601,145 @@
   )
 )
 
+;; ============================================================
+;; КОПИРОВАНИЕ БЛОКА С СОХРАНЕНИЕМ ДИНАМИЧЕСКИХ СВОЙСТВ
+;; Исправленная версия через WBLOCK + vla-InsertBlock
+;; ============================================================
+
+(defun blockrename-copy-block (old-name / new-name tempFile insPt oldEcho oldFiledia oldExpert
+                               acad doc blocks ms result newBlockObj insertedName newBlockDef)
+  (cond
+    ((blockrename-string-empty-p old-name)
+     (alert "Блок не выбран в списке.")
+     nil)
+
+    ((not (blockrename-renamable-p old-name))
+     (alert
+       (strcat "Блок \"" old-name
+               "\" является системным или анонимным\n"
+               "и не может быть скопирован."))
+     nil)
+
+    (T
+     ;; Генерируем уникальное имя
+     (setq new-name (blockrename-generate-unique-name old-name))
+
+     ;; Запрашиваем точку вставки
+     (setq insPt (getpoint (strcat "\nУкажите точку вставки копии \"" new-name "\": ")))
+     (if (null insPt)
+       (progn (princ "\nКопирование отменено.") nil)
+       (progn
+         ;; Генерируем уникальное имя временного файла
+         (setq tempFile
+           (strcat (getvar "TEMPPREFIX")
+                   "br_copy_"
+                   (itoa (fix (getvar "MILLISECS")))
+                   ".dwg"))
+
+         ;; Удаляем файл, если он существует
+         (if (findfile tempFile)
+           (vl-file-delete tempFile))
+
+         ;; Сохраняем и отключаем системные переменные
+         (setq oldEcho (getvar "CMDECHO"))
+         (setq oldFiledia (getvar "FILEDIA"))
+         (setq oldExpert (getvar "EXPERT"))
+         (setvar "CMDECHO" 0)
+         (setvar "FILEDIA" 0)
+         (setvar "EXPERT" 5)
+
+         ;; Получаем объекты
+         (setq acad (vlax-get-acad-object))
+         (setq doc (vla-get-ActiveDocument acad))
+         (setq blocks (vla-get-Blocks doc))
+         (setq ms (vla-get-ModelSpace doc))
+
+         ;; Экспортируем блок во временный файл через command (надёжнее для имён с пробелами)
+         (vl-catch-all-apply
+           '(lambda () (command "_.-WBLOCK" tempFile old-name))
+           '())
+
+         ;; Проверяем, что файл создан
+         (if (not (findfile tempFile))
+           (progn
+             (setvar "CMDECHO" oldEcho)
+             (setvar "FILEDIA" oldFiledia)
+             (setvar "EXPERT" oldExpert)
+             (alert (strcat "Не удалось создать временный файл для блока \"" old-name "\"."))
+             nil
+           )
+           (progn
+             ;; Вставляем блок из временного файла через vla-InsertBlock
+             (setq newBlockObj
+               (vl-catch-all-apply 'vla-InsertBlock
+                 (list ms
+                       (vlax-3d-point insPt)
+                       tempFile
+                       1.0 1.0 1.0 0.0)))
+
+             ;; Переименовываем вставленный блок в нужное имя
+             (if (and (not (vl-catch-all-error-p newBlockObj))
+                      newBlockObj)
+               (progn
+                 ;; Получаем имя вставленного блока
+                 (setq insertedName (vla-get-EffectiveName newBlockObj))
+
+                 ;; Переименовываем определение блока
+                 (if (and insertedName
+                          (not (= insertedName new-name))
+                          (not (tblsearch "BLOCK" new-name)))
+                   (progn
+                     (setq newBlockDef (vl-catch-all-apply 'vla-Item (list blocks insertedName)))
+                     (if (and (not (vl-catch-all-error-p newBlockDef)) newBlockDef)
+                       (vl-catch-all-apply 'vla-put-Name (list newBlockDef new-name))
+                     )
+                   )
+                 )
+               )
+             )
+
+             ;; Удаляем временный файл
+             (if (findfile tempFile)
+               (vl-file-delete tempFile))
+
+             ;; Восстанавливаем системные переменные
+             (setvar "CMDECHO" oldEcho)
+             (setvar "FILEDIA" oldFiledia)
+             (setvar "EXPERT" oldExpert)
+
+             ;; Обновляем глобальные переменные
+             (setq *BLOCKRENAME-ALL* (blockrename-all-names))
+             (blockrename-sticky-add new-name)
+             (setq *BLOCKRENAME-SELECTED* new-name)
+
+             (princ (strcat "\nСоздана копия: \"" old-name "\" -> \"" new-name "\""))
+             T
+           )
+         )
+       )
+     )
+    )
+  )
+)
+
+;; ============================================================
+;; АВТОНОМНАЯ КОМАНДА КОПИРОВАНИЯ БЛОКА
+;; ============================================================
+
+(defun c:blockcopy ( / name)
+  (princ "\n--- Копирование блока ---")
+  (setq name (getstring T "\nИмя блока для копирования: "))
+  (cond
+    ((blockrename-string-empty-p name)
+     (princ "\nИмя блока не задано."))
+    ((not (tblsearch "BLOCK" name))
+     (princ (strcat "\nБлок \"" name "\" не найден.")))
+    (T
+     (blockrename-copy-block name)))
+  (princ)
+)
+
+(defun c:КОПИЯБЛОКА () (c:blockcopy))
 
 ;; ============================================================
 ;; ПЕРЕИМЕНОВАНИЕ В ДИАЛОГЕ
@@ -676,6 +829,19 @@
   )
 )
 
+;; ============================================================
+;; ОБРАБОТЧИК КНОПКИ "КОПИЯ"
+;; Устанавливает глобальный флаг и закрывает диалог
+;; ============================================================
+
+(if (not (boundp '*BLOCKRENAME-COPY-REQUESTED*))
+  (setq *BLOCKRENAME-COPY-REQUESTED* nil)
+)
+
+(defun blockrename-copy-handler ()
+  (setq *EXTRACTION-ACTION* 'COPYBLOCK)
+  (done_dialog 1)
+)
 
 ;; ============================================================
 ;; АВТОНОМНАЯ КОМАНДА

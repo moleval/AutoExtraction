@@ -1434,6 +1434,7 @@
               (action_tile "chk_filter_anonymous" "(blockrename-filter-anonymous)")
               (action_tile "edt_block_search"     "(blockrename-search-changed)")
               (action_tile "lst_blocks"           "(blockrename-selected)")
+              (action_tile "btn_block_copy"       "(blockrename-copy-handler)")
               (action_tile "btn_block_rename"     "(blockrename-rename)")
 
               ;; --- Запуск модального диалога ---
@@ -1453,6 +1454,14 @@
                    *EXTRACTION-EXPORT-TXT*
                    *EXTRACTION-CREATE-TABLE*
                    nil)
+                )
+
+                ((eq *EXTRACTION-ACTION* 'COPYBLOCK)
+                 (if (and (boundp '*BLOCKRENAME-SELECTED*)
+                          *BLOCKRENAME-SELECTED*)
+                   (blockrename-copy-block *BLOCKRENAME-SELECTED*)
+                   (princ "\nБлок для копирования не выбран.")
+                 )
                 )
 
                 ((eq *EXTRACTION-ACTION* 'SAVEAS)

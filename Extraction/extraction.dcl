@@ -73,19 +73,6 @@ extraction_dialog : dialog {
 
   // ==========================================================
   // ВЕРХНИЙ РЯД: СЛОИ | БЛОКИ
-  //
-  // Слои:
-  //   1 строка кнопок
-  //   14 строк list_box
-  //   1 строка text
-  //   = 16
-  //
-  // Блоки:
-  //   1 строка edit_box
-  //   13 строк list_box
-  //   1 строка edit_box
-  //   1 строка button
-  //   = 16
   // ==========================================================
 
   : row {
@@ -151,38 +138,43 @@ extraction_dialog : dialog {
       fixed_width = true;
 
       : edit_box {
-
         key = "edt_block_search";
-
         label = "Поиск:";
-
         edit_width = 24;
       }
 
       : list_box {
-
         key = "lst_blocks";
-
         width = 36;
         height = 13;
-
         multiple_select = false;
       }
 
       : edit_box {
-
         key = "edt_block_rename";
-
         label = "Новое имя:";
-
         edit_width = 24;
       }
 
-      : button {
+      // ------------------------------------------------------
+      // КНОПКИ КОПИЯ + ПЕРЕИМЕНОВАТЬ
+      // Суммарная ширина 18+18 = 36 = ширина list_box
+      // ------------------------------------------------------
 
-        key = "btn_block_rename";
+      : row {
+        : button {
+          key = "btn_block_copy";
+          label = "Копия";
+          width = 18;
+          fixed_width = true;
+        }
 
-        label = "Переименовать";
+        : button {
+          key = "btn_block_rename";
+          label = "Переименовать";
+          width = 18;
+          fixed_width = true;
+        }
       }
     }
   }
