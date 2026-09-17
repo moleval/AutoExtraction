@@ -187,6 +187,8 @@
 )
 
 ;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
+;; Агрегат полилиний: (ключ слой номинал высота ширина кол-во площадь)
+;; Сортировка: слой ? тип (номинал) ? высота ? ширина
 (defun cl-aggregate (records detail / acc rec key found out)
   (setq acc '())
   (foreach rec records
@@ -207,9 +209,17 @@
                             (nth 2 rec) (nth 3 rec) 1 (nth 4 rec)) acc))))
   (setq out (vl-sort acc
     '(lambda (a b)
-       (if (= (cadr a) (cadr b))
-         (cl-str-smart-less (caddr a) (caddr b))
-         (cl-str-smart-less (cadr a) (cadr b))))))
+       (cond
+         ;; Слой
+         ((< (strcase (nth 1 a)) (strcase (nth 1 b))) T)
+         ((> (strcase (nth 1 a)) (strcase (nth 1 b))) nil)
+         ;; Высота (nth 3)
+         ((< (nth 3 a) (nth 3 b)) T)
+         ((> (nth 3 a) (nth 3 b)) nil)
+         ;; Ширина (nth 4)
+         ((< (nth 4 a) (nth 4 b)) T)
+         ((> (nth 4 a) (nth 4 b)) nil)
+         (T nil)))))
   out
 )
 
@@ -355,6 +365,7 @@
 )
 
 ;; Агрегат блоков: (ключ слой тип rC rB кол-во площадь подрезная)
+;; Сортировка: слой ? тип ? высота ? ширина (для всех кассет)
 (defun cl-blocks-aggregate (records / acc rec layer disp c b area is-cut
                              rC rB key found)
   (setq acc '())
@@ -378,13 +389,18 @@
   (setq acc (vl-sort acc
     '(lambda (a b)
        (cond
+         ;; Слой
          ((< (strcase (nth 1 a)) (strcase (nth 1 b))) T)
          ((> (strcase (nth 1 a)) (strcase (nth 1 b))) nil)
+         ;; Тип
          ((< (strcase (nth 2 a)) (strcase (nth 2 b))) T)
          ((> (strcase (nth 2 a)) (strcase (nth 2 b))) nil)
+         ;; Высота (nth 4)
+         ((< (nth 4 a) (nth 4 b)) T)
+         ((> (nth 4 a) (nth 4 b)) nil)
+         ;; Ширина (nth 3)
          ((< (nth 3 a) (nth 3 b)) T)
          ((> (nth 3 a) (nth 3 b)) nil)
-         ((< (nth 4 a) (nth 4 b)) T)
          (T nil)))))
   acc
 )
@@ -546,8 +562,8 @@
                              (vl-catch-all-error-message tbl)))
               (progn
                 (vla-SetColumnWidth tbl 0 col0Width)
-                (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.0))
-                (vla-SetColumnWidth tbl 2 (* maxTypeLen 3.0))
+                (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.5))
+                (vla-SetColumnWidth tbl 2 (* maxTypeLen 3.5))
                 (vla-SetColumnWidth tbl 3 30.0)
                 (vla-SetColumnWidth tbl 4 30.0)
                 (vla-SetColumnWidth tbl 5 25.0)
@@ -1084,7 +1100,7 @@
 ;; ТАБЛИЦЫ ПОЛИЛИНИЙ (К2)
 ;; ============================================================
 (defun cl-create-table-summary (data / pt tbl row nRows nCols space
-                                    rec total-cnt total-area)
+                                    rec total-cnt total-area maxLayerLen layerStr)
   (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
   (if (null pt)
     (progn (princ "\nТаблица пропущена.") nil)
@@ -1095,8 +1111,15 @@
       (setq space (vla-get-modelspace
                     (vla-get-activedocument (vlax-get-acad-object))))
       (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
+      
+      (setq maxLayerLen 10)
+      (foreach rec data
+        (setq layerStr (nth 1 rec))
+        (if (> (strlen layerStr) maxLayerLen)
+          (setq maxLayerLen (strlen layerStr))))
+      
       (vla-SetColumnWidth tbl 0 15.0)
-      (vla-SetColumnWidth tbl 1 90.0)
+      (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.5))
       (vla-SetColumnWidth tbl 2 30.0)
       (vla-SetColumnWidth tbl 3 35.0)
       (ts-ac-title tbl 0 "Облицовка (полилинии)" 4)
@@ -1152,8 +1175,10 @@
             (setq layerStr (nth 1 grp))
             (if (> (strlen layerStr) maxLayerLen)
               (setq maxLayerLen (strlen layerStr))))
+          ;; Добавляем запас для русских символов и пробелов
+          (setq maxLayerLen (+ maxLayerLen 2))
           ;; Итоги и автоподгон — один проход по слоям
-          (setq total-cnt 0 total-area 0.0 maxNumLen 3)
+          (setq total-cnt 0 total-area 0.0 maxNumLen 3.5)
           (setq layerGroups (cl-group-blocks-by-layer data))
           (setq layerIdx 1)
           (foreach lg layerGroups
@@ -1184,7 +1209,7 @@
                              (vl-catch-all-error-message tbl)))
               (progn
                 (vla-SetColumnWidth tbl 0 col0Width)
-                (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.0))
+                (vla-SetColumnWidth tbl 1 (* maxLayerLen 3.5))
                 (vla-SetColumnWidth tbl 2 30.0)
                 (vla-SetColumnWidth tbl 3 30.0)
                 (vla-SetColumnWidth tbl 4 25.0)
