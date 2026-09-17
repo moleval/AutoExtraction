@@ -781,7 +781,7 @@
               (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa (nth 3 grp)) "</Data></Cell>") f)
               (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
               (if is-cut
-                (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
+                (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f)
                 (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(R" (itoa row-num) "C4*R" (itoa row-num) "C5/1000000*R" (itoa row-num) "C6,2)\"><Data ss:Type=\"Number\">" (rtos (cl-round2 grpArea) 2 2) "</Data></Cell>") f))
               (write-line "   </Row>" f)
               (setq row-num (1+ row-num)))
