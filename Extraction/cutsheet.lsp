@@ -210,7 +210,7 @@
     nil)
 )
 
-(defun cs-block-area-from-props (props w h / )
+(defun cs-block-area-from-props (props w h)
   ;; Всегда кроим как прямоугольник (без учёта вырезов углов)
   (/ (* w h) 1000000.0)
 )
