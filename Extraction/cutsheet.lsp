@@ -489,106 +489,257 @@
   out
 )
 
-(defun cs-expanded-sorted (records / sorted)
-  (setq sorted (vl-sort records '(lambda (a b)
-    (cond
-      ((> (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) T)
-      ((< (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) nil)
-      ((> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) T)
-      ((< (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) nil)
-      (T (< (car a) (car b)))))))
-  sorted
-)
+;; ================= SORT / NESTING (MaxRects упрощённый) =================
 
-(defun cs-make-free-sheet (w h) (list 0.0 0.0 w h))
-(defun cs-free-x (r) (nth 0 r))
-(defun cs-free-y (r) (nth 1 r))
-(defun cs-free-w (r) (nth 2 r))
-(defun cs-free-h (r) (nth 3 r))
+(defun cs-merge-eps () 0.001)
 
-(defun cs-free-split-one (fr pw ph kerf / fx fy fw fh occW occH out)
-  (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
-  (setq occW (if (> (- fw pw) kerf) (+ pw kerf) pw) occH (if (> (- fh ph) kerf) (+ ph kerf) ph))
-  (setq out '())
-  (if (> (- fw occW) 1e-8) (setq out (cons (list (+ fx occW) fy (- fw occW) fh) out)))
-  (if (> (- fh occH) 1e-8) (setq out (cons (list fx (+ fy occH) occW (- fh occH)) out)))
-  (reverse out)
-)
-
-(defun cs-prune-free (free minSide / out a b drop keep)
-  (setq out '())
-  (foreach a free (if (and (> (nth 2 a) minSide) (> (nth 3 a) minSide)) (setq out (cons a out))))
-  (setq free (reverse out) out '())
-  (foreach a free
-    (setq drop nil)
-    (foreach b free
-      (if (and (not (equal a b)) (>= (nth 0 a) (nth 0 b)) (>= (nth 1 a) (nth 1 b))
-               (<= (+ (nth 0 a) (nth 2 a)) (+ (nth 0 b) (nth 2 b)))
-               (<= (+ (nth 1 a) (nth 3 a)) (+ (nth 1 b) (nth 3 b))))
-        (setq drop T)))
-    (if (not drop) (setq out (cons a out))))
-  (reverse out)
-)
-
-(defun cs-find-placement-in-free (freeRects pw ph allowRotate / fr best bestScore score dx dy minL maxL)
-  (setq best nil bestScore nil)
-  (foreach fr freeRects
-    (if (and (<= pw (+ (nth 2 fr) 1e-8)) (<= ph (+ (nth 3 fr) 1e-8)))
+;; Скоринг размещения детали в свободном прямоугольнике
+;; Усиленный: контакты, выравнивание, приоритет левого нижнего угла
+(defun cs-score-rect (rw rh fx fy fw fh usedParts curSheet sheetW sheetH / areaFit shortFit longFit fragmentation contact alignBonus distPenalty score p px py pw ph overlap)
+  (setq areaFit (- (* fw fh) (* rw rh)))
+  (setq shortFit (if (< (- fw rw) (- fh rh)) (- fw rw) (- fh rh)))
+  (setq longFit (if (> (- fw rw) (- fh rh)) (- fw rw) (- fh rh)))
+  (setq fragmentation (abs (- (- fw rw) (- fh rh))))
+  
+  ;; Контактный скоринг
+  (setq contact 0.0)
+  (if (<= fx (cs-merge-eps)) (setq contact (+ contact (* rh 15.0))))
+  (if (<= fy (cs-merge-eps)) (setq contact (+ contact (* rw 15.0))))
+  (if (>= (+ fx rw) (- sheetW (cs-merge-eps))) (setq contact (+ contact (* rh 15.0))))
+  (if (>= (+ fy rh) (- sheetH (cs-merge-eps))) (setq contact (+ contact (* rw 15.0))))
+  (if (< (- fw rw) (cs-merge-eps)) (setq contact (+ contact (* rh 5.0))))
+  (if (< (- fh rh) (cs-merge-eps)) (setq contact (+ contact (* rw 5.0))))
+  
+  ;; Контакт с деталями и выравнивание
+  (setq alignBonus 0.0)
+  (foreach p usedParts
+    (if (= (car p) curSheet)
       (progn
-        (setq dx (- (nth 2 fr) pw) dy (- (nth 3 fr) ph) minL (min dx dy) maxL (max dx dy) score (list minL maxL 0))
-        (if (or (null bestScore) (< (car score) (car bestScore)) (and (= (car score) (car bestScore)) (< (cadr score) (cadr bestScore))))
-          (setq bestScore score best (list (car score) (nth 0 fr) (nth 1 fr) pw ph 0))))))
-  (if allowRotate
-    (foreach fr freeRects
-      (if (and (<= ph (+ (nth 2 fr) 1e-8)) (<= pw (+ (nth 3 fr) 1e-8)))
-        (progn
-          (setq dx (- (nth 2 fr) ph) dy (- (nth 3 fr) pw) minL (min dx dy) maxL (max dx dy) score (list minL maxL 1))
-          (if (or (null bestScore) (< (car score) (car bestScore)) (and (= (car score) (car bestScore)) (< (cadr score) (cadr bestScore))))
-            (setq bestScore score best (list (car score) (nth 0 fr) (nth 1 fr) ph pw 1)))))))
-  best
+        (setq px (nth 1 p) py (nth 2 p) pw (nth 3 p) ph (nth 4 p))
+        ;; Вертикальный контакт
+        (if (or (< (abs (- px (+ fx rw))) (cs-merge-eps))
+                (< (abs (- (+ px pw) fx)) (cs-merge-eps)))
+          (progn
+            (setq overlap (- (min (+ py ph) (+ fy rh)) (max py fy)))
+            (if (> overlap 0) (setq contact (+ contact (* overlap 20.0))))))
+        ;; Горизонтальный контакт
+        (if (or (< (abs (- py (+ fy rh))) (cs-merge-eps))
+                (< (abs (- (+ py ph) fy)) (cs-merge-eps)))
+          (progn
+            (setq overlap (- (min (+ px pw) (+ fx rw)) (max px fx)))
+            (if (> overlap 0) (setq contact (+ contact (* overlap 20.0))))))
+        ;; Выравнивание по координатам
+        (if (< (abs (- fx px)) (cs-merge-eps)) (setq alignBonus (+ alignBonus 80.0)))
+        (if (< (abs (- fy py)) (cs-merge-eps)) (setq alignBonus (+ alignBonus 80.0)))
+        (if (< (abs (- (+ fx rw) (+ px pw))) (cs-merge-eps)) (setq alignBonus (+ alignBonus 50.0)))
+        (if (< (abs (- (+ fy rh) (+ py ph))) (cs-merge-eps)) (setq alignBonus (+ alignBonus 50.0))))))
+  
+  ;; НОВОЕ: Штраф за расстояние от левого нижнего угла
+  ;; Прижимает детали к началу координат для формирования деловых остатков
+  (setq distPenalty (+ (* fx 0.3) (* fy 0.3)))
+  
+  ;; Итоговый скоринг (меньше = лучше)
+  (setq score (+ (* areaFit 0.001)
+                 (* shortFit 5.0)
+                 (* longFit 1.0)
+                 (* fragmentation 0.5)
+                 (- (* contact 12.0))
+                 (- alignBonus)
+                 distPenalty))
+  score
 )
 
-(defun cs-add-placement (freeRects placement kerf minSide / newFree fr px py pw ph)
+;; Вырезание занятой области с учётом керфа
+(defun cs-subtract-rect (freeRects rx ry rw rh kerf / newFree fr fx fy fw fh)
   (setq newFree '())
-  (setq px (nth 1 placement) py (nth 2 placement) pw (nth 3 placement) ph (nth 4 placement))
   (foreach fr freeRects
-    (if (not (and (>= px (nth 0 fr)) (>= py (nth 1 fr)) (< px (+ (nth 0 fr) (nth 2 fr))) (< py (+ (nth 1 fr) (nth 3 fr)))))
+    (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
+    (if (or (>= rx (+ fx fw)) (<= (+ rx rw) fx)
+            (>= ry (+ fy fh)) (<= (+ ry rh) fy))
       (setq newFree (cons fr newFree))
-      (setq newFree (append (cs-free-split-one fr pw ph kerf) newFree))))
-  (cs-prune-free newFree minSide)
+      (progn
+        (if (> (- ry fy) kerf)
+          (setq newFree (cons (list fx fy fw (- ry fy kerf)) newFree)))
+        (if (> (- (+ fy fh) (+ ry rh)) kerf)
+          (setq newFree (cons (list fx (+ ry rh kerf) fw (- (+ fy fh) (+ ry rh) kerf)) newFree)))
+        (if (> (- rx fx) kerf)
+          (setq newFree (cons (list fx fy (- rx fx kerf) fh) newFree)))
+        (if (> (- (+ fx fw) (+ rx rw)) kerf)
+          (setq newFree (cons (list (+ rx rw kerf) fy (- (+ fx fw) (+ rx rw) kerf) fh) newFree))))))
+  (cs-prune-free-small newFree)
 )
 
-(defun cs-new-sheet (w h) (list (list (cs-make-free-sheet w h)) '() 0.0 0.0))
-(defun cs-sheet-placement (sheet w h rotateFlag / p) (setq p (cs-find-placement-in-free (car sheet) w h rotateFlag)) p)
+;; Удаление маленьких прямоугольников
+(defun cs-prune-free-small (freeRects / out fr)
+  (setq out '())
+  (foreach fr freeRects
+    (if (and (> (nth 2 fr) 1.0) (> (nth 3 fr) 1.0))
+      (setq out (cons fr out))))
+  (reverse out)
+)
 
-(defun cs-sheet-add (sheet placement part kerf minSide / newFree placements bboxArea actual)
-  (setq newFree (cs-add-placement (car sheet) placement kerf minSide))
-  (setq placements (cons (list part
-                               (nth 1 placement)
-                               (nth 2 placement)
-                               (nth 3 placement)
-                               (nth 4 placement)
-                               (nth 5 placement))
-                         (cadr sheet)))
-  (setq bboxArea (+ (nth 2 sheet)
-                    (* (nth 4 part) (nth 5 part) (/ 1.0 1000000.0))))
-  (setq actual (+ (nth 3 sheet) (nth 6 part)))
-  (list newFree placements bboxArea actual))
+;; Получить размещённые детали на листе для скоринга
+(defun cs-get-used-parts (sheet / out p)
+  (setq out '())
+  (foreach p (cadr sheet)
+    (setq out (cons (list 0 (nth 1 p) (nth 2 p) (nth 3 p) (nth 4 p)) out)))
+  (reverse out)
+)
 
-(defun cs-nest (parts sheetW sheetH kerf rotateFlag / sheets part best bestIdx bestP i sheet newSheet p oversized minSide)
+;; Упаковка деталей в листы (один проход)
+(defun cs-pack-rects (parts sheetW sheetH kerf rotateFlag / sheets oversized freeRects usedParts part pw ph bestScore bestX bestY bestW bestH bestRot bestSheetIdx found fr fx fy fw fh score sheetIdx sheet)
   (setq sheets '() oversized '())
-  (setq minSide (* 0.25 (min sheetW sheetH)))
+  (setq sheets (list (list (list (list 0.0 0.0 sheetW sheetH)) '() 0.0 0.0)))
+  
   (foreach part parts
-    (setq best nil bestIdx nil bestP nil i 0)
+    (setq pw (nth 4 part) ph (nth 5 part))
+    (setq bestScore 1e15 bestX nil bestY nil bestW nil bestH nil bestRot 0 bestSheetIdx nil found nil)
+    (setq sheetIdx 0)
+    
     (foreach sheet sheets
-      (setq p (cs-sheet-placement sheet (nth 4 part) (nth 5 part) rotateFlag))
-      (if p (if (or (null bestP) (< (car p) (car bestP)) (and (= (car p) (car bestP)) (< (cadr p) (cadr bestP)))) (setq bestP p bestIdx i)))
-      (setq i (1+ i)))
-    (if bestP
-      (progn (setq sheet (nth bestIdx sheets)) (setq sheet (cs-sheet-add sheet bestP part kerf minSide)) (setq sheets (subst sheet (nth bestIdx sheets) sheets)))
-      (progn (setq newSheet (cs-new-sheet sheetW sheetH)) (setq p (cs-sheet-placement newSheet (nth 4 part) (nth 5 part) rotateFlag))
-        (if p (setq sheets (append sheets (list (cs-sheet-add newSheet p part kerf minSide)))) (setq oversized (cons part oversized))))))
+      (setq freeRects (car sheet))
+      (foreach fr freeRects
+        (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
+        (if (and (<= pw fw) (<= ph fh))
+          (progn
+            (setq score (cs-score-rect pw ph fx fy fw fh (cs-get-used-parts sheet) sheetIdx sheetW sheetH))
+            (if (< score bestScore)
+              (setq bestScore score bestX fx bestY fy bestW pw bestH ph bestRot 0 bestSheetIdx sheetIdx found T))))
+        (if (and rotateFlag (<= ph fw) (<= pw fh))
+          (progn
+            (setq score (cs-score-rect ph pw fx fy fw fh (cs-get-used-parts sheet) sheetIdx sheetW sheetH))
+            (if (< score bestScore)
+              (setq bestScore score bestX fx bestY fy bestW ph bestH pw bestRot 1 bestSheetIdx sheetIdx found T)))))
+      (setq sheetIdx (1+ sheetIdx)))
+    
+    (if (not found)
+      (progn
+        (setq sheets (append sheets (list (list (list (list 0.0 0.0 sheetW sheetH)) '() 0.0 0.0))))
+        (setq sheetIdx (1- (length sheets)))
+        (setq freeRects (list (list 0.0 0.0 sheetW sheetH)))
+        (foreach fr freeRects
+          (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
+          (if (and (<= pw fw) (<= ph fh))
+            (progn
+              (setq score (cs-score-rect pw ph fx fy fw fh '() sheetIdx sheetW sheetH))
+              (if (< score bestScore)
+                (setq bestScore score bestX fx bestY fy bestW pw bestH ph bestRot 0 bestSheetIdx sheetIdx found T))))
+          (if (and rotateFlag (<= ph fw) (<= pw fh))
+            (progn
+              (setq score (cs-score-rect ph pw fx fy fw fh '() sheetIdx sheetW sheetH))
+              (if (< score bestScore)
+                (setq bestScore score bestX fx bestY fy bestW ph bestH pw bestRot 1 bestSheetIdx sheetIdx found T)))))))
+    
+    (if found
+      (progn
+        (setq sheet (nth bestSheetIdx sheets))
+        (setq sheet (list
+                      (cs-subtract-rect (car sheet) bestX bestY bestW bestH kerf)
+                      (cons (list part bestX bestY bestW bestH bestRot) (cadr sheet))
+                      (+ (nth 2 sheet) (* bestW bestH (/ 1.0 1000000.0)))
+                      (+ (nth 3 sheet) (nth 6 part))))
+        (setq sheets (subst sheet (nth bestSheetIdx sheets) sheets)))
+      (setq oversized (cons part oversized))))
+  
   (list sheets (reverse oversized))
+)
+
+;; Сортировка по площади (убывание)
+(defun cs-sort-by-area (records)
+  (vl-sort records
+    '(lambda (a b) (> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b)))))
+)
+
+;; Сортировка по максимальной стороне (убывание)
+(defun cs-sort-by-max-side (records)
+  (vl-sort records
+    '(lambda (a b) (> (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b)))))
+)
+
+;; Сортировка по минимальной стороне (убывание)
+(defun cs-sort-by-min-side (records)
+  (vl-sort records
+    '(lambda (a b) (> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b)))))
+)
+
+;; Подсчёт использования площади
+(defun cs-calc-utilization (sheets sheetW sheetH / used)
+  (setq used 0.0)
+  (foreach sheet sheets
+    (setq used (+ used (nth 2 sheet))))
+  (if (> (length sheets) 0)
+    (/ (* used 100.0) (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
+    0.0)
+)
+
+;; Главная функция раскроя - пробует 3 стратегии и выбирает лучшую
+(defun cs-nest (parts sheetW sheetH kerf rotateFlag / result1 result2 result3 bestResult bestSheets bestUtil sheets util)
+  ;; Стратегия 1: по площади
+  (setq result1 (cs-pack-rects (cs-sort-by-area parts) sheetW sheetH kerf rotateFlag))
+  (setq sheets (car result1) util (cs-calc-utilization sheets sheetW sheetH))
+  (setq bestResult result1 bestSheets (length sheets) bestUtil util)
+  
+  ;; Стратегия 2: по максимальной стороне
+  (setq result2 (cs-pack-rects (cs-sort-by-max-side parts) sheetW sheetH kerf rotateFlag))
+  (setq sheets (car result2) util (cs-calc-utilization sheets sheetW sheetH))
+  (if (or (< (length sheets) bestSheets)
+          (and (= (length sheets) bestSheets) (> util bestUtil)))
+    (setq bestResult result2 bestSheets (length sheets) bestUtil util))
+  
+  ;; Стратегия 3: по минимальной стороне
+  (setq result3 (cs-pack-rects (cs-sort-by-min-side parts) sheetW sheetH kerf rotateFlag))
+  (setq sheets (car result3) util (cs-calc-utilization sheets sheetW sheetH))
+  (if (or (< (length sheets) bestSheets)
+          (and (= (length sheets) bestSheets) (> util bestUtil)))
+    (setq bestResult result3 bestSheets (length sheets) bestUtil util))
+  
+  ;; Оптимизация последнего листа
+  (setq bestResult (list (cs-optimize-last-sheet (car bestResult) sheetW sheetH kerf rotateFlag)
+                         (cadr bestResult)))
+  
+  bestResult
+)
+
+;; Возвращает список без последнего элемента
+(defun cs-butlast (lst)
+  (if (<= (length lst) 1)
+    '()
+    (reverse (cdr (reverse lst))))
+)
+
+(defun cs-optimize-last-sheet (sheets sheetW sheetH kerf rotateFlag / lastSheet lastParts result1 result2 result3 bestResult bestScore score newSheets)
+  (if (or (null sheets) (<= (length sheets) 1))
+    sheets
+    (progn
+      (setq lastSheet (last sheets))
+      
+      (if (or (null lastSheet) (not (listp lastSheet)))
+        sheets
+        (progn
+          (setq lastParts (mapcar '(lambda (p) (car p)) (cadr lastSheet)))
+          
+          (if (or (null lastParts) (<= (length lastParts) 1))
+            sheets
+            (progn
+              ;; Стратегия 1: по убыванию площади
+              (setq result1 (cs-pack-rects (cs-sort-by-area lastParts) sheetW sheetH kerf rotateFlag))
+              (setq bestResult result1 bestScore (cs-calc-utilization (car result1) sheetW sheetH))
+              
+              ;; Стратегия 2: по возрастанию площади
+              (setq result2 (cs-pack-rects (reverse (cs-sort-by-area lastParts)) sheetW sheetH kerf rotateFlag))
+              (setq score (cs-calc-utilization (car result2) sheetW sheetH))
+              (if (> score bestScore)
+                (setq bestResult result2 bestScore score))
+              
+              ;; Стратегия 3: по минимальной стороне
+              (setq result3 (cs-pack-rects (cs-sort-by-min-side lastParts) sheetW sheetH kerf rotateFlag))
+              (setq score (cs-calc-utilization (car result3) sheetW sheetH))
+              (if (> score bestScore)
+                (setq bestResult result3 bestScore score))
+              
+              ;; Заменяем последний лист (без butlast)
+              (setq newSheets (append (reverse (cdr (reverse sheets))) (car bestResult)))
+              newSheets))))))
 )
 
 (defun cs-total-count (records / n r) (setq n 0) (foreach r records (setq n (1+ n))) n)
@@ -955,28 +1106,75 @@
   name
 )
 
-(defun cs-wrap-to-block (blockName insPt ss / oldEcho oldOsmode oldCmddia ok refs r basePt)
+(defun cs-wrap-to-block (blockName basePt insertPt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr acad doc ms insertPt3 result insertObj)
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
-      (setq oldEcho (getvar "CMDECHO") oldOsmode (getvar "OSMODE") oldCmddia (getvar "CMDDIA"))
-      (setq basePt (list (car insPt) (cadr insPt) 0.0))
-      (vl-catch-all-apply 'setvar (list "CMDECHO" 1))
-      (vl-catch-all-apply 'setvar (list "OSMODE" 0))
-      (vl-catch-all-apply 'setvar (list "CMDDIA" 0))
-      (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePt ss ""))
+      (setq oldEcho (getvar "CMDECHO")
+            oldOsmode (getvar "OSMODE")
+            oldCmddia (getvar "CMDDIA")
+            oldFiledia (getvar "FILEDIA"))
+      
+      (setq basePtStr (strcat (rtos (car basePt) 2 6) "," 
+                              (rtos (cadr basePt) 2 6) ",0"))
+      
+      ;; Отладка: выводим точки
+      (princ (strcat "\n[wrap] basePt (базовая): " 
+                     (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+      (princ (strcat "\n[wrap] insertPt (вставка): " 
+                     (rtos (car insertPt) 2 2) "," (rtos (cadr insertPt) 2 2)))
+      
+      ;; Отключаем привязки
+      (setvar "CMDECHO" 1)
+      (setvar "OSMODE" 0)
+      (setvar "CMDDIA" 0)
+      (setvar "FILEDIA" 0)
+      
+      ;; Создаём блок
+      (vl-catch-all-apply 'vl-cmdf 
+        (list "_.-BLOCK" blockName basePtStr ss ""))
+      
+      ;; Ждём завершения команды
+      (vl-catch-all-apply 'vl-cmdf (list ""))
+      
       (setq ok (tblsearch "BLOCK" blockName))
       (setq refs 0)
-      (if ok (progn (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName)))) (if r (setq refs (sslength r)))))
-      (vl-catch-all-apply 'setvar (list "CMDDIA" oldCmddia))
-      (vl-catch-all-apply 'setvar (list "OSMODE" oldOsmode))
-      (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
-      (cond
-        ((and ok (> refs 0)) (princ (strcat "\n[wrap] Блок \"" blockName "\" создан, ссылок: " (itoa refs))) T)
-        (ok (princ "\n[wrap] Определение есть, ссылки нет — вставляю.")
-            (entmake (list '(0 . "INSERT") '(100 . "AcDbEntity") '(100 . "AcDbBlockReference") (cons 2 blockName) (cons 10 basePt) '(41 . 1.0) '(42 . 1.0) '(43 . 1.0) '(50 . 0.0))) T)
-        (T (princ (strcat "\n[wrap] Блок \"" blockName "\" НЕ создан.")) nil)))
-  )
+      (if ok
+        (progn
+          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+          (if r (setq refs (sslength r)))))
+      
+      (princ (strcat "\n[wrap] Блок создан: " (if ok "да" "нет") ", ссылок: " (itoa refs)))
+      
+      ;; Если ссылок нет — вставляем блок
+      (if (and ok (= refs 0))
+        (progn
+          (princ "\n[wrap] Вставляю блок через ActiveX")
+          (setq acad (vlax-get-acad-object))
+          (setq doc (vla-get-ActiveDocument acad))
+          (setq ms (vla-get-ModelSpace doc))
+          (setq insertPt3 (vlax-3d-point (list (car insertPt) (cadr insertPt) 0.0)))
+          
+          ;; Вставляем блок и проверяем результат
+          (setq result (vl-catch-all-apply 'vla-InsertBlock 
+            (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
+          
+          (if (vl-catch-all-error-p result)
+            (princ (strcat "\n[wrap] Ошибка вставки: " (vl-catch-all-error-message result)))
+            (progn
+              ;; Проверяем координаты вставленного блока
+              (setq insertObj result)
+              (setq insertPt3 (vlax-get insertObj 'InsertionPoint))
+              (princ (strcat "\n[wrap] Блок вставлен в: " 
+                             (rtos (car insertPt3) 2 2) "," 
+                             (rtos (cadr insertPt3) 2 2)))))))
+      
+      ;; Восстанавливаем переменные
+      (setvar "FILEDIA" oldFiledia)
+      (setvar "CMDDIA" oldCmddia)
+      (setvar "OSMODE" oldOsmode)
+      (setvar "CMDECHO" oldEcho)
+      T))
 )
 
 (defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad r choice sheetW sheetH kerf rotateFlag exportXls exportAcad dynType records groups parts nested sheets oversized insPt colorMap bbox1 bbox2 bbox3 bbox doc oldEcho lastEnt ssNew ent blockName baseName uMark totalCnt actualArea bboxArea sheetArea kpdFact kpdBox)
@@ -1018,8 +1216,8 @@
 
   (princ (strcat "\nВ раскрой принято деталей: " (itoa (length records))))
 
-  (setq groups (cs-aggregate records) parts (cs-expanded-sorted records))
-  (setq nested (cs-nest parts sheetW sheetH kerf rotateFlag) sheets (car nested) oversized (cadr nested))
+  (setq groups (cs-aggregate records))
+  (setq nested (cs-nest records sheetW sheetH kerf rotateFlag) sheets (car nested) oversized (cadr nested))
 
   (setq totalCnt (length records) actualArea (cs-total-actual-area-records records) bboxArea (cs-total-bbox-area-records records)
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0))
@@ -1068,8 +1266,9 @@
             (progn
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
-              (cs-wrap-to-block blockName insPt ssNew)))
-
+              ;; Базовая точка блока и точка вставки - верхний левый угол рамки Невидимые
+              (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
+              (cs-wrap-to-block blockName blockBasePt blockBasePt ssNew)))
           (if (and doc uMark) (progn (vla-EndUndoMark doc) (setq uMark nil)))
 
           (cs-zoom-bbox bbox))
