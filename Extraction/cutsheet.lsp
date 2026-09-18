@@ -695,7 +695,7 @@
     (cs-draw-text-center (list (+ px (* w 0.5)) (+ py (* h 0.53))) (min *CUTSHEET-TEXT-H* (* 0.12 (min w h))) (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
 )
 
-(defun cs-draw-summary (groups sheets oversized sheetW sheetH insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i)
+(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr)
   (setq left (car insPt) top (cadr insPt) rowH 220.0 totalCnt 0 actualArea 0.0 bboxArea 0.0 sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec)) actualArea (+ actualArea (nth 8 rec))))
   (setq kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0) kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0) waste (max 0.0 (- sheetArea actualArea)))
@@ -722,21 +722,61 @@
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Потери: " (cs-format-num waste 2) " м2") *CUTSHEET-WASTE-COLOR*)
   (setq y (- y (* 1.2 rowH)))
-  (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* "ПОЗИЦИИ" *CUTSHEET-TITLE-COLOR*)
+
+  ;; Заголовок ИЗДЕЛИЯ с подписью формата
+  (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* "ИЗДЕЛИЯ (ВхШ)" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 0.82) "Размер" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) "Кол-во" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) "Площадь" *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
+
+  ;; Сортировка изделий
+  (if rotateFlag
+    ;; Можно вращать: сортируем по наименьшей стороне (принимаем её за высоту)
+    (setq sortedGroups
+      (vl-sort groups
+        '(lambda (a b)
+           (cond
+             ((< (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) T)
+             ((> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) nil)
+             ((< (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) T)
+             (T nil)))))
+    ;; Нельзя вращать: сортируем по высоте (Y) = (nth 5)
+    (setq sortedGroups
+      (vl-sort groups
+        '(lambda (a b)
+           (cond
+             ((< (nth 5 a) (nth 5 b)) T)
+             ((> (nth 5 a) (nth 5 b)) nil)
+             ((< (nth 4 a) (nth 4 b)) T)
+             (T nil))))))
+
+  ;; Отображение изделий
   (setq colorMap (cs-build-color-map groups))
   (setq i 0)
-  (foreach rec groups
+  (foreach rec sortedGroups
     (setq col (nth (rem i (length *CUTSHEET-PALETTE*)) *CUTSHEET-PALETTE*))
-    (cs-draw-text (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 0.82) (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))) col)
+
+    ;; Формируем строку размера в формате ВхШ (высота х ширина)
+    (if rotateFlag
+      ;; Можно вращать: минимальная сторона = высота, максимальная = ширина
+      (setq sizeStr
+        (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec)))
+                "x"
+                (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
+      ;; Нельзя вращать: высота (Y) х ширина (X)
+      (setq sizeStr
+        (strcat (cs-itoa-safe (nth 5 rec))
+                "x"
+                (cs-itoa-safe (nth 4 rec)))))
+
+    (cs-draw-text (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
     (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
     (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
     (setq y (- y rowH))
     (setq i (1+ i)))
+
   (if oversized
     (progn (setq y (- y rowH)) (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
   (list (list left (- top (* rowH (+ rows 9 (if oversized 1 0))))) (list (+ left width) top))
@@ -983,7 +1023,10 @@
           (setq lastEnt (entlast))
 
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
-          (setq bbox2 (cs-draw-summary groups sheets oversized sheetW sheetH (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))))
+          (setq bbox2
+            (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
+              (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*)
+                    (cadr (cadr bbox1)))))
           (setq bbox (cs-combine-bbox bbox1 bbox2))
           (setq bbox3 (cs-draw-frame bbox))
           (setq bbox (cs-combine-bbox bbox bbox3))
