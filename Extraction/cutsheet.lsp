@@ -30,7 +30,7 @@
 (setq *CUTSHEET-SHEET-GAP* 350.0)
 (setq *CUTSHEET-SHEET-HEADER* 260.0)
 (setq *CUTSHEET-GRID-COLS* 3)
-(setq *CUTSHEET-SUMMARY-W* 2600.0)
+(setq *CUTSHEET-SUMMARY-W* 2000.0)
 (setq *CUTSHEET-SUMMARY-GAP* 500.0)
 (setq *CUTSHEET-OUTLINE-COLOR* 7)
 (setq *CUTSHEET-TITLE-COLOR* 5)
@@ -40,10 +40,10 @@
 (setq *CUTSHEET-WASTE-COLOR* 8)
 (setq *CUTSHEET-PART-TEXT-COLOR* 2)
 (setq *CUTSHEET-FRAME-LAYER* "Невидимые")
-(setq *CUTSHEET-FRAME-PAD-LEFT* 300.0)
-(setq *CUTSHEET-FRAME-PAD-RIGHT* 150.0)
-(setq *CUTSHEET-FRAME-PAD-TOP* 150.0)
-(setq *CUTSHEET-FRAME-PAD-BOTTOM* 250.0)
+(setq *CUTSHEET-FRAME-PAD-LEFT* 200.0)
+(setq *CUTSHEET-FRAME-PAD-RIGHT* 200.0)
+(setq *CUTSHEET-FRAME-PAD-TOP* 250.0)
+(setq *CUTSHEET-FRAME-PAD-BOTTOM* 200.0)
 (setq *CUTSHEET-MIN-TEXT-AREA* 50000.0)
 
 (if (not (boundp '*cs-tmp-choice*)) (setq *cs-tmp-choice* 'ALL))
@@ -679,12 +679,35 @@
 
 (defun cs-draw-sheet-header (x y sheetW sheetH n / h textY)
   (setq h *CUTSHEET-SHEET-HEADER*)
-  (cs-draw-text-bold (list x (+ y sheetH (* h 0.75))) *CUTSHEET-TEXT-H* (strcat "ЛИСТ " (itoa n)) *CUTSHEET-HEADER-COLOR*)
-  (setq textY (+ y sheetH (* h 0.28)))
-  (cs-draw-line (list x (+ y sheetH)) (list (+ x sheetW) (+ y sheetH)) *CUTSHEET-OUTLINE-COLOR*)
-  (cs-draw-text (list x textY) (* *CUTSHEET-TEXT-H* 0.75) "0" *CUTSHEET-VALUE-COLOR*)
-  (cs-draw-text (list (+ x sheetW -140.0) textY) (* *CUTSHEET-TEXT-H* 0.75) (cs-itoa-safe sheetW) *CUTSHEET-VALUE-COLOR*)
-  (cs-draw-text (list (- x 240.0) (+ y sheetH -100.0)) (* *CUTSHEET-TEXT-H* 0.75) (cs-itoa-safe sheetH) *CUTSHEET-VALUE-COLOR*)
+  
+  ;; Надпись "ЛИСТ N" - чуть выше верхней границы листа
+  (cs-draw-text-bold (list x (+ y sheetH (* h 0.5))) 
+                     *CUTSHEET-TEXT-H* 
+                     (strcat "ЛИСТ " (itoa n)) 
+                     *CUTSHEET-HEADER-COLOR*)
+  
+  ;; Метка высоты - в левом верхнем углу, под надписью ЛИСТ N
+  ;; Выравнивание по левому краю листа
+  (cs-draw-text (list x (+ y sheetH (* h 0.15))) 
+                (* *CUTSHEET-TEXT-H* 0.75) 
+                (cs-itoa-safe sheetH) 
+                *CUTSHEET-VALUE-COLOR*)
+  
+  ;; Линия шкалы по НИЖНЕЙ границе листа
+  (cs-draw-line (list x y) 
+                (list (+ x sheetW) y) 
+                *CUTSHEET-OUTLINE-COLOR*)
+  
+  ;; Метки "0" и ширина ПОД нижней границей листа
+  (setq textY (- y (* h 0.35)))
+  (cs-draw-text (list x textY) 
+                (* *CUTSHEET-TEXT-H* 0.75) 
+                "0" 
+                *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ x sheetW -140.0) textY) 
+                (* *CUTSHEET-TEXT-H* 0.75) 
+                (cs-itoa-safe sheetW) 
+                *CUTSHEET-VALUE-COLOR*)
 )
 
 (defun cs-draw-placement (pl x0 y0 colorMap / r px py w h rot col)
@@ -696,44 +719,55 @@
 )
 
 (defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr)
-  (setq left (car insPt) top (cadr insPt) rowH 220.0 totalCnt 0 actualArea 0.0 bboxArea 0.0 sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
+  (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0 sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec)) actualArea (+ actualArea (nth 8 rec))))
   (setq kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0) kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0) waste (max 0.0 (- sheetArea actualArea)))
   (setq rows (length groups) maxLabelLen 10)
   (foreach rec groups (setq col (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec)))) (if (> (strlen col) maxLabelLen) (setq maxLabelLen (strlen col))))
   (setq width (max *CUTSHEET-SUMMARY-W* (+ 600.0 (* maxLabelLen 40.0))))
-  (cs-draw-rect (list left (- top (* rowH (+ rows 9 (if oversized 1 0))))) (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
+  
+  ;; Высота рамки: 13 строк заголовка + количество изделий
+  (cs-draw-rect (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
+  
   (setq y (- top (* rowH 0.72)))
-  (cs-draw-text-bold (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 1.45) "РАСКРОЙ ЛИСТА" *CUTSHEET-TITLE-COLOR*)
+  (cs-draw-text-bold (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 1.45) "РАСКРОЙ ЛИСТА" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y (* rowH 1.28)))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Лист: " (cs-itoa-safe sheetW) " x " (cs-itoa-safe sheetH) " мм") *CUTSHEET-HEADER-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Лист: " (cs-itoa-safe sheetW) " x " (cs-itoa-safe sheetH) " мм") *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Листов: " (itoa (length sheets))) *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Листов: " (itoa (length sheets))) *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Деталей: " (itoa totalCnt) " шт.") *CUTSHEET-VALUE-COLOR*)
+  
+  ;; "Изделий" вместо "Деталей"
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Изделий: " (itoa totalCnt) " шт.") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Фактическая площадь: " (cs-format-num actualArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
+  
+  ;; Поворот разрешен/запрещен
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* 
+                (if rotateFlag "Поворот деталей разрешен" "Поворот деталей запрещен") 
+                *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Площадь габаритов: " (cs-format-num bboxArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
+  
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Фактическая площадь: " (cs-format-num actualArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "ПОЛЕЗНЫЙ ВЫХОД: " (cs-format-num kpdFact 1) "%") *CUTSHEET-KPD-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Площадь габаритов: " (cs-format-num bboxArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Габаритный выход: " (cs-format-num kpdBox 1) "%") *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "ПОЛЕЗНЫЙ ВЫХОД: " (cs-format-num kpdFact 1) "%") *CUTSHEET-KPD-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "Потери: " (cs-format-num waste 2) " м2") *CUTSHEET-WASTE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Габаритный выход: " (cs-format-num kpdBox 1) "%") *CUTSHEET-VALUE-COLOR*)
+  (setq y (- y rowH))
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Потери: " (cs-format-num waste 2) " м2") *CUTSHEET-WASTE-COLOR*)
   (setq y (- y (* 1.2 rowH)))
 
   ;; Заголовок ИЗДЕЛИЯ с подписью формата
-  (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* "ИЗДЕЛИЯ (ВхШ)" *CUTSHEET-TITLE-COLOR*)
+  (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* "ИЗДЕЛИЯ (ВхШ)" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 0.82) "Размер" *CUTSHEET-HEADER-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) "Размер" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) "Кол-во" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) "Площадь" *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
 
   ;; Сортировка изделий
   (if rotateFlag
-    ;; Можно вращать: сортируем по наименьшей стороне (принимаем её за высоту)
     (setq sortedGroups
       (vl-sort groups
         '(lambda (a b)
@@ -742,7 +776,6 @@
              ((> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) nil)
              ((< (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) T)
              (T nil)))))
-    ;; Нельзя вращать: сортируем по высоте (Y) = (nth 5)
     (setq sortedGroups
       (vl-sort groups
         '(lambda (a b)
@@ -757,29 +790,26 @@
   (setq i 0)
   (foreach rec sortedGroups
     (setq col (nth (rem i (length *CUTSHEET-PALETTE*)) *CUTSHEET-PALETTE*))
-
-    ;; Формируем строку размера в формате ВхШ (высота х ширина)
     (if rotateFlag
-      ;; Можно вращать: минимальная сторона = высота, максимальная = ширина
       (setq sizeStr
         (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec)))
                 "x"
                 (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
-      ;; Нельзя вращать: высота (Y) х ширина (X)
       (setq sizeStr
         (strcat (cs-itoa-safe (nth 5 rec))
                 "x"
                 (cs-itoa-safe (nth 4 rec)))))
-
-    (cs-draw-text (list (+ left 100.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
+    (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
     (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
     (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
     (setq y (- y rowH))
     (setq i (1+ i)))
 
   (if oversized
-    (progn (setq y (- y rowH)) (cs-draw-text-bold (list (+ left 100.0) y) *CUTSHEET-TEXT-H* (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
-  (list (list left (- top (* rowH (+ rows 9 (if oversized 1 0))))) (list (+ left width) top))
+    (progn (setq y (- y rowH)) (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
+  
+  ;; Возврат bbox с учётом высоты
+  (list (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top))
 )
 
 (defun cs-draw-frame (bbox / x1 y1 x2 y2)
