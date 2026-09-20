@@ -2,7 +2,7 @@
 ;;; CUTSHEET.LSP — модуль двумерного раскроя листа
 ;;; AutoExtraction / AutoCAD 2016+
 ;;;
-;;; РЕДАКЦИЯ 3 (исправления):
+;;; РЕДАКЦИЯ 4 (исправления):
 ;;;   1. Площадь в агрегации — фактическая из записи
 ;;;   2. Убрано дублирование в диалоге
 ;;;   3. Вынесена константа *CUTSHEET-MIN-TEXT-AREA*
@@ -11,22 +11,28 @@
 ;;;   6. Расширены стили XLS
 ;;;   7. Явная проверка размеров
 ;;;   8. Динамическая ширина таблицы
+;;;   9. Заливка SOLID вместо HATCH (совместимость с cutline)
+;;;  10. Таблица: количество деталей напротив типов
+;;;  11. Компактная таблица, шкала по низу листа
+;;;  12. МаксRects с контактным скорингом
 ;;; ============================================================
 
 (vl-load-com)
 
-(setq *CUTSHEET-MIN-SIZE* 50.0)
-(setq *CUTSHEET-MAX-SIZE* 500000.0)
+;; ================= ПАРАМЕТРЫ =================
+(setq *CUTSHEET-MIN-SIZE*        50.0)
+(setq *CUTSHEET-MAX-SIZE*     500000.0)
 (setq *CUTSHEET-DEFAULT-WIDTH* 3000.0)
 (setq *CUTSHEET-DEFAULT-HEIGHT* 1500.0)
-(setq *CUTSHEET-DEFAULT-KERF* 3.0)
+(setq *CUTSHEET-DEFAULT-KERF*   3.0)
 (setq *CUTSHEET-DEFAULT-ROTATE* T)
 
+;; Графика
 (setq *CUTSHEET-PART-TRANSPARENCY* 0.70)
 (setq *CUTSHEET-WASTE-TRANSPARENCY* 0.88)
 (setq *CUTSHEET-PALETTE* '(1 2 3 4 5 6 30 210 140 90 40 120))
 (setq *CUTSHEET-TITLE-H* 100.0)
-(setq *CUTSHEET-TEXT-H* 60.0)
+(setq *CUTSHEET-TEXT-H*  60.0)
 (setq *CUTSHEET-SHEET-GAP* 350.0)
 (setq *CUTSHEET-SHEET-HEADER* 260.0)
 (setq *CUTSHEET-GRID-COLS* 3)
@@ -39,6 +45,7 @@
 (setq *CUTSHEET-KPD-COLOR* 1)
 (setq *CUTSHEET-WASTE-COLOR* 8)
 (setq *CUTSHEET-PART-TEXT-COLOR* 2)
+(setq *CUTSHEET-TEXT-COLOR* 7)
 (setq *CUTSHEET-FRAME-LAYER* "Невидимые")
 (setq *CUTSHEET-FRAME-PAD-LEFT* 200.0)
 (setq *CUTSHEET-FRAME-PAD-RIGHT* 200.0)
@@ -46,22 +53,24 @@
 (setq *CUTSHEET-FRAME-PAD-BOTTOM* 200.0)
 (setq *CUTSHEET-MIN-TEXT-AREA* 50000.0)
 
-(if (not (boundp '*cs-tmp-choice*)) (setq *cs-tmp-choice* 'ALL))
-(if (not (boundp '*cs-tmp-sheet-w*)) (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
-(if (not (boundp '*cs-tmp-sheet-h*)) (setq *cs-tmp-sheet-h* *CUTSHEET-DEFAULT-HEIGHT*))
-(if (not (boundp '*cs-tmp-kerf*)) (setq *cs-tmp-kerf* *CUTSHEET-DEFAULT-KERF*))
-(if (not (boundp '*cs-tmp-rotate*)) (setq *cs-tmp-rotate* *CUTSHEET-DEFAULT-ROTATE*))
-(if (not (boundp '*cs-tmp-xls*)) (setq *cs-tmp-xls* T))
-(if (not (boundp '*cs-tmp-acad*)) (setq *cs-tmp-acad* T))
-(if (not (boundp '*cs-tmp-dyn-type*)) (setq *cs-tmp-dyn-type* ""))
-(if (not (boundp '*cs-dyn-types*)) (setq *cs-dyn-types* '()))
-(if (not (boundp '*CUTSHEET-LAST-WIDTH*)) (setq *CUTSHEET-LAST-WIDTH* *CUTSHEET-DEFAULT-WIDTH*))
+;; Состояние диалога
+(if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
+(if (not (boundp '*cs-tmp-sheet-w*))   (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
+(if (not (boundp '*cs-tmp-sheet-h*))   (setq *cs-tmp-sheet-h* *CUTSHEET-DEFAULT-HEIGHT*))
+(if (not (boundp '*cs-tmp-kerf*))      (setq *cs-tmp-kerf* *CUTSHEET-DEFAULT-KERF*))
+(if (not (boundp '*cs-tmp-rotate*))    (setq *cs-tmp-rotate* *CUTSHEET-DEFAULT-ROTATE*))
+(if (not (boundp '*cs-tmp-xls*))       (setq *cs-tmp-xls* T))
+(if (not (boundp '*cs-tmp-acad*))      (setq *cs-tmp-acad* T))
+(if (not (boundp '*cs-tmp-dyn-type*))  (setq *cs-tmp-dyn-type* ""))
+(if (not (boundp '*cs-dyn-types*))     (setq *cs-dyn-types* '()))
+(if (not (boundp '*CUTSHEET-LAST-WIDTH*))  (setq *CUTSHEET-LAST-WIDTH* *CUTSHEET-DEFAULT-WIDTH*))
 (if (not (boundp '*CUTSHEET-LAST-HEIGHT*)) (setq *CUTSHEET-LAST-HEIGHT* *CUTSHEET-DEFAULT-HEIGHT*))
-(if (not (boundp '*CUTSHEET-LAST-KERF*)) (setq *CUTSHEET-LAST-KERF* *CUTSHEET-DEFAULT-KERF*))
+(if (not (boundp '*CUTSHEET-LAST-KERF*))   (setq *CUTSHEET-LAST-KERF* *CUTSHEET-DEFAULT-KERF*))
 (if (not (boundp '*CUTSHEET-LAST-ROTATE*)) (setq *CUTSHEET-LAST-ROTATE* *CUTSHEET-DEFAULT-ROTATE*))
-(if (not (boundp '*CUTSHEET-LAST-XLS*)) (setq *CUTSHEET-LAST-XLS* T))
-(if (not (boundp '*CUTSHEET-LAST-ACAD*)) (setq *CUTSHEET-LAST-ACAD* T))
+(if (not (boundp '*CUTSHEET-LAST-XLS*))    (setq *CUTSHEET-LAST-XLS* T))
+(if (not (boundp '*CUTSHEET-LAST-ACAD*))   (setq *CUTSHEET-LAST-ACAD* T))
 
+;; ================= СТРОКИ / ЧИСЛА =================
 (defun cs-split-string (str delim / pos out item)
   (setq out '())
   (while (setq pos (vl-string-search delim str))
@@ -70,29 +79,24 @@
     (setq str (substr str (+ pos 2))))
   (setq item (vl-string-trim " \t\r\n" str))
   (if (> (strlen item) 0) (setq out (cons item out)))
-  (reverse out)
-)
+  (reverse out))
 
 (defun cs-round2 (x)
-  (/ (fix (+ (* x 100.0) 0.5)) 100.0)
-)
+  (/ (fix (+ (* x 100.0) 0.5)) 100.0))
 
 (defun cs-format-num (x digits)
-  (vl-string-translate "." "," (rtos x 2 digits))
-)
+  (vl-string-translate "." "," (rtos x 2 digits)))
 
 (defun cs-xls-num (x digits)
-  (rtos x 2 digits)
-)
+  (rtos x 2 digits))
 
 (defun cs-itoa-safe (x)
-  (itoa (fix (+ x 0.5)))
-)
+  (itoa (fix (+ x 0.5))))
 
 (defun cs-safe-number (x)
-  (if (numberp x) (float x) nil)
-)
+  (if (numberp x) (float x) nil))
 
+;; ================= ДИНАМИЧЕСКИЕ БЛОКИ =================
 (defun cs-value-to-number (value / x s)
   (cond
     ((numberp value) (float value))
@@ -109,9 +113,7 @@
          (setq x (vl-catch-all-apply 'atof (list s)))
          (if (vl-catch-all-error-p x) nil x))
        nil))
-    (T nil)
-  )
-)
+    (T nil)))
 
 (defun cs-block-all-props (obj / dyn prop pname pval out)
   (setq out '())
@@ -124,19 +126,15 @@
           (setq pname (vl-string-trim " \t\r\n" pname))
           (setq pval (vl-catch-all-apply 'vla-get-Value (list prop)))
           (if (not (vl-catch-all-error-p pval))
-            (setq out (cons (cons pname pval) out)))))
-    )
-  )
-  (reverse out)
-)
+            (setq out (cons (cons pname pval) out)))))))
+  (reverse out))
 
 (defun cs-prop-value (props wanted / p)
   (setq p nil)
   (foreach x props
     (if (and (null p) (= (strcase (car x)) (strcase wanted)))
       (setq p (cdr x))))
-  (if p (cs-value-to-number p) nil)
-)
+  (if p (cs-value-to-number p) nil))
 
 (defun cs-get-effective-name-safe (obj / r)
   (setq r (vl-catch-all-apply 'vla-get-EffectiveName (list obj)))
@@ -144,8 +142,7 @@
     (progn
       (setq r (vl-catch-all-apply 'vla-get-Name (list obj)))
       (if (vl-catch-all-error-p r) nil r))
-    r)
-)
+    r))
 
 (defun cs-get-visibility-safe (obj / dyn prop pname val result)
   (setq dyn (vl-catch-all-apply 'vlax-invoke (list obj 'GetDynamicBlockProperties)))
@@ -167,9 +164,7 @@
                   (progn
                     (if (= (type val) 'VARIANT) (setq val (vlax-variant-value val)))
                     (if val (setq result (vl-princ-to-string val))))))))))
-      result)
-  )
-)
+      result)))
 
 (defun cs-get-dyn-type-name (ent / obj vis name)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
@@ -183,9 +178,7 @@
           (setq vis (cs-get-visibility-safe obj))
           (if (and vis (> (strlen (vl-string-trim " \t\r\n" vis)) 0))
             (vl-string-trim " \t\r\n" vis)
-            "Без имени"))))
-  )
-)
+            "Без имени"))))))
 
 (defun cs-get-bbox (ent / obj mn mx r p1 p2)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
@@ -197,9 +190,7 @@
         nil
         (progn
           (setq p1 (vlax-safearray->list mn) p2 (vlax-safearray->list mx))
-          (list p1 p2))))
-  )
-)
+          (list p1 p2))))))
 
 (defun cs-bbox-w-h (ent / bb p1 p2)
   (setq bb (cs-get-bbox ent))
@@ -207,37 +198,32 @@
     (progn
       (setq p1 (car bb) p2 (cadr bb))
       (list (abs (- (car p2) (car p1))) (abs (- (cadr p2) (cadr p1)))))
-    nil)
-)
+    nil))
 
 (defun cs-block-area-from-props (props w h)
-  ;; Всегда кроим как прямоугольник (без учёта вырезов углов)
-  (/ (* w h) 1000000.0)
-)
+  (/ (* w h) 1000000.0))
 
+;; ================= ПОЛИЛИНИИ =================
 (defun cs-poly-closed-p (ent / f)
   (setq f (cdr (assoc 70 (entget ent))))
-  (if f (= 1 (logand 1 f)) nil)
-)
+  (if f (= 1 (logand 1 f)) nil))
 
 (defun cs-poly-has-arcs (ent / found)
   (setq found nil)
   (foreach g (entget ent)
     (if (and (= (car g) 42) (> (abs (cdr g)) 1e-8)) (setq found T)))
-  found
-)
+  found)
 
 (defun cs-poly-area (ent / obj a)
   (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
   (setq a (if (vl-catch-all-error-p obj) nil (vl-catch-all-apply 'vla-get-Area (list obj))))
   (if (and a (not (vl-catch-all-error-p a)) (numberp a) (> a 0.0))
     (/ a 1000000.0)
-    0.0)
-)
+    0.0))
 
+;; ================= ИСТОЧНИК ОБЪЕКТОВ =================
 (defun cs-layer-ok-p (layer layers)
-  (if (or (null layers) (= (length layers) 0)) T (su-layer-match-any layer layers))
-)
+  (if (or (null layers) (= (length layers) 0)) T (su-layer-match-any layer layers)))
 
 (defun cs-build-filter-ss (layers / ss out i ent typ lay)
   (setq ss nil)
@@ -256,9 +242,9 @@
       (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers))
         (ssadd ent out))
       (setq i (1+ i))))
-  (if (> (sslength out) 0) out nil)
-)
+  (if (> (sslength out) 0) out nil))
 
+;; ================= ЗАПИСЬ ЧАСТЕЙ =================
 (defun cs-poly-record (ent id / ed layer bb wh area arc type nominal)
   (setq ed (entget ent) layer (cdr (assoc 8 ed)) bb (cs-get-bbox ent))
   (if (and (cs-poly-closed-p ent) bb)
@@ -270,8 +256,7 @@
           (setq nominal (strcat (cs-itoa-safe (car wh)) "x" (cs-itoa-safe (cadr wh))))
           (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent))
         nil))
-    nil)
-)
+    nil))
 
 (defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH area nominal source)
   (setq ed (entget ent) layer (cdr (assoc 8 ed))
@@ -281,7 +266,6 @@
     (progn
       (setq props (cs-block-all-props obj) typName (cs-get-dyn-type-name ent))
       (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
-      ;; Защита от нечисловых значений
       (if (not (numberp pW)) (setq pW nil))
       (if (not (numberp pH)) (setq pH nil))
       (if (and pW pH (> pW 0.0) (> pH 0.0))
@@ -296,9 +280,7 @@
           (setq area (/ (* w h) 1000000.0))
           (setq nominal (strcat (cs-itoa-safe w) "x" (cs-itoa-safe h)))
           (list id "DYN" layer typName w h area nominal source ent))
-        nil))
-  )
-)
+        nil))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
   (setq out '() i 0 id 0)
@@ -317,8 +299,7 @@
             (setq id (1+ id)) (setq rec (cs-block-record ent id))))))
       (if rec (setq out (cons rec out)))
       (setq i (1+ i))))
-  (reverse out)
-)
+  (reverse out))
 
 (defun cs-collect-dyn-types (ss / i ent typ nm out)
   (setq i 0 out '())
@@ -330,15 +311,13 @@
           (setq nm (cs-get-dyn-type-name ent))
           (if (and nm (not (member nm out))) (setq out (cons nm out)))))
       (setq i (1+ i))))
-  (vl-sort out '(lambda (a b) (< (strcase a) (strcase b))))
-)
+  (vl-sort out '(lambda (a b) (< (strcase a) (strcase b)))))
 
 (defun cs-count-type (ss kind / i ent typ obj cnt wh)
   (setq i 0 cnt 0)
   (if ss
     (repeat (sslength ss)
-      (setq ent (ssname ss i)
-            typ (cdr (assoc 0 (entget ent))))
+      (setq ent (ssname ss i) typ (cdr (assoc 0 (entget ent))))
       (cond
         ((and (eq kind 'POLY) (= typ "LWPOLYLINE"))
          (if (cs-poly-closed-p ent) (setq cnt (1+ cnt))))
@@ -351,8 +330,7 @@
         ((eq kind 'ALL)
          (if (or (= typ "LWPOLYLINE") (= typ "INSERT")) (setq cnt (1+ cnt)))))
       (setq i (1+ i))))
-  cnt
-)
+  cnt)
 
 (defun cs-count-dyn-type (ss wanted / i ent typ cnt)
   (setq i 0 cnt 0)
@@ -362,17 +340,16 @@
       (if (and (= typ "INSERT") (or (= wanted "") (= (cs-get-dyn-type-name ent) wanted)))
         (setq cnt (1+ cnt)))
       (setq i (1+ i))))
-  cnt
-)
+  cnt)
 
+;; ================= DCL =================
 (defun cs-safe-set-tile (key val) (vl-catch-all-apply 'set_tile (list key val)))
 (defun cs-safe-mode-tile (key mode) (vl-catch-all-apply 'mode_tile (list key mode)))
 
 (defun cs-cut-sizes-valid-p (w h kerf)
   (and (numberp w) (numberp h) (> w *CUTSHEET-MIN-SIZE*) (> h *CUTSHEET-MIN-SIZE*)
        (< w *CUTSHEET-MAX-SIZE*) (< h *CUTSHEET-MAX-SIZE*)
-       (numberp kerf) (>= kerf 0.0) (< kerf (min w h)))
-)
+       (numberp kerf) (>= kerf 0.0) (< kerf (min w h))))
 
 (defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result)
   (setq dcl-file (findfile "cutsheet_filter.dcl"))
@@ -392,9 +369,7 @@
                 *cs-tmp-acad* defaultAcad
                 *cs-tmp-dyn-type* "")
           (if (not (new_dialog "cutsheet_filter_dialog" dcl-id))
-            (progn
-              (vl-catch-all-apply 'unload_dialog (list dcl-id))
-              nil)
+            (progn (vl-catch-all-apply 'unload_dialog (list dcl-id)) nil)
             (progn
               (cs-safe-set-tile "txt_poly_count" (strcat (itoa polyCnt) " шт."))
               (cs-safe-set-tile "txt_dyn_count" (strcat (itoa dynCnt) " шт."))
@@ -406,8 +381,6 @@
               (end_list)
               (set_tile "popup_dyn_type" "0")
               (cs-safe-mode-tile "popup_dyn_type" 1)
-              (cs-safe-mode-tile "popup_dyn_type" 1)
-              ;; Блокировка радиокнопок при отсутствии объектов
               (if (<= polyCnt 0) (cs-safe-mode-tile "rb_poly" 1))
               (if (<= dynCnt 0) (cs-safe-mode-tile "rb_dyn" 1))
               (if (<= (+ polyCnt dynCnt) 0) (cs-safe-mode-tile "rb_all" 1))
@@ -420,65 +393,42 @@
               (cs-safe-set-tile "chk_rotate" (if defaultRotate "1" "0"))
               (cs-safe-set-tile "chk_xls" (if defaultXls "1" "0"))
               (cs-safe-set-tile "chk_acad" (if defaultAcad "1" "0"))
-              (action_tile "rb_all"
-                "(setq *cs-tmp-choice* 'ALL) (mode_tile \"popup_dyn_type\" 1)")
-              (action_tile "rb_poly"
-                "(setq *cs-tmp-choice* 'POLY) (mode_tile \"popup_dyn_type\" 1)")
-              (action_tile "rb_dyn"
-                "(setq *cs-tmp-choice* 'DYN) (mode_tile \"popup_dyn_type\" 0)")
+              (action_tile "rb_all"  "(setq *cs-tmp-choice* 'ALL) (mode_tile \"popup_dyn_type\" 1)")
+              (action_tile "rb_poly" "(setq *cs-tmp-choice* 'POLY) (mode_tile \"popup_dyn_type\" 1)")
+              (action_tile "rb_dyn"  "(setq *cs-tmp-choice* 'DYN) (mode_tile \"popup_dyn_type\" 0)")
               (action_tile "popup_dyn_type"
                 "(if (= (atoi $value) 0) (setq *cs-tmp-dyn-type* \"\") (setq *cs-tmp-dyn-type* (nth (1- (atoi $value)) *cs-dyn-types*))) (setq *cs-tmp-choice* 'DYN) (mode_tile \"popup_dyn_type\" 0)")
-              (action_tile "edt_sheet_w"
-                "(setq *cs-tmp-sheet-w* (atof (vl-string-translate \",\" \".\" $value)))")
-              (action_tile "edt_sheet_h"
-                "(setq *cs-tmp-sheet-h* (atof (vl-string-translate \",\" \".\" $value)))")
-              (action_tile "edt_kerf"
-                "(setq *cs-tmp-kerf* (atof (vl-string-translate \",\" \".\" $value)))")
-              (action_tile "chk_rotate"
-                "(setq *cs-tmp-rotate* (= $value \"1\"))")
-              (action_tile "chk_xls"
-                "(setq *cs-tmp-xls* (= $value \"1\"))")
-              (action_tile "chk_acad"
-                "(setq *cs-tmp-acad* (= $value \"1\"))")
-              (action_tile "btn_ok"
-                "(if (cs-cut-sizes-valid-p *cs-tmp-sheet-w* *cs-tmp-sheet-h* *cs-tmp-kerf*) (done_dialog 1) (alert \"Проверьте размеры листа и ширину реза.\"))")
+              (action_tile "edt_sheet_w" "(setq *cs-tmp-sheet-w* (atof (vl-string-translate \",\" \".\" $value)))")
+              (action_tile "edt_sheet_h" "(setq *cs-tmp-sheet-h* (atof (vl-string-translate \",\" \".\" $value)))")
+              (action_tile "edt_kerf"    "(setq *cs-tmp-kerf* (atof (vl-string-translate \",\" \".\" $value)))")
+              (action_tile "chk_rotate" "(setq *cs-tmp-rotate* (= $value \"1\"))")
+              (action_tile "chk_xls"    "(setq *cs-tmp-xls* (= $value \"1\"))")
+              (action_tile "chk_acad"   "(setq *cs-tmp-acad* (= $value \"1\"))")
+              (action_tile "btn_ok"     "(if (cs-cut-sizes-valid-p *cs-tmp-sheet-w* *cs-tmp-sheet-h* *cs-tmp-kerf*) (done_dialog 1) (alert \"Проверьте размеры листа и ширину реза.\"))")
               (action_tile "btn_cancel" "(done_dialog 0)")
               (setq result (start_dialog))
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
               (if (= result 1)
-                (list *cs-tmp-choice*
-                      *cs-tmp-sheet-w*
-                      *cs-tmp-sheet-h*
-                      *cs-tmp-kerf*
-                      *cs-tmp-rotate*
-                      *cs-tmp-xls*
-                      *cs-tmp-acad*
-                      *cs-tmp-dyn-type*)
-                nil
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-)
+                (list *cs-tmp-choice* *cs-tmp-sheet-w* *cs-tmp-sheet-h* *cs-tmp-kerf*
+                      *cs-tmp-rotate* *cs-tmp-xls* *cs-tmp-acad* *cs-tmp-dyn-type*)
+                nil))))))))
 
+;; ================= АГРЕГАЦИЯ =================
 (defun cs-part-key (r)
-  (strcat (nth 1 r) "|" (nth 3 r) "|" (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r)))
-)
+  (strcat (nth 1 r) "|" (nth 3 r) "|" (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r))))
 
 (defun cs-part-label (r)
-  (strcat (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r)))
-)
+  (strcat (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r))))
 
 (defun cs-aggregate (records / acc r key f out)
   (setq acc '())
   (foreach r records
     (setq key (cs-part-key r) f (assoc key acc))
     (if f
-      (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) (1+ (nth 6 f)) (+ (nth 7 f) (nth 6 r)) (+ (nth 8 f) (nth 6 r))) f acc))
-      (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1 (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)) acc))))
+      (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r)
+                             (1+ (nth 6 f)) (+ (nth 7 f) (nth 6 r)) (+ (nth 8 f) (nth 6 r))) f acc))
+      (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1
+                            (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)) acc))))
   (setq out (vl-sort acc '(lambda (a b)
     (cond
       ((> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) T)
@@ -486,22 +436,18 @@
       ((< (strcase (nth 3 a)) (strcase (nth 3 b))) T)
       ((> (strcase (nth 3 a)) (strcase (nth 3 b))) nil)
       (T nil)))))
-  out
-)
+  out)
 
-;; ================= SORT / NESTING (MaxRects упрощённый) =================
-
+;; ================= SORT / NESTING (MaxRects с контактным скорингом) =================
 (defun cs-merge-eps () 0.001)
 
-;; Скоринг размещения детали в свободном прямоугольнике
-;; Усиленный: контакты, выравнивание, приоритет левого нижнего угла
+;; Скоринг размещения с контактами и прижимом к началу
 (defun cs-score-rect (rw rh fx fy fw fh usedParts curSheet sheetW sheetH / areaFit shortFit longFit fragmentation contact alignBonus distPenalty score p px py pw ph overlap)
   (setq areaFit (- (* fw fh) (* rw rh)))
   (setq shortFit (if (< (- fw rw) (- fh rh)) (- fw rw) (- fh rh)))
   (setq longFit (if (> (- fw rw) (- fh rh)) (- fw rw) (- fh rh)))
   (setq fragmentation (abs (- (- fw rw) (- fh rh))))
   
-  ;; Контактный скоринг
   (setq contact 0.0)
   (if (<= fx (cs-merge-eps)) (setq contact (+ contact (* rh 15.0))))
   (if (<= fy (cs-merge-eps)) (setq contact (+ contact (* rw 15.0))))
@@ -510,84 +456,57 @@
   (if (< (- fw rw) (cs-merge-eps)) (setq contact (+ contact (* rh 5.0))))
   (if (< (- fh rh) (cs-merge-eps)) (setq contact (+ contact (* rw 5.0))))
   
-  ;; Контакт с деталями и выравнивание
   (setq alignBonus 0.0)
   (foreach p usedParts
     (if (= (car p) curSheet)
       (progn
         (setq px (nth 1 p) py (nth 2 p) pw (nth 3 p) ph (nth 4 p))
-        ;; Вертикальный контакт
         (if (or (< (abs (- px (+ fx rw))) (cs-merge-eps))
                 (< (abs (- (+ px pw) fx)) (cs-merge-eps)))
           (progn
             (setq overlap (- (min (+ py ph) (+ fy rh)) (max py fy)))
             (if (> overlap 0) (setq contact (+ contact (* overlap 20.0))))))
-        ;; Горизонтальный контакт
         (if (or (< (abs (- py (+ fy rh))) (cs-merge-eps))
                 (< (abs (- (+ py ph) fy)) (cs-merge-eps)))
           (progn
             (setq overlap (- (min (+ px pw) (+ fx rw)) (max px fx)))
             (if (> overlap 0) (setq contact (+ contact (* overlap 20.0))))))
-        ;; Выравнивание по координатам
         (if (< (abs (- fx px)) (cs-merge-eps)) (setq alignBonus (+ alignBonus 80.0)))
         (if (< (abs (- fy py)) (cs-merge-eps)) (setq alignBonus (+ alignBonus 80.0)))
         (if (< (abs (- (+ fx rw) (+ px pw))) (cs-merge-eps)) (setq alignBonus (+ alignBonus 50.0)))
         (if (< (abs (- (+ fy rh) (+ py ph))) (cs-merge-eps)) (setq alignBonus (+ alignBonus 50.0))))))
   
-  ;; НОВОЕ: Штраф за расстояние от левого нижнего угла
-  ;; Прижимает детали к началу координат для формирования деловых остатков
   (setq distPenalty (+ (* fx 0.3) (* fy 0.3)))
-  
-  ;; Итоговый скоринг (меньше = лучше)
-  (setq score (+ (* areaFit 0.001)
-                 (* shortFit 5.0)
-                 (* longFit 1.0)
-                 (* fragmentation 0.5)
-                 (- (* contact 12.0))
-                 (- alignBonus)
-                 distPenalty))
-  score
-)
+  (setq score (+ (* areaFit 0.001) (* shortFit 5.0) (* longFit 1.0) (* fragmentation 0.5)
+                 (- (* contact 12.0)) (- alignBonus) distPenalty))
+  score)
 
-;; Вырезание занятой области с учётом керфа
 (defun cs-subtract-rect (freeRects rx ry rw rh kerf / newFree fr fx fy fw fh)
   (setq newFree '())
   (foreach fr freeRects
     (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
-    (if (or (>= rx (+ fx fw)) (<= (+ rx rw) fx)
-            (>= ry (+ fy fh)) (<= (+ ry rh) fy))
+    (if (or (>= rx (+ fx fw)) (<= (+ rx rw) fx) (>= ry (+ fy fh)) (<= (+ ry rh) fy))
       (setq newFree (cons fr newFree))
       (progn
-        (if (> (- ry fy) kerf)
-          (setq newFree (cons (list fx fy fw (- ry fy kerf)) newFree)))
-        (if (> (- (+ fy fh) (+ ry rh)) kerf)
-          (setq newFree (cons (list fx (+ ry rh kerf) fw (- (+ fy fh) (+ ry rh) kerf)) newFree)))
-        (if (> (- rx fx) kerf)
-          (setq newFree (cons (list fx fy (- rx fx kerf) fh) newFree)))
-        (if (> (- (+ fx fw) (+ rx rw)) kerf)
-          (setq newFree (cons (list (+ rx rw kerf) fy (- (+ fx fw) (+ rx rw) kerf) fh) newFree))))))
-  (cs-prune-free-small newFree)
-)
+        (if (> (- ry fy) kerf) (setq newFree (cons (list fx fy fw (- ry fy kerf)) newFree)))
+        (if (> (- (+ fy fh) (+ ry rh)) kerf) (setq newFree (cons (list fx (+ ry rh kerf) fw (- (+ fy fh) (+ ry rh) kerf)) newFree)))
+        (if (> (- rx fx) kerf) (setq newFree (cons (list fx fy (- rx fx kerf) fh) newFree)))
+        (if (> (- (+ fx fw) (+ rx rw)) kerf) (setq newFree (cons (list (+ rx rw kerf) fy (- (+ fx fw) (+ rx rw) kerf) fh) newFree))))))
+  (cs-prune-free-small newFree))
 
-;; Удаление маленьких прямоугольников
 (defun cs-prune-free-small (freeRects / out fr)
   (setq out '())
   (foreach fr freeRects
-    (if (and (> (nth 2 fr) 1.0) (> (nth 3 fr) 1.0))
-      (setq out (cons fr out))))
-  (reverse out)
-)
+    (if (and (> (nth 2 fr) 1.0) (> (nth 3 fr) 1.0)) (setq out (cons fr out))))
+  (reverse out))
 
-;; Получить размещённые детали на листе для скоринга
 (defun cs-get-used-parts (sheet / out p)
   (setq out '())
   (foreach p (cadr sheet)
     (setq out (cons (list 0 (nth 1 p) (nth 2 p) (nth 3 p) (nth 4 p)) out)))
-  (reverse out)
-)
+  (reverse out))
 
-;; Упаковка деталей в листы (один проход)
-(defun cs-pack-rects (parts sheetW sheetH kerf rotateFlag / sheets oversized freeRects usedParts part pw ph bestScore bestX bestY bestW bestH bestRot bestSheetIdx found fr fx fy fw fh score sheetIdx sheet)
+(defun cs-pack-rects (parts sheetW sheetH kerf rotateFlag / sheets oversized freeRects part pw ph bestScore bestX bestY bestW bestH bestRot bestSheetIdx found fr fx fy fw fh score sheetIdx sheet)
   (setq sheets '() oversized '())
   (setq sheets (list (list (list (list 0.0 0.0 sheetW sheetH)) '() 0.0 0.0)))
   
@@ -641,144 +560,110 @@
         (setq sheets (subst sheet (nth bestSheetIdx sheets) sheets)))
       (setq oversized (cons part oversized))))
   
-  (list sheets (reverse oversized))
-)
+  (list sheets (reverse oversized)))
 
-;; Сортировка по площади (убывание)
 (defun cs-sort-by-area (records)
-  (vl-sort records
-    '(lambda (a b) (> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b)))))
-)
+  (vl-sort records '(lambda (a b) (> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))))))
 
-;; Сортировка по максимальной стороне (убывание)
 (defun cs-sort-by-max-side (records)
-  (vl-sort records
-    '(lambda (a b) (> (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b)))))
-)
+  (vl-sort records '(lambda (a b) (> (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))))))
 
-;; Сортировка по минимальной стороне (убывание)
 (defun cs-sort-by-min-side (records)
-  (vl-sort records
-    '(lambda (a b) (> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b)))))
-)
+  (vl-sort records '(lambda (a b) (> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))))))
 
-;; Подсчёт использования площади
 (defun cs-calc-utilization (sheets sheetW sheetH / used)
   (setq used 0.0)
-  (foreach sheet sheets
-    (setq used (+ used (nth 2 sheet))))
+  (foreach sheet sheets (setq used (+ used (nth 2 sheet))))
   (if (> (length sheets) 0)
     (/ (* used 100.0) (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
-    0.0)
-)
+    0.0))
 
-;; Главная функция раскроя - пробует 3 стратегии и выбирает лучшую
 (defun cs-nest (parts sheetW sheetH kerf rotateFlag / result1 result2 result3 bestResult bestSheets bestUtil sheets util)
-  ;; Стратегия 1: по площади
   (setq result1 (cs-pack-rects (cs-sort-by-area parts) sheetW sheetH kerf rotateFlag))
   (setq sheets (car result1) util (cs-calc-utilization sheets sheetW sheetH))
   (setq bestResult result1 bestSheets (length sheets) bestUtil util)
   
-  ;; Стратегия 2: по максимальной стороне
   (setq result2 (cs-pack-rects (cs-sort-by-max-side parts) sheetW sheetH kerf rotateFlag))
   (setq sheets (car result2) util (cs-calc-utilization sheets sheetW sheetH))
-  (if (or (< (length sheets) bestSheets)
-          (and (= (length sheets) bestSheets) (> util bestUtil)))
+  (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result2 bestSheets (length sheets) bestUtil util))
   
-  ;; Стратегия 3: по минимальной стороне
   (setq result3 (cs-pack-rects (cs-sort-by-min-side parts) sheetW sheetH kerf rotateFlag))
   (setq sheets (car result3) util (cs-calc-utilization sheets sheetW sheetH))
-  (if (or (< (length sheets) bestSheets)
-          (and (= (length sheets) bestSheets) (> util bestUtil)))
+  (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result3 bestSheets (length sheets) bestUtil util))
   
-  ;; Оптимизация последнего листа
-  (setq bestResult (list (cs-optimize-last-sheet (car bestResult) sheetW sheetH kerf rotateFlag)
-                         (cadr bestResult)))
-  
-  bestResult
-)
+  (setq bestResult (list (cs-optimize-last-sheet (car bestResult) sheetW sheetH kerf rotateFlag) (cadr bestResult)))
+  bestResult)
 
-;; Возвращает список без последнего элемента
 (defun cs-butlast (lst)
-  (if (<= (length lst) 1)
-    '()
-    (reverse (cdr (reverse lst))))
-)
+  (if (<= (length lst) 1) '() (reverse (cdr (reverse lst)))))
 
 (defun cs-optimize-last-sheet (sheets sheetW sheetH kerf rotateFlag / lastSheet lastParts result1 result2 result3 bestResult bestScore score newSheets)
   (if (or (null sheets) (<= (length sheets) 1))
     sheets
     (progn
       (setq lastSheet (last sheets))
-      
       (if (or (null lastSheet) (not (listp lastSheet)))
         sheets
         (progn
           (setq lastParts (mapcar '(lambda (p) (car p)) (cadr lastSheet)))
-          
           (if (or (null lastParts) (<= (length lastParts) 1))
             sheets
             (progn
-              ;; Стратегия 1: по убыванию площади
               (setq result1 (cs-pack-rects (cs-sort-by-area lastParts) sheetW sheetH kerf rotateFlag))
               (setq bestResult result1 bestScore (cs-calc-utilization (car result1) sheetW sheetH))
-              
-              ;; Стратегия 2: по возрастанию площади
               (setq result2 (cs-pack-rects (reverse (cs-sort-by-area lastParts)) sheetW sheetH kerf rotateFlag))
               (setq score (cs-calc-utilization (car result2) sheetW sheetH))
-              (if (> score bestScore)
-                (setq bestResult result2 bestScore score))
-              
-              ;; Стратегия 3: по минимальной стороне
+              (if (> score bestScore) (setq bestResult result2 bestScore score))
               (setq result3 (cs-pack-rects (cs-sort-by-min-side lastParts) sheetW sheetH kerf rotateFlag))
               (setq score (cs-calc-utilization (car result3) sheetW sheetH))
-              (if (> score bestScore)
-                (setq bestResult result3 bestScore score))
-              
-              ;; Заменяем последний лист (без butlast)
+              (if (> score bestScore) (setq bestResult result3 bestScore score))
               (setq newSheets (append (reverse (cdr (reverse sheets))) (car bestResult)))
-              newSheets))))))
-)
+              newSheets)))))))
 
+;; ================= СТАТИСТИКА =================
 (defun cs-total-count (records / n r) (setq n 0) (foreach r records (setq n (1+ n))) n)
 (defun cs-total-actual-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (nth 6 r)))) a)
 (defun cs-total-bbox-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))))) a)
 
-(defun cs-sheet-list (sheets / out idx sh pl)
-  (setq out '() idx 1)
-  (foreach sh sheets
-    (setq pl '())
-    (foreach p (cadr sh) (setq pl (cons (cons idx p) pl)))
-    (setq out (cons (list idx (reverse pl) (nth 2 sh) (nth 3 sh)) out))
-    (setq idx (1+ idx)))
-  (reverse out)
-)
-
+;; ================= ГРАФИКА =================
 (defun cs-ensure-italic-style (/ result)
   (if (tblsearch "STYLE" "Раскрой Italic") T
     (progn
-      (setq result (entmake (list '(0 . "STYLE") '(100 . "AcDbSymbolTableRecord") '(100 . "AcDbTextStyleTableRecord") '(2 . "Раскрой Italic") '(70 . 0) '(40 . 0.0) '(41 . 1.0) '(50 . 0.26) '(71 . 0) '(42 . 2.5) '(3 . "Arial") '(4 . ""))))
-      (if result (tblsearch "STYLE" "Раскрой Italic") nil)))
-)
+      (setq result (entmake (list '(0 . "STYLE") '(100 . "AcDbSymbolTableRecord")
+                                  '(100 . "AcDbTextStyleTableRecord")
+                                  '(2 . "Раскрой Italic") '(70 . 0)
+                                  '(40 . 0.0) '(41 . 1.0) '(50 . 0.26)
+                                  '(71 . 0) '(42 . 2.5) '(3 . "Arial") '(4 . ""))))
+      (if result (tblsearch "STYLE" "Раскрой Italic") nil))))
 
 (defun cs-ensure-bold-style (/ result)
   (if (tblsearch "STYLE" "Основной стиль (надписи без наклона)") T
     (progn
-      (setq result (entmake (list '(0 . "STYLE") '(100 . "AcDbSymbolTableRecord") '(100 . "AcDbTextStyleTableRecord") '(2 . "Основной стиль (надписи без наклона)") '(70 . 0) '(40 . 0.0) '(41 . 1.0) '(50 . 0.0) '(71 . 0) '(42 . 2.5) '(3 . "arialbd.ttf") '(4 . ""))))
-      (if result (tblsearch "STYLE" "Основной стиль (надписи без наклона)") nil)))
-)
+      (setq result (entmake (list '(0 . "STYLE") '(100 . "AcDbSymbolTableRecord")
+                                  '(100 . "AcDbTextStyleTableRecord")
+                                  '(2 . "Основной стиль (надписи без наклона)")
+                                  '(70 . 0) '(40 . 0.0) '(41 . 1.0) '(50 . 0.0)
+                                  '(71 . 0) '(42 . 2.5) '(3 . "arialbd.ttf") '(4 . ""))))
+      (if result (tblsearch "STYLE" "Основной стиль (надписи без наклона)") nil))))
 
 (defun cs-draw-line (p1 p2 color)
-  (entmake (list '(0 . "LINE") '(100 . "AcDbEntity") (cons 62 color) (cons 10 (list (car p1) (cadr p1) 0.0)) (cons 11 (list (car p2) (cadr p2) 0.0))))
-)
+  (entmake (list '(0 . "LINE") '(100 . "AcDbEntity")
+                 (cons 62 color)
+                 (cons 10 (list (car p1) (cadr p1) 0.0))
+                 (cons 11 (list (car p2) (cadr p2) 0.0)))))
 
 (defun cs-draw-rect (p1 p2 color)
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity") (cons 62 color) '(100 . "AcDbPolyline") '(90 . 4) '(70 . 1)
-    (cons 10 (list (car p1) (cadr p1))) (cons 10 (list (car p2) (cadr p1))) (cons 10 (list (car p2) (cadr p2))) (cons 10 (list (car p1) (cadr p2)))))
-)
+  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+                 (cons 62 color) '(100 . "AcDbPolyline")
+                 '(90 . 4) '(70 . 1)
+                 (cons 10 (list (car p1) (cadr p1)))
+                 (cons 10 (list (car p2) (cadr p1)))
+                 (cons 10 (list (car p2) (cadr p2)))
+                 (cons 10 (list (car p1) (cadr p2))))))
 
+;; Прозрачность через ActiveX
 (defun cs-apply-transparency (ent val90 / obj r)
   (if ent
     (progn
@@ -786,213 +671,241 @@
       (if (not (vl-catch-all-error-p obj))
         (progn
           (setq r (vl-catch-all-apply 'vlax-put-property (list obj 'EntityTransparency val90)))
-          (if (vl-catch-all-error-p r) (vl-catch-all-apply 'vlax-put-property (list obj 'Transparency val90)))))))
-  ent
-)
+          (if (vl-catch-all-error-p r)
+            (vl-catch-all-apply 'vlax-put-property (list obj 'Transparency val90)))))))
+  ent)
 
-(defun cs-frac-to-dxf440 (fraction) (fix (* 255.0 (/ (- 100.0 (* fraction 100.0)) 100.0))))
-
-(defun cs-draw-filled-rect (p1 p2 color transparency / x1 y1 x2 y2 trans440)
+;; transparency: 0.0..1.0 (где 1.0 = 90% прозрачности)
+;; ЗАЛИВКА ЧЕРЕЗ SOLID (цвет через entmod)
+(defun cs-draw-filled-rect (p1 p2 color transparency / x1 y1 x2 y2 ent res aci edata)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (setq trans440 (cs-frac-to-dxf440 transparency))
-  (if (< trans440 0) (setq trans440 0))
-  (if (> trans440 255) (setq trans440 255))
-  (entmake (list '(0 . "HATCH") '(100 . "AcDbEntity") (cons 62 color) (cons 440 trans440) '(100 . "AcDbHatch") '(10 0.0 0.0 0.0) '(210 0.0 0.0 1.0) '(2 . "SOLID") '(70 . 1) '(71 . 0) '(91 . 1) '(92 . 2) '(72 . 0) '(73 . 1) '(93 . 4)
-    (cons 10 (list x1 y1)) (cons 10 (list x2 y1)) (cons 10 (list x2 y2)) (cons 10 (list x1 y2)) '(97 . 0) '(75 . 0) '(76 . 1) '(47 . 1.0) '(98 . 0)))
-)
+  ;; Преобразуем прозрачность 0.0..1.0 в 0..90
+  (setq aci (fix (+ 0.5 (* transparency 90.0))))
+  (if (> aci 90) (setq aci 90))
+  (if (< aci 0) (setq aci 0))
+  
+  ;; Создаём SOLID БЕЗ кода 62
+  (setq res
+    (entmake
+      (list
+        '(0 . "SOLID")
+        '(100 . "AcDbEntity")
+        '(100 . "AcDbTrace")
+        (cons 10 (list x1 y1 0.0))
+        (cons 11 (list x2 y1 0.0))
+        (cons 12 (list x1 y2 0.0))
+        (cons 13 (list x2 y2 0.0))
+        '(39 . 0.0)
+      )
+    )
+  )
+  
+  (if res
+    (progn
+      (setq ent (entlast))
+      ;; Устанавливаем цвет через entmod
+      (setq edata (entget ent))
+      (entmod (append edata (list (cons 62 color))))
+      ;; Устанавливаем прозрачность через ActiveX
+      (cs-apply-transparency ent aci)
+      ent)
+    nil))
 
 (defun cs-draw-text (pt h txt color / style)
   (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity") (cons 62 color) (cons 7 style) (cons 10 (list (car pt) (cadr pt) 0.0)) (cons 40 h) (cons 1 txt) '(50 . 0.0)))
-)
+  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+                 (cons 62 color) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-bold (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Основной стиль (надписи без наклона)") "Основной стиль (надписи без наклона)" (getvar "TEXTSTYLE")))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity") (cons 62 color) (cons 7 style) (cons 10 (list (car pt) (cadr pt) 0.0)) (cons 40 h) (cons 1 txt) '(50 . 0.0)))
-)
+  (setq style (if (tblsearch "STYLE" "Основной стиль (надписи без наклона)")
+                "Основной стиль (надписи без наклона)" (getvar "TEXTSTYLE")))
+  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+                 (cons 62 color) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-center (pt h txt color / style)
   (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity") (cons 62 color) (cons 7 style) (cons 10 (list (car pt) (cadr pt) 0.0)) (cons 11 (list (car pt) (cadr pt) 0.0)) (cons 40 h) (cons 1 txt) '(50 . 0.0) '(72 . 1) '(73 . 2)))
-)
+  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+                 (cons 62 color) (cons 7 style)
+                 (cons 10 (list (car pt) (cadr pt) 0.0))
+                 (cons 11 (list (car pt) (cadr pt) 0.0))
+                 (cons 40 h) (cons 1 txt) '(50 . 0.0)
+                 '(72 . 1) '(73 . 2))))
 
 (defun cs-build-color-map (groups / out i g)
   (setq out '() i 0)
   (foreach g groups
     (setq out (cons (cons (car g) (nth (rem i (length *CUTSHEET-PALETTE*)) *CUTSHEET-PALETTE*)) out) i (1+ i)))
-  out
-)
+  out)
 
 (defun cs-color-for-part (r colorMap / a)
   (setq a (assoc (cs-part-key r) colorMap))
-  (if a (cdr a) *CUTSHEET-PART-TEXT-COLOR*)
-)
+  (if a (cdr a) *CUTSHEET-PART-TEXT-COLOR*))
 
 (defun cs-draw-sheet-header (x y sheetW sheetH n / h textY)
   (setq h *CUTSHEET-SHEET-HEADER*)
-  
-  ;; Надпись "ЛИСТ N" - чуть выше верхней границы листа
-  (cs-draw-text-bold (list x (+ y sheetH (* h 0.5))) 
-                     *CUTSHEET-TEXT-H* 
-                     (strcat "ЛИСТ " (itoa n)) 
-                     *CUTSHEET-HEADER-COLOR*)
-  
-  ;; Метка высоты - в левом верхнем углу, под надписью ЛИСТ N
-  ;; Выравнивание по левому краю листа
-  (cs-draw-text (list x (+ y sheetH (* h 0.15))) 
-                (* *CUTSHEET-TEXT-H* 0.75) 
-                (cs-itoa-safe sheetH) 
-                *CUTSHEET-VALUE-COLOR*)
-  
-  ;; Линия шкалы по НИЖНЕЙ границе листа
-  (cs-draw-line (list x y) 
-                (list (+ x sheetW) y) 
-                *CUTSHEET-OUTLINE-COLOR*)
-  
-  ;; Метки "0" и ширина ПОД нижней границей листа
+  (cs-draw-text-bold (list x (+ y sheetH (* h 0.5))) *CUTSHEET-TEXT-H*
+                     (strcat "ЛИСТ " (itoa n)) *CUTSHEET-HEADER-COLOR*)
+  (cs-draw-text (list x (+ y sheetH (* h 0.15))) (* *CUTSHEET-TEXT-H* 0.75)
+                (cs-itoa-safe sheetH) *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-line (list x y) (list (+ x sheetW) y) *CUTSHEET-OUTLINE-COLOR*)
   (setq textY (- y (* h 0.35)))
-  (cs-draw-text (list x textY) 
-                (* *CUTSHEET-TEXT-H* 0.75) 
-                "0" 
-                *CUTSHEET-VALUE-COLOR*)
-  (cs-draw-text (list (+ x sheetW -140.0) textY) 
-                (* *CUTSHEET-TEXT-H* 0.75) 
-                (cs-itoa-safe sheetW) 
-                *CUTSHEET-VALUE-COLOR*)
-)
+  (cs-draw-text (list x textY) (* *CUTSHEET-TEXT-H* 0.75) "0" *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ x sheetW -140.0) textY) (* *CUTSHEET-TEXT-H* 0.75)
+                (cs-itoa-safe sheetW) *CUTSHEET-VALUE-COLOR*))
 
-(defun cs-draw-placement (pl x0 y0 colorMap / r px py w h rot col)
-  (setq r (car pl) px (+ x0 (nth 1 pl)) py (+ y0 (nth 2 pl)) w (nth 3 pl) h (nth 4 pl) rot (nth 5 pl) col (cs-color-for-part r colorMap))
-  (cs-draw-filled-rect (list px py) (list (+ px w) (+ py h)) col *CUTSHEET-PART-TRANSPARENCY*)
-  (cs-draw-rect (list px py) (list (+ px w) (+ py h)) *CUTSHEET-OUTLINE-COLOR*)
+;; ОТРИСОВКА ИЗДЕЛИЯ: Заливка SOLID + Обводка + Подпись
+(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col)
+  (setq r (car pl)
+        x (+ x0 (cadr pl))
+        y (+ y0 (caddr pl))
+        w (nth 3 pl)
+        h (nth 4 pl)
+        rot (nth 5 pl)
+        col (cs-color-for-part r colorMap))
+  ;; 1. Заливка (под обводкой) — SOLID с прозрачностью
+  (cs-draw-filled-rect (list x y) (list (+ x w) (+ y h)) col *CUTSHEET-PART-TRANSPARENCY*)
+  ;; 2. Обводка (поверх заливки)
+  (cs-draw-rect (list x y) (list (+ x w) (+ y h)) *CUTSHEET-OUTLINE-COLOR*)
+  ;; 3. Подпись
   (if (> (* w h) *CUTSHEET-MIN-TEXT-AREA*)
-    (cs-draw-text-center (list (+ px (* w 0.5)) (+ py (* h 0.53))) (min *CUTSHEET-TEXT-H* (* 0.12 (min w h))) (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
-)
+    (cs-draw-text-center (list (+ x (* w 0.5)) (+ y (* h 0.53)))
+                         (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
+                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*)))
 
 (defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr)
-  (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0 sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
-  (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec)) actualArea (+ actualArea (nth 8 rec))))
-  (setq kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0) kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0) waste (max 0.0 (- sheetArea actualArea)))
+  (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
+        sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
+  (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
+                            actualArea (+ actualArea (nth 8 rec))))
+  (setq kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0)
+        kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0)
+        waste (max 0.0 (- sheetArea actualArea)))
   (setq rows (length groups) maxLabelLen 10)
-  (foreach rec groups (setq col (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec)))) (if (> (strlen col) maxLabelLen) (setq maxLabelLen (strlen col))))
+  (foreach rec groups (setq col (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))))
+    (if (> (strlen col) maxLabelLen) (setq maxLabelLen (strlen col))))
   (setq width (max *CUTSHEET-SUMMARY-W* (+ 600.0 (* maxLabelLen 40.0))))
-  
-  ;; Высота рамки: 13 строк заголовка + количество изделий
-  (cs-draw-rect (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
+  (cs-draw-rect (list left (- top (* rowH (+ rows 13 (if oversized 1 0)))))
+                (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
   
   (setq y (- top (* rowH 0.72)))
   (cs-draw-text-bold (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 1.45) "РАСКРОЙ ЛИСТА" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y (* rowH 1.28)))
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Лист: " (cs-itoa-safe sheetW) " x " (cs-itoa-safe sheetH) " мм") *CUTSHEET-HEADER-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Лист: " (cs-itoa-safe sheetW) " x " (cs-itoa-safe sheetH) " мм") *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Листов: " (itoa (length sheets))) *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Листов: " (itoa (length sheets))) *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  
-  ;; "Изделий" вместо "Деталей"
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Изделий: " (itoa totalCnt) " шт.") *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Изделий: " (itoa totalCnt) " шт.") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  
-  ;; Поворот разрешен/запрещен
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* 
-                (if rotateFlag "Поворот деталей разрешен" "Поворот деталей запрещен") 
-                *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (if rotateFlag "Поворот деталей разрешен" "Поворот деталей запрещен") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Фактическая площадь: " (cs-format-num actualArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Фактическая площадь: " (cs-format-num actualArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Площадь габаритов: " (cs-format-num bboxArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Площадь габаритов: " (cs-format-num bboxArea 2) " м2") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "ПОЛЕЗНЫЙ ВЫХОД: " (cs-format-num kpdFact 1) "%") *CUTSHEET-KPD-COLOR*)
+  (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                     (strcat "ПОЛЕЗНЫЙ ВЫХОД: " (cs-format-num kpdFact 1) "%") *CUTSHEET-KPD-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Габаритный выход: " (cs-format-num kpdBox 1) "%") *CUTSHEET-VALUE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Габаритный выход: " (cs-format-num kpdBox 1) "%") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
-  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "Потери: " (cs-format-num waste 2) " м2") *CUTSHEET-WASTE-COLOR*)
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Потери: " (cs-format-num waste 2) " м2") *CUTSHEET-WASTE-COLOR*)
   (setq y (- y (* 1.2 rowH)))
-
-  ;; Заголовок ИЗДЕЛИЯ с подписью формата
   (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* "ИЗДЕЛИЯ (ВхШ)" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) "Размер" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) "Кол-во" *CUTSHEET-HEADER-COLOR*)
   (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) "Площадь" *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
-
-  ;; Сортировка изделий
+  
   (if rotateFlag
-    (setq sortedGroups
-      (vl-sort groups
-        '(lambda (a b)
-           (cond
-             ((< (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) T)
-             ((> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) nil)
-             ((< (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) T)
-             (T nil)))))
-    (setq sortedGroups
-      (vl-sort groups
-        '(lambda (a b)
-           (cond
-             ((< (nth 5 a) (nth 5 b)) T)
-             ((> (nth 5 a) (nth 5 b)) nil)
-             ((< (nth 4 a) (nth 4 b)) T)
-             (T nil))))))
-
-  ;; Отображение изделий
+    (setq sortedGroups (vl-sort groups
+      '(lambda (a b)
+         (cond
+           ((< (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) T)
+           ((> (min (nth 4 a) (nth 5 a)) (min (nth 4 b) (nth 5 b))) nil)
+           ((< (max (nth 4 a) (nth 5 a)) (max (nth 4 b) (nth 5 b))) T)
+           (T nil)))))
+    (setq sortedGroups (vl-sort groups
+      '(lambda (a b)
+         (cond
+           ((< (nth 5 a) (nth 5 b)) T)
+           ((> (nth 5 a) (nth 5 b)) nil)
+           ((< (nth 4 a) (nth 4 b)) T)
+           (T nil))))))
+  
   (setq colorMap (cs-build-color-map groups))
   (setq i 0)
   (foreach rec sortedGroups
     (setq col (nth (rem i (length *CUTSHEET-PALETTE*)) *CUTSHEET-PALETTE*))
     (if rotateFlag
-      (setq sizeStr
-        (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec)))
-                "x"
-                (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
-      (setq sizeStr
-        (strcat (cs-itoa-safe (nth 5 rec))
-                "x"
-                (cs-itoa-safe (nth 4 rec)))))
+      (setq sizeStr (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec))) "x"
+                            (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
+      (setq sizeStr (strcat (cs-itoa-safe (nth 5 rec)) "x" (cs-itoa-safe (nth 4 rec)))))
     (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
-    (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
-    (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
+    (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                  (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
+    (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                  (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
     (setq y (- y rowH))
     (setq i (1+ i)))
-
-  (if oversized
-    (progn (setq y (- y rowH)) (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
   
-  ;; Возврат bbox с учётом высоты
-  (list (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top))
-)
+  (if oversized
+    (progn (setq y (- y rowH))
+           (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                              (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
+  
+  (list (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top)))
 
 (defun cs-draw-frame (bbox / x1 y1 x2 y2)
   (if (not (tblsearch "LAYER" *CUTSHEET-FRAME-LAYER*))
-    (entmake (list '(0 . "LAYER") '(100 . "AcDbSymbolTableRecord") '(100 . "AcDbLayerTableRecord") (cons 2 *CUTSHEET-FRAME-LAYER*) '(70 . 0) '(62 . 7) '(6 . "Continuous") '(370 . -3))))
-  (setq x1 (- (car (car bbox)) *CUTSHEET-FRAME-PAD-LEFT*) y1 (- (cadr (car bbox)) *CUTSHEET-FRAME-PAD-BOTTOM*)
-        x2 (+ (car (cadr bbox)) *CUTSHEET-FRAME-PAD-RIGHT*) y2 (+ (cadr (cadr bbox)) *CUTSHEET-FRAME-PAD-TOP*))
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity") (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline") '(90 . 4) '(70 . 1)
-    (cons 10 (list x1 y1)) (cons 10 (list x2 y1)) (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
-  (list (list x1 y1) (list x2 y2))
-)
+    (entmake (list '(0 . "LAYER") '(100 . "AcDbSymbolTableRecord")
+                   '(100 . "AcDbLayerTableRecord")
+                   (cons 2 *CUTSHEET-FRAME-LAYER*) '(70 . 0)
+                   '(62 . 7) '(6 . "Continuous") '(370 . -3))))
+  (setq x1 (- (car (car bbox)) *CUTSHEET-FRAME-PAD-LEFT*)
+        y1 (- (cadr (car bbox)) *CUTSHEET-FRAME-PAD-BOTTOM*)
+        x2 (+ (car (cadr bbox)) *CUTSHEET-FRAME-PAD-RIGHT*)
+        y2 (+ (cadr (cadr bbox)) *CUTSHEET-FRAME-PAD-TOP*))
+  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+                 (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline")
+                 '(90 . 4) '(70 . 1)
+                 (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
+                 (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
+  (list (list x1 y1) (list x2 y2)))
 
 (defun cs-draw-layout (sheets sheetW sheetH insPt colorMap / n sh col row x y p)
   (setq n 0)
   (foreach sh sheets
-    (setq n (1+ n) col (rem (1- n) *CUTSHEET-GRID-COLS*) row (fix (/ (1- n) *CUTSHEET-GRID-COLS*))
+    (setq n (1+ n) col (rem (1- n) *CUTSHEET-GRID-COLS*)
+          row (fix (/ (1- n) *CUTSHEET-GRID-COLS*))
           x (+ (car insPt) (* col (+ sheetW *CUTSHEET-SHEET-GAP*)))
           y (- (cadr insPt) (* row (+ sheetH *CUTSHEET-SHEET-GAP* *CUTSHEET-SHEET-HEADER*))))
     (cs-draw-sheet-header x y sheetW sheetH n)
     (cs-draw-rect (list x y) (list (+ x sheetW) (+ y sheetH)) *CUTSHEET-OUTLINE-COLOR*)
     (foreach p (cadr sh) (cs-draw-placement p x y colorMap)))
-  (list (list (car insPt) (- (cadr insPt) (* (max 0 (fix (/ (max 0 (1- n)) *CUTSHEET-GRID-COLS*))) (+ sheetH *CUTSHEET-SHEET-GAP* *CUTSHEET-SHEET-HEADER*))))
-        (list (+ (car insPt) (* (max 0 (1- (min n *CUTSHEET-GRID-COLS*))) (+ sheetW *CUTSHEET-SHEET-GAP*)) sheetW) (+ (cadr insPt) sheetH)))
-)
+  (list (list (car insPt) (- (cadr insPt) (* (max 0 (fix (/ (max 0 (1- n)) *CUTSHEET-GRID-COLS*)))
+                                              (+ sheetH *CUTSHEET-SHEET-GAP* *CUTSHEET-SHEET-HEADER*))))
+        (list (+ (car insPt) (* (max 0 (1- (min n *CUTSHEET-GRID-COLS*))) (+ sheetW *CUTSHEET-SHEET-GAP*)) sheetW)
+              (+ (cadr insPt) sheetH))))
 
+;; ================= XLS / CSV =================
 (defun cs-xml-escape (s)
   (setq s (vl-string-subst "&amp;" "&" s))
   (setq s (vl-string-subst "&lt;" "<" s))
   (setq s (vl-string-subst "&gt;" ">" s))
   (setq s (vl-string-subst "&quot;" "\"" s))
-  s
-)
+  s)
 
 (defun cs-write-csv (sheets oversized sheetW sheetH kerf / fname f n sh p r)
   (setq fname (strcat (getvar "DWGPREFIX") (vl-filename-base (getvar "DWGNAME")) " Раскрой листа.csv"))
@@ -1007,17 +920,20 @@
         (setq n (1+ n))
         (foreach p (cadr sh)
           (setq r (car p))
-          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";" (cs-format-num (nth 1 p) 1) ";" (cs-format-num (nth 2 p) 1) ";" (if (= (nth 5 p) 1) "90" "0") ";" (cs-format-num (nth 6 r) 4)) f)))
+          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+                              (cs-format-num (nth 1 p) 1) ";" (cs-format-num (nth 2 p) 1) ";"
+                              (if (= (nth 5 p) 1) "90" "0") ";" (cs-format-num (nth 6 r) 4)) f)))
       (if oversized
         (progn
           (write-line "" f)
           (write-line "НЕРАЗМЕЩЁННЫЕ ДЕТАЛИ" f)
-          (foreach r oversized (write-line (strcat (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";" (cs-format-num (nth 6 r) 4)) f))))
+          (foreach r oversized
+            (write-line (strcat (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+                                (cs-format-num (nth 6 r) 4)) f))))
       (close f)
       (princ (strcat "\nCSV сохранён: " fname))
       T)
-    nil)
-)
+    nil))
 
 (defun cs-write-xls (groups sheets oversized sheetW sheetH kerf / fname f n sh p r rec totalCnt actualArea bboxArea sheetArea kpdFact kpdBox)
   (setq fname (strcat (getvar "DWGPREFIX") (vl-filename-base (getvar "DWGNAME")) " Раскрой листа.xls"))
@@ -1025,10 +941,11 @@
   (if f
     (progn
       (setq totalCnt 0 actualArea 0.0 bboxArea 0.0)
-      (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec)) actualArea (+ actualArea (nth 8 rec))))
+      (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
+                                actualArea (+ actualArea (nth 8 rec))))
       (setq sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0))
             kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0)
-            kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0))
+            kpdBox  (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0))
       (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
       (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
       (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
@@ -1048,7 +965,7 @@
       (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Формат листа</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">" (cs-itoa-safe sheetW) "x" (cs-itoa-safe sheetH) " мм</Data></Cell></Row>") f)
       (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Пропил</Data></Cell><Cell ss:StyleID=\"N\"><Data ss:Type=\"Number\">" (cs-xls-num kerf 2) "</Data></Cell></Row>") f)
       (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Листов</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"Number\">" (itoa (length sheets)) "</Data></Cell></Row>") f)
-      (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Деталей</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"Number\">" (itoa totalCnt) "</Data></Cell></Row>") f)
+      (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Изделий</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"Number\">" (itoa totalCnt) "</Data></Cell></Row>") f)
       (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Фактическая площадь, м2</Data></Cell><Cell ss:StyleID=\"N\"><Data ss:Type=\"Number\">" (cs-xls-num actualArea 4) "</Data></Cell></Row>") f)
       (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">Площадь габаритов, м2</Data></Cell><Cell ss:StyleID=\"N\"><Data ss:Type=\"Number\">" (cs-xls-num bboxArea 4) "</Data></Cell></Row>") f)
       (write-line (strcat "<Row><Cell ss:StyleID=\"H\"><Data ss:Type=\"String\">Полезный выход, %</Data></Cell><Cell ss:StyleID=\"H\"><Data ss:Type=\"Number\">" (cs-xls-num kpdFact 1) "</Data></Cell></Row>") f)
@@ -1079,13 +996,12 @@
       (close f)
       (princ (strcat "\nXLS сохранён: " fname))
       T)
-    nil)
-)
+    nil))
 
+;; ================= СЛУЖЕБНЫЕ ГРАФИЧЕСКИЕ ПРОЦЕДУРЫ =================
 (defun cs-combine-bbox (a b)
   (list (list (min (car (car a)) (car (car b))) (min (cadr (car a)) (cadr (car b))))
-        (list (max (car (cadr a)) (car (cadr b))) (max (cadr (cadr a)) (cadr (cadr b)))))
-)
+        (list (max (car (cadr a)) (car (cadr b))) (max (cadr (cadr a)) (cadr (cadr b))))))
 
 (defun cs-zoom-bbox (bbox / app p1 p2)
   (setq app (vl-catch-all-apply 'vlax-get-acad-object '()))
@@ -1093,20 +1009,17 @@
     (progn
       (setq p1 (vlax-3d-point (list (car (car bbox)) (cadr (car bbox)) 0.0))
             p2 (vlax-3d-point (list (car (cadr bbox)) (cadr (cadr bbox)) 0.0)))
-      (vl-catch-all-apply 'vla-ZoomWindow (list app p1 p2))))
-)
+      (vl-catch-all-apply 'vla-ZoomWindow (list app p1 p2)))))
 
 (defun cs-setvar-transparency-display ()
-  (vl-catch-all-apply 'setvar (list "TRANSPARENCYDISPLAY" 1))
-)
+  (vl-catch-all-apply 'setvar (list "TRANSPARENCYDISPLAY" 1)))
 
 (defun cs-unique-block-name (base / name n)
   (setq n 0 name (strcat base " " (itoa n)))
   (while (tblsearch "BLOCK" name) (setq n (1+ n) name (strcat base " " (itoa n))))
-  name
-)
+  name)
 
-(defun cs-wrap-to-block (blockName basePt insertPt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr acad doc ms insertPt3 result insertObj)
+(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr insertPt3 acad doc ms)
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
@@ -1115,27 +1028,15 @@
             oldCmddia (getvar "CMDDIA")
             oldFiledia (getvar "FILEDIA"))
       
-      (setq basePtStr (strcat (rtos (car basePt) 2 6) "," 
-                              (rtos (cadr basePt) 2 6) ",0"))
+      (setq basePtStr (strcat (rtos (car basePt) 2 6) "," (rtos (cadr basePt) 2 6) ",0"))
       
-      ;; Отладка: выводим точки
-      (princ (strcat "\n[wrap] basePt (базовая): " 
-                     (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
-      (princ (strcat "\n[wrap] insertPt (вставка): " 
-                     (rtos (car insertPt) 2 2) "," (rtos (cadr insertPt) 2 2)))
-      
-      ;; Отключаем привязки
       (setvar "CMDECHO" 1)
       (setvar "OSMODE" 0)
       (setvar "CMDDIA" 0)
       (setvar "FILEDIA" 0)
       
-      ;; Создаём блок
-      (vl-catch-all-apply 'vl-cmdf 
-        (list "_.-BLOCK" blockName basePtStr ss ""))
-      
-      ;; Ждём завершения команды
-      (vl-catch-all-apply 'vl-cmdf (list ""))
+      ;; Создаём блок в режиме Удалить
+      (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss ""))
       
       (setq ok (tblsearch "BLOCK" blockName))
       (setq refs 0)
@@ -1146,95 +1047,120 @@
       
       (princ (strcat "\n[wrap] Блок создан: " (if ok "да" "нет") ", ссылок: " (itoa refs)))
       
-      ;; Если ссылок нет — вставляем блок
-      (if (and ok (= refs 0))
+      ;; Вставляем блок обратно в ту же точку (базовая точка = точка вставки)
+      (if ok
         (progn
-          (princ "\n[wrap] Вставляю блок через ActiveX")
           (setq acad (vlax-get-acad-object))
           (setq doc (vla-get-ActiveDocument acad))
           (setq ms (vla-get-ModelSpace doc))
-          (setq insertPt3 (vlax-3d-point (list (car insertPt) (cadr insertPt) 0.0)))
-          
-          ;; Вставляем блок и проверяем результат
-          (setq result (vl-catch-all-apply 'vla-InsertBlock 
-            (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
-          
-          (if (vl-catch-all-error-p result)
-            (princ (strcat "\n[wrap] Ошибка вставки: " (vl-catch-all-error-message result)))
-            (progn
-              ;; Проверяем координаты вставленного блока
-              (setq insertObj result)
-              (setq insertPt3 (vlax-get insertObj 'InsertionPoint))
-              (princ (strcat "\n[wrap] Блок вставлен в: " 
-                             (rtos (car insertPt3) 2 2) "," 
-                             (rtos (cadr insertPt3) 2 2)))))))
+          (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+          (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
+          (princ (strcat "\n[wrap] Блок вставлен в базовую точку: "
+                         (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))))
       
-      ;; Восстанавливаем переменные
       (setvar "FILEDIA" oldFiledia)
       (setvar "CMDDIA" oldCmddia)
       (setvar "OSMODE" oldOsmode)
       (setvar "CMDECHO" oldEcho)
-      T))
-)
+      T)))
 
-(defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad r choice sheetW sheetH kerf rotateFlag exportXls exportAcad dynType records groups parts nested sheets oversized insPt colorMap bbox1 bbox2 bbox3 bbox doc oldEcho lastEnt ssNew ent blockName baseName uMark totalCnt actualArea bboxArea sheetArea kpdFact kpdBox)
+;; ================= ГЛАВНАЯ ФУНКЦИЯ =================
+(defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes
+                      defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad
+                      r choice sheetW sheetH kerf rotateFlag exportXls exportAcad dynType
+                      records groups parts nested sheets oversized
+                      insPt colorMap bbox1 bbox2 bbox3 bbox
+                      doc oldEcho lastEnt ssNew ent blockName baseName uMark
+                      totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
+                      blockBasePt)
+  
   (defun *error* (msg)
-    (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*"))) (princ (strcat "\n[CUTSHEET ERROR] " msg)))
+    (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
+      (princ (strcat "\n[CUTSHEET ERROR] " msg)))
     (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
     (if oldEcho (setvar "CMDECHO" oldEcho))
     (setq *cs-tmp-choice* 'ALL *cs-tmp-dyn-type* "")
     (princ))
-
+  
   (princ "\n=== РАСКРОЙ ЛИСТА ===")
+  
   (if (eq layers-from-caller 'ASK)
     (progn
       (setq layers-from-caller (getstring T "\nСлои через запятую (Enter — все слои): "))
       (if (= layers-from-caller "")
         (setq layers-from-caller nil)
-        (setq layers-from-caller (mapcar '(lambda (x) (vl-string-trim " \t" x)) (cs-split-string layers-from-caller ","))))))
-
+        (setq layers-from-caller
+          (mapcar '(lambda (x) (vl-string-trim " \t" x))
+                  (cs-split-string layers-from-caller ","))))))
+  
   (setq ss (cs-build-filter-ss layers-from-caller))
-  (if (null ss) (progn (princ "\nНе выбрано подходящих LWPOLYLINE/INSERT.") (princ) (exit)))
-
-  (setq polyCnt (cs-count-type ss 'POLY) dynCnt (cs-count-type ss 'DYN) dynTypes (cs-collect-dyn-types ss))
+  (if (null ss)
+    (progn (princ "\nНе выбрано подходящих LWPOLYLINE/INSERT.") (princ) (exit)))
+  
+  (setq polyCnt (cs-count-type ss 'POLY)
+        dynCnt (cs-count-type ss 'DYN)
+        dynTypes (cs-collect-dyn-types ss))
+  
   (princ (strcat "\nПолилиний: " (itoa polyCnt) ", динамических блоков: " (itoa dynCnt)))
-
-  (if (= (+ polyCnt dynCnt) 0) (progn (princ "\nПодходящих исходных объектов нет.") (princ) (exit)))
-
-  (setq defaultW *CUTSHEET-LAST-WIDTH* defaultH *CUTSHEET-LAST-HEIGHT* defaultKerf *CUTSHEET-LAST-KERF* defaultRotate *CUTSHEET-LAST-ROTATE* defaultXls *CUTSHEET-LAST-XLS* defaultAcad *CUTSHEET-LAST-ACAD*)
+  
+  (if (= (+ polyCnt dynCnt) 0)
+    (progn (princ "\nПодходящих исходных объектов нет.") (princ) (exit)))
+  
+  (setq defaultW *CUTSHEET-LAST-WIDTH*
+        defaultH *CUTSHEET-LAST-HEIGHT*
+        defaultKerf *CUTSHEET-LAST-KERF*
+        defaultRotate *CUTSHEET-LAST-ROTATE*
+        defaultXls *CUTSHEET-LAST-XLS*
+        defaultAcad *CUTSHEET-LAST-ACAD*)
+  
   (if (boundp '*CUTSHEET-CREATE-XLS*) (setq defaultXls *CUTSHEET-CREATE-XLS*))
   (if (boundp '*CUTSHEET-CREATE-TABLE*) (setq defaultAcad *CUTSHEET-CREATE-TABLE*))
-
+  
   (setq r (cs-dialog polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad))
   (if (null r) (progn (princ "\nРаскрой листа отменён.") (princ) (exit)))
-
-  (setq choice (nth 0 r) sheetW (nth 1 r) sheetH (nth 2 r) kerf (nth 3 r) rotateFlag (nth 4 r) exportXls (nth 5 r) exportAcad (nth 6 r) dynType (nth 7 r))
-  (setq *CUTSHEET-LAST-WIDTH* sheetW *CUTSHEET-LAST-HEIGHT* sheetH *CUTSHEET-LAST-KERF* kerf *CUTSHEET-LAST-ROTATE* rotateFlag *CUTSHEET-LAST-XLS* exportXls *CUTSHEET-LAST-ACAD* exportAcad)
-
+  
+  (setq choice (nth 0 r) sheetW (nth 1 r) sheetH (nth 2 r) kerf (nth 3 r)
+        rotateFlag (nth 4 r) exportXls (nth 5 r) exportAcad (nth 6 r) dynType (nth 7 r))
+  
+  (setq *CUTSHEET-LAST-WIDTH* sheetW *CUTSHEET-LAST-HEIGHT* sheetH
+        *CUTSHEET-LAST-KERF* kerf *CUTSHEET-LAST-ROTATE* rotateFlag
+        *CUTSHEET-LAST-XLS* exportXls *CUTSHEET-LAST-ACAD* exportAcad)
+  
   (setq records (cs-collect-records ss choice dynType))
-  (if (null records) (progn (princ "\nПосле фильтрации не осталось деталей с определёнными габаритами.") (princ) (exit)))
-
+  (if (null records)
+    (progn (princ "\nПосле фильтрации не осталось деталей с определёнными габаритами.")
+           (princ) (exit)))
+  
   (princ (strcat "\nВ раскрой принято деталей: " (itoa (length records))))
-
+  
   (setq groups (cs-aggregate records))
-  (setq nested (cs-nest records sheetW sheetH kerf rotateFlag) sheets (car nested) oversized (cadr nested))
-
-  (setq totalCnt (length records) actualArea (cs-total-actual-area-records records) bboxArea (cs-total-bbox-area-records records)
+  (setq nested (cs-nest records sheetW sheetH kerf rotateFlag)
+        sheets (car nested)
+        oversized (cadr nested))
+  
+  (setq totalCnt (length records)
+        actualArea (cs-total-actual-area-records records)
+        bboxArea (cs-total-bbox-area-records records)
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0))
         kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0)
         kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0))
-
-  (princ (strcat "\nЛистов: " (itoa (length sheets)) " | деталей: " (itoa totalCnt) " | полезный выход: " (cs-format-num kpdFact 1) "%" " | габаритный выход: " (cs-format-num kpdBox 1) "%"))
-
+  
+  (princ (strcat "\nЛистов: " (itoa (length sheets)) " | деталей: " (itoa totalCnt)
+                 " | полезный выход: " (cs-format-num kpdFact 1) "%"
+                 " | габаритный выход: " (cs-format-num kpdBox 1) "%"))
+  
   (if oversized
     (progn
       (princ (strcat "\nНЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт."))
-      (foreach r oversized (princ (strcat "\n  " (cs-part-label r) " | " (nth 3 r))))))
-
+      (foreach r oversized
+        (princ (strcat "\n  " (cs-part-label r) " | " (nth 3 r))))))
+  
   (if exportXls
     (if (not (cs-write-xls groups sheets oversized sheetW sheetH kerf))
-      (progn (princ "\nXLS не создан — выполняется fallback CSV.") (cs-write-csv sheets oversized sheetW sheetH kerf))))
-
+      (progn
+        (princ "\nXLS не создан — выполняется fallback CSV.")
+        (cs-write-csv sheets oversized sheetW sheetH kerf))))
+  
   (if exportAcad
     (progn
       (setq insPt (getpoint "\nУкажите точку вставки карты раскроя: "))
@@ -1247,38 +1173,36 @@
           (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list (vlax-get-acad-object))))
           (if (and (not (vl-catch-all-error-p doc)) doc)
             (progn (vl-catch-all-apply 'vla-StartUndoMark (list doc)) (setq uMark T)))
-
+          
           (setq lastEnt (entlast))
-
+          
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
-          (setq bbox2
-            (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
-              (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*)
-                    (cadr (cadr bbox1)))))
+          (setq bbox2 (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
+                    (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))))
           (setq bbox (cs-combine-bbox bbox1 bbox2))
           (setq bbox3 (cs-draw-frame bbox))
           (setq bbox (cs-combine-bbox bbox bbox3))
-
+          
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
           (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
-
+          
           (if (> (sslength ssNew) 0)
             (progn
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
-              ;; Базовая точка блока и точка вставки - верхний левый угол рамки Невидимые
+              ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
               (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
-              (cs-wrap-to-block blockName blockBasePt blockBasePt ssNew)))
+              (cs-wrap-to-block blockName blockBasePt ssNew)))
+          
           (if (and doc uMark) (progn (vla-EndUndoMark doc) (setq uMark nil)))
-
           (cs-zoom-bbox bbox))
         (princ "\nКарта AutoCAD не построена."))))
+  
+  (princ))
 
-  (princ)
-)
-
+;; ================= КОМАНДЫ =================
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 3). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 4). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
