@@ -1015,7 +1015,7 @@
   (while (tblsearch "BLOCK" name) (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
 
-(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr insertPt3 acad doc ms result)
+(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r oldRefs si e retained basePtStr insertPt3 acad doc ms result)
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
@@ -1031,7 +1031,13 @@
       (setvar "CMDDIA" 0)
       (setvar "FILEDIA" 0)
       
-      ;; Создаём блок в режиме Удалить
+      ;; Число INSERT имени blockName ДО -BLOCK (защита от двойного INSERT, Шаг 4):
+      ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить], ENTER
+      ;; выбирает «Преобразовать» и вхождение создаётся самим -BLOCK.
+      (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+      (setq oldRefs (if r (sslength r) 0))
+      
+      ;; Создаём блок (текстовый -BLOCK; опции Преобразовать/Удалить есть не во всех версиях)
       (setq result (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss "")))
       (cond
         ((vl-catch-all-error-p result)
@@ -1041,17 +1047,35 @@
          (princ "\n[wrap] Блок не создан")
          (setq ok nil))
         (T
-         (setq ok T refs 0)
+         (setq ok T)
          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-         (if r (setq refs (sslength r)))
-         (princ (strcat "\n[wrap] Блок создан: " (if ok "да" "нет") ", ссылок: " (itoa refs)))
-         ;; Вставляем блок обратно в ту же точку (базовая точка = точка вставки)
-         (setq acad (vlax-get-acad-object)
-               doc (vla-get-ActiveDocument acad)
-               ms (vla-get-ModelSpace doc)
-               insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-         (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
-         (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))))
+         (setq refs (if r (sslength r) 0))
+         (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa refs)))
+         (if (> refs oldRefs)
+           ;; -BLOCK САМ создал INSERT (режим «Преобразовать»): второй не добавляем,
+           ;; иначе получилось бы двойное вхождение (Шаг 4).
+           (princ "\n[wrap] INSERT создан самим -BLOCK (режим Преобразовать) — повторная вставка не требуется.")
+           (progn
+             ;; INSERT не создан. Если оригиналы пережили -BLOCK (режим «оставить»),
+             ;; стираем их, чтобы под INSERT не осталась дублирующая геометрия.
+             (setq si 0 retained 0)
+             (repeat (sslength ss)
+               (setq e (ssname ss si))
+               (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
+               (setq si (1+ si)))
+             (if (> retained 0)
+               (princ (strcat "\n[wrap] Удалено оригиналов, оставшихся после -BLOCK: " (itoa retained))))
+             ;; Вставляем ровно один INSERT обратно в ту же точку (базовая точка = точка вставки)
+             (setq acad (vlax-get-acad-object)
+                   doc (vla-get-ActiveDocument acad)
+                   ms (vla-get-ModelSpace doc)
+                   insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+             (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
+             (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+             ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
+             (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+             (princ (strcat "\n[wrap] Проверка: ссылок до -BLOCK: " (itoa oldRefs)
+                            ", после вставки: " (itoa (if r (sslength r) 0))))))))
       (setvar "FILEDIA" oldFiledia)
       (setvar "CMDDIA" oldCmddia)
       (setvar "OSMODE" oldOsmode)

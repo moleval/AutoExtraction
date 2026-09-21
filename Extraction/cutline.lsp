@@ -1831,6 +1831,7 @@
                        barHeight sumInsPt num-bars stock-total-mm
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
+                       blkRefsSet blkRefsBefore blkIdx
                        layers layers-str total-input type-counts
                        user-filter line-cnt mline-cnt dynblock-cnt
                        dynblock-type mline-type
@@ -2090,11 +2091,34 @@
             (progn
               (setq oldEcho (getvar "CMDECHO"))
               (setvar "CMDECHO" 0)
+              ;; Число INSERT с этим именем ДО -BLOCK (защита от двойного INSERT, Шаг 4):
+              ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить],
+              ;; ENTER выбирает «Преобразовать» и INSERT создаётся самим -BLOCK.
+              (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
               (command "._-BLOCK" blockName insPt ssNew "")
               (setvar "CMDECHO" oldEcho)
               (if (tblsearch "BLOCK" blockName)
-                (progn (n1-block-insert blockName insPt)
-                       (princ (strcat "\nСоздан блок с раскладкой: " blockName)))
+                (progn
+                  (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+                  (if (> (if blkRefsSet (sslength blkRefsSet) 0) blkRefsBefore)
+                    ;; -BLOCK САМ создал INSERT (режим «Преобразовать») — второй не нужен.
+                    (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                   " (INSERT создан самим -BLOCK)"))
+                    (progn
+                      ;; INSERT не создан: стираем оригиналы, пережившие -BLOCK
+                      ;; (режим «оставить»), и вставляем ровно один INSERT.
+                      (setq blkIdx 0)
+                      (repeat (sslength ssNew)
+                        (setq ent (ssname ssNew blkIdx))
+                        (if (entget ent) (entdel ent))
+                        (setq blkIdx (1+ blkIdx)))
+                      (n1-block-insert blockName insPt)
+                      ;; Контроль (Шаг 4): должен остаться ровно один новый INSERT
+                      (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+                      (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                     " (ссылок до: " (itoa blkRefsBefore)
+                                     ", после: " (itoa (if blkRefsSet (sslength blkRefsSet) 0)) ")")))))
                 (princ "\nНе удалось создать блок."))
             )
             (princ "\nНет объектов для создания блока.")
