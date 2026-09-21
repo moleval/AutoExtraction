@@ -29,5 +29,7 @@
 
 ## Закрыто вне основного плана (для контекста)
 
-- Дополнение к Шагу 5: `*error*` в `cutline-main` (undo-метка + CMDECHO при любом прерывании) — `6cb0b80`.
+- Дополнение к Шагу 5: `*error*` в `cutline-main` (undo-метка + CMDECHO при любом прерывании) — `6cb0b80`. **`e40b2d8`:** симметричная защита `-BLOCK` в cutline (vl-cmdf + vl-catch-all-error-p, как в cs-wrap-to-block).
+- Дополнение к Шагу 4: критерий приёмки «ровно один новый INSERT» + проверка `vla-InsertBlock` — `ef43276`.
+- Дополнение к Шагу 7: состоянием `*extraction-preselected-set*` владеет только диспетчер; выборки (select-utils ×3, `cs-build-filter-ss`) делегируют изъятие через `ex-take-preselected` (extraction.lsp).
 - Самовключение карт прошлых раскроев в выборку деталей — Шаг 9 (блоки «Раскрой …», слой «Невидимые»).

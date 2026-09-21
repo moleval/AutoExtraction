@@ -184,16 +184,30 @@
 
 
 ;; ============================================================
+;; Доступ к предвыделению диспетчера. select-utils состояние НЕ меняет
+;; (дополнение к Шагу 7): запись выполняет только владелец — extraction.lsp.
+;; ============================================================
+(defun su-preselection-value (/)
+  ;; ТОЛЬКО чтение.
+  (if (boundp '*extraction-preselected-set*) *extraction-preselected-set*))
+
+(defun su-take-preselection (/)
+  ;; «Взял — погасил»: само погашение делает владелец (ex-take-preselected).
+  ;; Если диспетчер не загружен (автономный запуск), просто читаем.
+  (if (fboundp 'ex-take-preselected)
+    (ex-take-preselected)
+    (su-preselection-value)))
+
+;; ============================================================
 ;; Выбор вхождений блоков (INSERT) с учётом предвыбора (Р2.2)
 ;; ============================================================
 (defun su-select-inserts (layers / ss i ent data layer out layer-name)
   (su-block-props-cache-clear)
   (setq out '())
 
-  (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
-    (setq ss *extraction-preselected-set*)
-    (setq ss (ssget "_I"))
-  )
+  (setq ss (su-take-preselection))
+  (if (null ss)
+    (setq ss (ssget "_I")))
 
   (if (null ss)
     (if (null layers)
@@ -222,10 +236,6 @@
     )
   )
 
-  (if (and (boundp '*extraction-preselected-set*)
-           *extraction-preselected-set*)
-    (if out (setq *extraction-preselected-set* nil))
-  )
 
   (reverse out)
 )
@@ -602,13 +612,11 @@
   (setq ss nil)
   (setq ssfilter (su-build-cutline-ssfilter layers))
 
-  (if (and (boundp '*extraction-preselected-set*)
-           *extraction-preselected-set*)
+  (setq pre-ss (su-take-preselection))
+  (if pre-ss
     (progn
-      (setq pre-ss *extraction-preselected-set*)
       (setq ss (su-filter-ss-cutline pre-ss *su-cutline-types* layers))
-      (if (and ss (> (sslength ss) 0))
-        (setq *extraction-preselected-set* nil)
+      (if (not (and ss (> (sslength ss) 0)))
         (setq ss nil)
       )
     )
@@ -644,10 +652,9 @@
 (defun su-select-lwpolylines (layers / ss out i ent data layer layer-mask)
   (setq out '())
 
-  (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
-    (setq ss *extraction-preselected-set*)
-    (setq ss (ssget "_I"))
-  )
+  (setq ss (su-take-preselection))
+  (if (null ss)
+    (setq ss (ssget "_I")))
 
   (if (null ss)
     (if (null layers)
@@ -676,10 +683,6 @@
     )
   )
 
-  (if (and (boundp '*extraction-preselected-set*)
-           *extraction-preselected-set*)
-    (if out (setq *extraction-preselected-set* nil))
-  )
 
   (reverse out)
 )

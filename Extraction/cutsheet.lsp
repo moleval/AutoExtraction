@@ -222,10 +222,8 @@
 
 (defun cs-build-filter-ss (layers / ss out i ent typ lay)
   (setq ss nil)
-  (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
-    (progn
-      (setq ss *extraction-preselected-set*)
-      (setq *extraction-preselected-set* nil))
+  (setq ss (su-take-preselection))
+  (if (null ss)
     (setq ss (ssget "_I" '((0 . "LWPOLYLINE,INSERT")))))
   (if (null ss) (setq ss (ssget "_X" '((0 . "LWPOLYLINE,INSERT")))))
   (setq out (ssadd) i 0)

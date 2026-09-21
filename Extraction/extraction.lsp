@@ -73,6 +73,15 @@
   (setq *extraction-preselected-set* nil)
 )
 
+;; ≈динственна€ операци€ с предвыделением вне жизненного цикла диспетчера Ч
+;; Ђвз€ть и погаситьї (consume-once). Ѕиблиотечные выборки (select-utils,
+;; cs-build-filter-ss) не измен€ют *extraction-preselected-set* напр€мую,
+;; а делегируют изъ€тие сюда (владелец состо€ни€ Ч диспетчер, Ўаг 7).
+(defun ex-take-preselected (/ v)
+  (setq v *extraction-preselected-set*)
+  (setq *extraction-preselected-set* nil)
+  v)
+
 (if (not (boundp '*EXTRACTION-MODULES-LOADED*))
   (setq *EXTRACTION-MODULES-LOADED* nil)
 )
