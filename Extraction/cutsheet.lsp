@@ -102,7 +102,11 @@
     ((numberp value) (float value))
     ((= (type value) 'VARIANT)
      (setq x (vl-catch-all-apply 'vlax-variant-value (list value)))
-     (if (vl-catch-all-error-p x) nil (cs-value-to-number x)))
+     (cond
+       ((vl-catch-all-error-p x) nil)
+       ((numberp x) (float x))
+       ((= (type x) 'STR) (cs-value-to-number x))
+       (T nil)))
     ((= (type value) 'STR)
      (setq s (vl-string-trim " \t\r\n" value))
      (if (> (strlen s) 0)
