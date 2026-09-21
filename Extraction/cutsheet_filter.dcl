@@ -8,45 +8,43 @@ cutsheet_filter_dialog : dialog {
   : boxed_column {
     label = "Какие детали раскроить";
 
-    : radio_column {
-      : row {
-        : radio_button {
-          key = "rb_all";
-          label = "Все типы";
-          width = 25;
-        }
-        : text {
-          key = "txt_all_count";
-          label = "";
-          alignment = left;
-          width = 15;
-        }
+    : row {
+      : radio_button {
+        key = "rb_all";
+        label = "Все типы";
+        width = 25;
       }
-      : row {
-        : radio_button {
-          key = "rb_poly";
-          label = "Только полилинии";
-          width = 25;
-        }
-        : text {
-          key = "txt_poly_count";
-          label = "";
-          alignment = left;
-          width = 15;
-        }
+      : text {
+        key = "txt_all_count";
+        label = "";
+        alignment = left;
+        width = 15;
       }
-      : row {
-        : radio_button {
-          key = "rb_dyn";
-          label = "Динамические блоки";
-          width = 25;
-        }
-        : text {
-          key = "txt_dyn_count";
-          label = "";
-          alignment = left;
-          width = 15;
-        }
+    }
+    : row {
+      : radio_button {
+        key = "rb_poly";
+        label = "Только полилинии";
+        width = 25;
+      }
+      : text {
+        key = "txt_poly_count";
+        label = "";
+        alignment = left;
+        width = 15;
+      }
+    }
+    : row {
+      : radio_button {
+        key = "rb_dyn";
+        label = "Динамические блоки";
+        width = 25;
+      }
+      : text {
+        key = "txt_dyn_count";
+        label = "";
+        alignment = left;
+        width = 15;
       }
     }
   }

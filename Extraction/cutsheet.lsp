@@ -351,6 +351,21 @@
        (< w *CUTSHEET-MAX-SIZE*) (< h *CUTSHEET-MAX-SIZE*)
        (numberp kerf) (>= kerf 0.0) (< kerf (min w h))))
 
+;; ============================================================
+;; Ручное управление радиокнопками (аналог n1-select-radio из cutline.lsp)
+;; ============================================================
+(defun cs-select-radio (selected / keys k)
+  (setq keys '("rb_all" "rb_poly" "rb_dyn"))
+  (foreach k keys
+    (cs-safe-set-tile k (if (= k selected) "1" "0"))
+  )
+  (cond
+    ((= selected "rb_all")  (setq *cs-tmp-choice* 'ALL)  (cs-safe-mode-tile "popup_dyn_type" 1))
+    ((= selected "rb_poly") (setq *cs-tmp-choice* 'POLY) (cs-safe-mode-tile "popup_dyn_type" 1))
+    ((= selected "rb_dyn")  (setq *cs-tmp-choice* 'DYN)  (cs-safe-mode-tile "popup_dyn_type" 0))
+  )
+)
+
 (defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result)
   (setq dcl-file (findfile "cutsheet_filter.dcl"))
   (if (null dcl-file)
@@ -393,9 +408,9 @@
               (cs-safe-set-tile "chk_rotate" (if defaultRotate "1" "0"))
               (cs-safe-set-tile "chk_xls" (if defaultXls "1" "0"))
               (cs-safe-set-tile "chk_acad" (if defaultAcad "1" "0"))
-              (action_tile "rb_all"  "(setq *cs-tmp-choice* 'ALL) (mode_tile \"popup_dyn_type\" 1)")
-              (action_tile "rb_poly" "(setq *cs-tmp-choice* 'POLY) (mode_tile \"popup_dyn_type\" 1)")
-              (action_tile "rb_dyn"  "(setq *cs-tmp-choice* 'DYN) (mode_tile \"popup_dyn_type\" 0)")
+              (action_tile "rb_all"  "(cs-select-radio \"rb_all\")")
+              (action_tile "rb_poly" "(cs-select-radio \"rb_poly\")")
+              (action_tile "rb_dyn"  "(cs-select-radio \"rb_dyn\")")
               (action_tile "popup_dyn_type"
                 "(if (= (atoi $value) 0) (setq *cs-tmp-dyn-type* \"\") (setq *cs-tmp-dyn-type* (nth (1- (atoi $value)) *cs-dyn-types*))) (setq *cs-tmp-choice* 'DYN) (mode_tile \"popup_dyn_type\" 0)")
               (action_tile "edt_sheet_w" "(setq *cs-tmp-sheet-w* (atof (vl-string-translate \",\" \".\" $value)))")
