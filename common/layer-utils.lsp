@@ -4,31 +4,6 @@
 ;;; ============================================================
 (vl-load-com)
 
-(defun tu-layer-names ( / acad doc layers out item name)
-  (setq out '())
-  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
-  (if (and (not (vl-catch-all-error-p acad)) acad)
-    (progn
-      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
-      (if (and (not (vl-catch-all-error-p doc)) doc)
-        (progn
-          (setq layers (vl-catch-all-apply 'vla-get-Layers (list doc)))
-          (if (and (not (vl-catch-all-error-p layers)) layers)
-            (vlax-for item layers
-              (setq name (vl-catch-all-apply 'vla-get-Name (list item)))
-              (if (and (not (vl-catch-all-error-p name))
-                       (= (type name) 'STR))
-                (setq out (cons name out))
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-  (tu-sort-strings-ci (tu-list-unique-ci out))
-)
-
 (defun tu-layer-filter-dictionary ( / layer0 layertable ext dict )
   (if (setq layer0 (tblobjname "layer" "0"))
     (progn
@@ -113,23 +88,6 @@
     )
   )
   (reverse out)
-)
-
-(defun tu-filtered-layer-names ( / filters layers keywords f fname )
-  (setq keywords '("фасад" "витраж" "фонар"))
-  (setq filters (tu-group-filter-names-and-layers))
-  (setq layers '())
-  (foreach f filters
-    (setq fname (car f))
-    (if (and (= (type fname) 'STR)
-             (vl-some '(lambda (key)
-                         (and (= (type key) 'STR)
-                              (vl-string-search (strcase key) (strcase fname))))
-                      keywords))
-      (setq layers (append layers (cadr f)))
-    )
-  )
-  (tu-sort-strings-ci (tu-list-unique-ci layers))
 )
 
 (princ "\nLAYER-UTILS.LSP загружен.")

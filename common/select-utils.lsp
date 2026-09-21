@@ -258,17 +258,6 @@
 ;; ============================================================
 ;; Проверки свойств блоков через кэш (Р3.3)
 ;; ============================================================
-(defun su-has-length-property (obj)
-  (car (su-get-block-props obj))
-)
-
-(defun su-has-width-property (obj)
-  (cadr (su-get-block-props obj))
-)
-
-(defun su-has-height-property (obj)
-  (caddr (su-get-block-props obj))
-)
 
 (defun su-is-valid-stock-block (obj / p)
   (setq p (su-get-block-props obj))

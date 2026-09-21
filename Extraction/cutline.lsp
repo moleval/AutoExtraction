@@ -285,11 +285,6 @@
 ;; ÄÂÎÉÍÀß ÂÅĞÒÈÊÀËÜÍÀß ËÈÍÈß ĞÅÇÀ
 ;; Ğèñóåò äâå ïàğàëëåëüíûå ëèíèè ñî ñäâèãîì ±offset
 ;; ============================================================
-(defun n1-draw-cut-line (x y0 barHeight color / offset)
-  (setq offset (* barHeight 0.05))
-  (n1-draw-line (list (- x offset) y0) (list (- x offset) (+ y0 barHeight)) color)
-  (n1-draw-line (list (+ x offset) y0) (list (+ x offset) (+ y0 barHeight)) color)
-)
 
 (defun n1-draw-line (p1 p2 color)
   (entmake (list (cons 0 "LINE") (cons 62 color)
@@ -553,8 +548,6 @@
   bars
 )
 
-(defun n1-mline-length (ent) (su-mline-length ent))
-
 (defun n1-add-group (groups key / found)
   (setq found (assoc key groups))
   (if found
@@ -788,10 +781,6 @@
 )
 (defun n1-safe-mode-tile (key mode)
   (vl-catch-all-apply 'mode_tile (list key mode))
-)
-(defun n1-safe-get-tile (key / r)
-  (setq r (vl-catch-all-apply 'get_tile (list key)))
-  (if (vl-catch-all-error-p r) nil r)
 )
 
 ;; ============================================================

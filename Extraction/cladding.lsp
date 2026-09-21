@@ -41,27 +41,6 @@
   )
 )
 
-(defun cl-leading-number (s / n ch)
-  (if (/= (type s) 'STR)
-    nil
-    (progn
-      (setq s (vl-string-trim " \t" s) n "")
-      (while (and (> (strlen s) 0)
-                  (setq ch (substr s 1 1))
-                  (>= (ascii ch) 48)
-                  (<= (ascii ch) 57))
-        (setq n (strcat n ch))
-        (setq s (substr s 2)))
-      (if (= n "") nil (atoi n))))
-)
-
-(defun cl-str-smart-less (a b / na nb)
-  (setq na (cl-leading-number a) nb (cl-leading-number b))
-  (if (and na nb)
-    (if (= na nb) (< (strcase a) (strcase b)) (< na nb))
-    (< (strcase a) (strcase b)))
-)
-
 (defun cl-split-string (str delim / pos result item)
   (setq result '())
   (while (setq pos (vl-string-search delim str))
@@ -468,27 +447,6 @@
       (list (list 'subtotal layerIdx layer layCnt layArea))))
     (setq layerIdx (1+ layerIdx)))
   items
-)
-
-;; ---------- равномерное распределение по строкам ----------
-(defun cl-partition-flat (items idealRows / total numTables rowsPerTable
-                            chunks current currentCount item)
-  (setq total (length items))
-  (setq numTables (fix (+ (/ (float total) idealRows) 0.5)))
-  (if (< numTables 1) (setq numTables 1))
-  (setq rowsPerTable (fix (+ (/ (float total) numTables) 0.5)))
-  (if (< rowsPerTable 1) (setq rowsPerTable 1))
-  (setq chunks '() current '() currentCount 0)
-  (foreach item items
-    (if (and (>= currentCount rowsPerTable)
-             (eq (car item) 'data))
-      (progn
-        (setq chunks (append chunks (list current)))
-        (setq current '() currentCount 0)))
-    (setq current (append current (list item)))
-    (setq currentCount (1+ currentCount)))
-  (if current (setq chunks (append chunks (list current))))
-  chunks
 )
 
 ;; ---------- сборка кусков ----------

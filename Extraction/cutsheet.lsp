@@ -81,9 +81,6 @@
   (if (> (strlen item) 0) (setq out (cons item out)))
   (reverse out))
 
-(defun cs-round2 (x)
-  (/ (fix (+ (* x 100.0) 0.5)) 100.0))
-
 (defun cs-format-num (x digits)
   (vl-string-translate "." "," (rtos x 2 digits)))
 
@@ -92,9 +89,6 @@
 
 (defun cs-itoa-safe (x)
   (itoa (fix (+ x 0.5))))
-
-(defun cs-safe-number (x)
-  (if (numberp x) (float x) nil))
 
 ;; ================= ÄÈÍÀÌÈ×ÅÑÊÈÅ ÁËÎÊÈ =================
 (defun cs-value-to-number (value / x s)
@@ -203,9 +197,6 @@
       (setq p1 (car bb) p2 (cadr bb))
       (list (abs (- (car p2) (car p1))) (abs (- (cadr p2) (cadr p1)))))
     nil))
-
-(defun cs-block-area-from-props (props w h)
-  (/ (* w h) 1000000.0))
 
 ;; ================= ÏÎËÈËÈÍÈÈ =================
 (defun cs-poly-closed-p (ent / f)
@@ -333,16 +324,6 @@
              (if (and wh (> (car wh) 0.0) (> (cadr wh) 0.0)) (setq cnt (1+ cnt))))))
         ((eq kind 'ALL)
          (if (or (= typ "LWPOLYLINE") (= typ "INSERT")) (setq cnt (1+ cnt)))))
-      (setq i (1+ i))))
-  cnt)
-
-(defun cs-count-dyn-type (ss wanted / i ent typ cnt)
-  (setq i 0 cnt 0)
-  (if ss
-    (repeat (sslength ss)
-      (setq ent (ssname ss i) typ (cdr (assoc 0 (entget ent))))
-      (if (and (= typ "INSERT") (or (= wanted "") (= (cs-get-dyn-type-name ent) wanted)))
-        (setq cnt (1+ cnt)))
       (setq i (1+ i))))
   cnt)
 
@@ -615,9 +596,6 @@
   (setq bestResult (list (cs-optimize-last-sheet (car bestResult) sheetW sheetH kerf rotateFlag) (cadr bestResult)))
   bestResult)
 
-(defun cs-butlast (lst)
-  (if (<= (length lst) 1) '() (reverse (cdr (reverse lst)))))
-
 (defun cs-optimize-last-sheet (sheets sheetW sheetH kerf rotateFlag / lastSheet lastParts result1 result2 result3 bestResult bestScore score newSheets)
   (if (or (null sheets) (<= (length sheets) 1))
     sheets
@@ -642,7 +620,6 @@
               newSheets)))))))
 
 ;; ================= ÑÒÀÒÈÑÒÈÊÀ =================
-(defun cs-total-count (records / n r) (setq n 0) (foreach r records (setq n (1+ n))) n)
 (defun cs-total-actual-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (nth 6 r)))) a)
 (defun cs-total-bbox-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))))) a)
 

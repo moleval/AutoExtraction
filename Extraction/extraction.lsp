@@ -512,30 +512,10 @@
 ;; СПЕЦИАЛЬНЫЙ СПИСОК ПОДСИСТЕМЫ
 ;; ============================================================
 
-(defun extraction-subsystem-layer-list ()
-  (setq *extraction-updating-ui* T)
-
-  (setq *EXTRACTION-VISIBLE-LAYERS*
-    '("Подсистема"
-      "Подсистема алюминиевая"
-      "Подсистема оцинкованная"))
-
-  (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
-  (set_tile "lst_layers" "")
-  (extraction-update-select-buttons)
-
-  (setq *extraction-updating-ui* nil)
-)
-
 
 ;; ============================================================
 ;; ОЧИСТКА ВЫБОРА
 ;; ============================================================
-
-(defun extraction-clear-layer-selection ()
-  (set_tile "lst_layers" "")
-  (extraction-layer-selection-changed)
-)
 
 
 ;; ============================================================

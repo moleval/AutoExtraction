@@ -26,26 +26,6 @@
 
 (vl-load-com)
 
-;; Безопасный вызов функции с перехватом ошибок
-(defun tu-safe-call (func args / result)
-  (setq result (vl-catch-all-apply func args))
-  (if (vl-catch-all-error-p result)
-    nil
-    result
-  )
-)
-
-;; Возвращает T, если вызов завершился успешно
-(defun tu-safe-call-result (func args / result)
-  (setq result (vl-catch-all-apply func args))
-  (not (vl-catch-all-error-p result))
-)
-
-;; Проверка пустой строки
-(defun tu-string-empty-p (str)
-  (or (null str) (= str "") (not (= (type str) 'STR)))
-)
-
 ;; ============================================================
 ;; Уникализация списка строк без учёта регистра
 ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
@@ -72,18 +52,6 @@
 ;; Сортировка строк без учёта регистра
 (defun tu-sort-strings-ci (lst)
   (vl-sort lst '(lambda (a b) (< (strcase a) (strcase b))))
-)
-
-;; Преобразование списка строк в строку с разделителем запятая
-(defun tu-list-to-comma-string (lst)
-  (if lst
-    (apply 'strcat
-      (cons (car lst)
-        (mapcar '(lambda (x) (strcat "," x)) (cdr lst))
-      )
-    )
-    ""
-  )
 )
 
 ;; Удаление расширения из пути
@@ -123,14 +91,6 @@
   (getfiled "Сохранить как" default "xls" 1)
 )
 
-;; Безопасный вывод числа с фиксированной точностью
-(defun tu-safe-rtos (num prec)
-  (if (numberp num)
-    (rtos num 2 prec)
-    "0"
-  )
-)
-
 ;; ============================================================
 ;; Проверка возможности записи файла
 ;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D14):
@@ -143,14 +103,6 @@
       (close f)
       T
     )
-    nil
-  )
-)
-
-;; Проверка существования каталога
-(defun tu-ensure-directory-exists-p (dir)
-  (if (findfile dir)
-    T
     nil
   )
 )
