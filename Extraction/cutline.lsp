@@ -1824,7 +1824,7 @@
 ;; ============================================================
 ;; Главная функция
 ;; ============================================================
-(defun cutline-main (layers-from-caller / ss tol stock kerf insPt
+(defun cutline-main (layers-from-caller / *error* ss tol stock kerf insPt
                        pieces pieces-ok pieces-oversized split
                        sorted bars
                        bbox0 bbox1 bbox2 bbox3 bbox-frame bbox p1 p2 color-map
@@ -1839,6 +1839,13 @@
                        default-stock default-kerf
                        dialog-result r xls-ok
                        old-transparency-display)
+  (defun *error* (msg)
+    (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
+      (princ (strcat "\n[CUTLINE ERROR] " msg)))
+    (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
+    (if oldEcho (setvar "CMDECHO" oldEcho))
+    (princ))
+  
 
   (princ "\n=== Линейный раскрой мерного материала ===")
 
