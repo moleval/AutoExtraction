@@ -1831,7 +1831,7 @@
                        barHeight sumInsPt num-bars stock-total-mm
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
-                       blkRefsSet blkRefsBefore blkIdx
+                       blkRefsSet blkRefsBefore blkIdx blkRefsAfter blkCmdResult
                        layers layers-str total-input type-counts
                        user-filter line-cnt mline-cnt dynblock-cnt
                        dynblock-type mline-type
@@ -2096,10 +2096,18 @@
               ;; ENTER выбирает «Преобразовать» и INSERT создаётся самим -BLOCK.
               (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
-              (command "._-BLOCK" blockName insPt ssNew "")
+              (setq blkCmdResult
+                    (vl-catch-all-apply 'vl-cmdf
+                      (list "_.-BLOCK" blockName insPt ssNew "")))
               (setvar "CMDECHO" oldEcho)
-              (if (tblsearch "BLOCK" blockName)
-                (progn
+              (cond
+                ((vl-catch-all-error-p blkCmdResult)
+                 (princ (strcat "\nОшибка при создании блока: "
+                                (vl-catch-all-error-message blkCmdResult))))
+                ((not (tblsearch "BLOCK" blockName))
+                 (princ "\nНе удалось создать блок."))
+                (T
+(progn
                   (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
                   (if (> (if blkRefsSet (sslength blkRefsSet) 0) blkRefsBefore)
                     ;; -BLOCK САМ создал INSERT (режим «Преобразовать») — второй не нужен.
@@ -2118,8 +2126,7 @@
                       (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
                       (princ (strcat "\nСоздан блок с раскладкой: " blockName
                                      " (ссылок до: " (itoa blkRefsBefore)
-                                     ", после: " (itoa (if blkRefsSet (sslength blkRefsSet) 0)) ")")))))
-                (princ "\nНе удалось создать блок."))
+                                     ", после: " (itoa (if blkRefsSet (sslength blkRefsSet) 0)) ")")))))))
             )
             (princ "\nНет объектов для создания блока.")
           )
