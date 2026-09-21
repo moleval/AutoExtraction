@@ -234,7 +234,7 @@
       (setq ent (ssname ss i)
             typ (cdr (assoc 0 (entget ent)))
             lay (cdr (assoc 8 (entget ent))))
-      (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers))
+      (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers) (not (su-map-entity-p ent)))
         (ssadd ent out))
       (setq i (1+ i))))
   (if (> (sslength out) 0) out nil))

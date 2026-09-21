@@ -155,6 +155,33 @@
     )
   )
 )
+;; ============================================================
+;; Шаг 9. Признак «нашей» сущности карты раскроя:
+;;   - любой объект на служебном слое рамки «Невидимые»;
+;;   - INSERT блоков «Раскрой листа …» / «Раскрой …» (карты прошлых запусков).
+;; ============================================================
+(defun su-map-entity-p (ent / ed typ lay bnm)
+  (setq ed (entget ent)
+        typ (cdr (assoc 0 ed))
+        lay (cdr (assoc 8 ed)))
+  (or
+    (and lay (= (strcase lay) (strcase "Невидимые")))
+    (and (= typ "INSERT")
+         (setq bnm (cdr (assoc 2 ed)))
+         bnm
+         (wcmatch (strcase bnm) "РАСКРОЙ ЛИСТА*,РАСКРОЙ *"))))
+
+;; Удалить карты-артефакты из набора (Шаг 9)
+(defun su-ssdel-map-entities (ss / i e)
+  (if ss
+    (progn
+      (setq i -1)
+      (repeat (sslength ss)
+        (setq i (1+ i) e (ssname ss i))
+        (if (and e (su-map-entity-p e)) (ssdel e ss)))
+      ss)
+    nil))
+
 
 ;; ============================================================
 ;; Выбор вхождений блоков (INSERT) с учётом предвыбора (Р2.2)
@@ -187,7 +214,7 @@
         (setq ent (ssname ss i))
         (setq data (entget ent))
         (setq layer (cdr (assoc 8 data)))
-        (if (su-layer-selected-p layer layers)
+        (if (and (su-layer-selected-p layer layers) (not (su-map-entity-p ent)))
           (setq out (cons ent out))
         )
         (setq i (1+ i))
@@ -510,7 +537,7 @@
         (setq data (entget ent))
         (setq typ (cdr (assoc 0 data)))
         (setq lay (cdr (assoc 8 data)))
-        (if (and (member typ types) (su-layer-match-any lay layers))
+        (if (and (member typ types) (su-layer-match-any lay layers) (not (su-map-entity-p ent)))
           (ssadd ent new-ss)
         )
         (setq i (1+ i))
@@ -599,6 +626,7 @@
     (progn
       (setq raw-count (sslength ss))
       (setq ss (su-filter-dynblocks ss))
+      (if ss (setq ss (su-ssdel-map-entities ss)))
       (if (and ss raw-count (< (sslength ss) raw-count))
         (princ (strcat "\n  После пост-фильтрации отсеяно: "
                        (itoa (- raw-count (sslength ss)))
@@ -640,7 +668,7 @@
         (setq ent (ssname ss i))
         (setq data (entget ent))
         (setq layer (cdr (assoc 8 data)))
-        (if (su-layer-selected-p layer layers)
+        (if (and (su-layer-selected-p layer layers) (not (su-map-entity-p ent)))
           (setq out (cons ent out))
         )
         (setq i (1+ i))
