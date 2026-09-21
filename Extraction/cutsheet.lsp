@@ -1038,7 +1038,7 @@
   (while (tblsearch "BLOCK" name) (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
 
-(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr insertPt3 acad doc ms)
+(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r basePtStr insertPt3 acad doc ms result)
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
@@ -1055,33 +1055,31 @@
       (setvar "FILEDIA" 0)
       
       ;; Создаём блок в режиме Удалить
-      (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss ""))
-      
-      (setq ok (tblsearch "BLOCK" blockName))
-      (setq refs 0)
-      (if ok
-        (progn
-          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-          (if r (setq refs (sslength r)))))
-      
-      (princ (strcat "\n[wrap] Блок создан: " (if ok "да" "нет") ", ссылок: " (itoa refs)))
-      
-      ;; Вставляем блок обратно в ту же точку (базовая точка = точка вставки)
-      (if ok
-        (progn
-          (setq acad (vlax-get-acad-object))
-          (setq doc (vla-get-ActiveDocument acad))
-          (setq ms (vla-get-ModelSpace doc))
-          (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-          (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
-          (princ (strcat "\n[wrap] Блок вставлен в базовую точку: "
-                         (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))))
-      
+      (setq result (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss "")))
+      (cond
+        ((vl-catch-all-error-p result)
+         (princ (strcat "\n[wrap] Ошибка: " (vl-catch-all-error-message result)))
+         (setq ok nil))
+        ((not (tblsearch "BLOCK" blockName))
+         (princ "\n[wrap] Блок не создан")
+         (setq ok nil))
+        (T
+         (setq ok T refs 0)
+         (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+         (if r (setq refs (sslength r)))
+         (princ (strcat "\n[wrap] Блок создан: " (if ok "да" "нет") ", ссылок: " (itoa refs)))
+         ;; Вставляем блок обратно в ту же точку (базовая точка = точка вставки)
+         (setq acad (vlax-get-acad-object)
+               doc (vla-get-ActiveDocument acad)
+               ms (vla-get-ModelSpace doc)
+               insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+         (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
+         (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))))
       (setvar "FILEDIA" oldFiledia)
       (setvar "CMDDIA" oldCmddia)
       (setvar "OSMODE" oldOsmode)
       (setvar "CMDECHO" oldEcho)
-      T)))
+      ok)))
 
 ;; ================= ГЛАВНАЯ ФУНКЦИЯ =================
 (defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes
