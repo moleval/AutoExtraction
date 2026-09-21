@@ -1015,7 +1015,7 @@
   (while (tblsearch "BLOCK" name) (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
 
-(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r oldRefs si e retained basePtStr insertPt3 acad doc ms result)
+(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r oldRefs si e retained ins-result finalRefs basePtStr insertPt3 acad doc ms result)
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
@@ -1051,11 +1051,17 @@
          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
          (setq refs (if r (sslength r) 0))
          (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa refs)))
-         (if (> refs oldRefs)
-           ;; -BLOCK САМ создал INSERT (режим «Преобразовать»): второй не добавляем,
-           ;; иначе получилось бы двойное вхождение (Шаг 4).
-           (princ "\n[wrap] INSERT создан самим -BLOCK (режим Преобразовать) — повторная вставка не требуется.")
-           (progn
+(cond
+           ((= refs (1+ oldRefs))
+            ;; Ровно один новый INSERT — его создал сам -BLOCK (режим «Преобразовать»).
+            ;; Второй не добавляем (двойное вхождение, Шаг 4).
+            (princ "\n[wrap] INSERT создан самим -BLOCK (ровно 1 новый, режим Преобразовать) — повторная вставка не требуется."))
+           ((> refs (1+ oldRefs))
+            ;; Аномалия: новых INSERT больше одного — ничего не добавляем, только сигнал.
+            (princ (strcat "\n[wrap] ВНИМАНИЕ: новых INSERT после -BLOCK: " (itoa (- refs oldRefs))
+                           " (ожидался 1) — повторная вставка отменена.")))
+           (T
+(progn
              ;; INSERT не создан. Если оригиналы пережили -BLOCK (режим «оставить»),
              ;; стираем их, чтобы под INSERT не осталась дублирующая геометрия.
              (setq si 0 retained 0)
@@ -1070,12 +1076,16 @@
                    doc (vla-get-ActiveDocument acad)
                    ms (vla-get-ModelSpace doc)
                    insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-             (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0))
-             (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+             (setq ins-result (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
+             (if (vl-catch-all-error-p ins-result)
+               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (vl-catch-all-error-message ins-result)))
+               (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2))))
              ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
              (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+             (setq finalRefs (if r (sslength r) 0))
              (princ (strcat "\n[wrap] Проверка: ссылок до -BLOCK: " (itoa oldRefs)
-                            ", после вставки: " (itoa (if r (sslength r) 0))))))))
+                            ", после вставки: " (itoa finalRefs)
+                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)"))))))))
       (setvar "FILEDIA" oldFiledia)
       (setvar "CMDDIA" oldCmddia)
       (setvar "OSMODE" oldOsmode)

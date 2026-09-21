@@ -2107,13 +2107,20 @@
                 ((not (tblsearch "BLOCK" blockName))
                  (princ "\nНе удалось создать блок."))
                 (T
-(progn
+                 (progn
                   (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-                  (if (> (if blkRefsSet (sslength blkRefsSet) 0) blkRefsBefore)
-                    ;; -BLOCK САМ создал INSERT (режим «Преобразовать») — второй не нужен.
-                    (princ (strcat "\nСоздан блок с раскладкой: " blockName
-                                   " (INSERT создан самим -BLOCK)"))
-                    (progn
+                  (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
+                  (cond
+                    ((= blkRefsAfter (1+ blkRefsBefore))
+                     ;; Ровно один новый INSERT — его создал сам -BLOCK (Шаг 4), второй не нужен.
+                     (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                    " (INSERT создан самим -BLOCK, ровно 1)")))
+                    ((> blkRefsAfter (1+ blkRefsBefore))
+                     (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                    "\nВНИМАНИЕ: после -BLOCK новых INSERT: " (itoa (- blkRefsAfter blkRefsBefore))
+                                    " (ожидался 1) — повторная вставка отменена.")))
+                    (T
+(progn
                       ;; INSERT не создан: стираем оригиналы, пережившие -BLOCK
                       ;; (режим «оставить»), и вставляем ровно один INSERT.
                       (setq blkIdx 0)
@@ -2124,9 +2131,13 @@
                       (n1-block-insert blockName insPt)
                       ;; Контроль (Шаг 4): должен остаться ровно один новый INSERT
                       (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+                      (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
                       (princ (strcat "\nСоздан блок с раскладкой: " blockName
                                      " (ссылок до: " (itoa blkRefsBefore)
-                                     ", после: " (itoa (if blkRefsSet (sslength blkRefsSet) 0)) ")")))))))
+                                     ", после: " (itoa blkRefsAfter) ")"
+                                     (if (= blkRefsAfter (1+ blkRefsBefore))
+                                       ""
+                                       " (ВНИМАНИЕ: прирост не равен 1!)")))))))))
             )
             (princ "\nНет объектов для создания блока.")
           )
