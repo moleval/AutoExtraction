@@ -1089,15 +1089,23 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt)
+                      blockBasePt oldOsmode oldCmddia oldFiledia)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTSHEET ERROR] " msg)))
     (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
     (if oldEcho (setvar "CMDECHO" oldEcho))
+    (if oldOsmode (setvar "OSMODE" oldOsmode))
+    (if oldCmddia (setvar "CMDDIA" oldCmddia))
+    (if oldFiledia (setvar "FILEDIA" oldFiledia))
     (setq *cs-tmp-choice* 'ALL *cs-tmp-dyn-type* "")
     (princ))
+  
+  (setq oldOsmode (getvar "OSMODE")
+        oldCmddia (getvar "CMDDIA")
+        oldFiledia (getvar "FILEDIA")
+        oldEcho (getvar "CMDECHO"))
   
   (princ "\n=== –¿— –Œ… À»—“¿ ===")
   
