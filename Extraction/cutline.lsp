@@ -2135,10 +2135,5 @@
 (defun c:cutline () (cutline-main 'ASK))
 (defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
 
-(defun c:CUTSHEET ()
-  (princ "\nCUTSHEET: модуль в разработке.")
-  (princ)
-)
-
 (princ "\nCUTLINE.LSP загружен. Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
