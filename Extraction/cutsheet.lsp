@@ -441,7 +441,7 @@
     (setq key (cs-part-key r) f (assoc key acc))
     (if f
       (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r)
-                             (1+ (nth 6 f)) (+ (nth 7 f) (nth 6 r)) (+ (nth 8 f) (nth 6 r))) f acc))
+                             (1+ (nth 6 f)) (+ (nth 7 f) (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))) (+ (nth 8 f) (nth 6 r))) f acc))
       (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1
                             (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)) acc))))
   (setq out (vl-sort acc '(lambda (a b)
