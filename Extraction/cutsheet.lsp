@@ -776,7 +776,7 @@
                          (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
                          (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*)))
 
-(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr)
+(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
@@ -860,21 +860,43 @@
     (setq y (- y rowH))
     (setq i (1+ i)))
   
+  ;; Этап 2: секция неразмещенных - агрегировано по габариту:
+  ;; заголовок «НЕРАЗМЕЩЕНО (ВxШ)», колонки «габариты | количество».
+  (setq skipGroups nil)
   (if oversized
     (progn
+      (foreach r oversized
+        (setq g (assoc (cs-part-label r) skipGroups))
+        (if g
+          (setq skipGroups
+                (subst (list (car g) (cadr g) (caddr g) (1+ (cadddr g))) g skipGroups))
+          (setq skipGroups
+                (cons (list (cs-part-label r) (nth 4 r) (nth 5 r) 1) skipGroups))))
+      (setq skipGroups
+        (vl-sort skipGroups
+          '(lambda (a b)
+             (cond ((> (* (cadr a) (caddr a)) (* (cadr b) (caddr b))) T)
+                   ((< (* (cadr a) (caddr a)) (* (cadr b) (caddr b))) nil)
+                   ((vl-string< (car a) (car b)) T)
+                   (T nil)))))
       (setq y (- y rowH))
       (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
-                         (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)
-      ;; Этап 2: каждая неразмещенная - отдельной строкой «WxH | имя»,
-      ;; как в консоли/XLS; рамка (bbox ниже) расширяется на эти строки.
-      (foreach r oversized
+                         "НЕРАЗМЕЩЕНО (ВxШ)" *CUTSHEET-TITLE-COLOR*)
+      (setq y (- y rowH))
+      (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    "габариты" *CUTSHEET-HEADER-COLOR*)
+      (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    "количество" *CUTSHEET-HEADER-COLOR*)
+      (foreach g skipGroups
         (setq y (- y rowH))
         (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82)
-                      (cs-part-label r) *CUTSHEET-WASTE-COLOR*)
-        (cs-draw-text (list (+ left (* width 0.35)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                      (nth 3 r) *CUTSHEET-WASTE-COLOR*))))
+                      (car g) *CUTSHEET-WASTE-COLOR*)
+        (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                      (itoa (nth 3 g)) *CUTSHEET-WASTE-COLOR*))))
   
-  (list (list left (- top (* rowH (+ rows 13 (if oversized (+ 1 (length oversized)) 0))))) (list (+ left width) top)))
+  ;; Рамка - по фактической нижней линии текста (запас 0.8 строки):
+  ;; секция неразмещенных конструктивно не может быть зачеркнута.
+  (list (list left (- y (* rowH 0.8))) (list (+ left width) top)))
 
 (defun cs-draw-frame (bbox / x1 y1 x2 y2)
   (if (not (tblsearch "LAYER" *CUTSHEET-FRAME-LAYER*))
