@@ -898,6 +898,37 @@
   ;; секция неразмещенных конструктивно не может быть зачеркнута.
   (list (list left (- y (* rowH 0.8))) (list (+ left width) top)))
 
+;; Фактический объемлющий прямоугольник всех примитивов набора.
+;; Рамка результата строится по реальным границам (GetBoundingBox),
+;; а не по расчетным координатам - наложение кромки исключено.
+(defun cs-entities-bbox (ss / i e o mn mx x1 y1 x2 y2)
+  (setq x1 nil)
+  (setq i 0)
+  (repeat (sslength ss)
+    (setq e (ssname ss i))
+    (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+    (if (and (not (vl-catch-all-error-p o)) o)
+      (progn
+        (setq mn nil)
+        (setq mx nil)
+        (vl-catch-all-apply 'vla-GetBoundingBox (list o 'mn 'mx))
+        (if (and mn mx)
+          (progn
+            (setq mn (vlax-safearray->list (vlax-variant-value mn)))
+            (setq mx (vlax-safearray->list (vlax-variant-value mx)))
+            (if (or (null x1) (< (car mn) x1)) (setq x1 (car mn)))
+            (if (or (null y1) (< (cadr mn) y1)) (setq y1 (cadr mn)))
+            (if (or (null x2) (> (car mx) x2)) (setq x2 (car mx)))
+            (if (or (null y2) (> (cadr mx) y2)) (setq y2 (cadr mx)))
+          )
+        )
+      )
+    )
+    (setq i (1+ i))
+  )
+  (if x1 (list (list x1 y1) (list x2 y2)) nil)
+)
+
 (defun cs-draw-frame (bbox / x1 y1 x2 y2)
   (if (not (tblsearch "LAYER" *CUTSHEET-FRAME-LAYER*))
     (entmake (list '(0 . "LAYER") '(100 . "AcDbSymbolTableRecord")
@@ -1269,10 +1300,19 @@
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
           (setq bbox2 (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
                     (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))))
-          (setq bbox (cs-combine-bbox bbox1 bbox2))
+          
+          ;; Собрать созданные примитивы для фактического bbox
+          (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
+          (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          
+          ;; Этап 2: рамка - по ФАКТИЧЕСКИМ границам результата (GetBoundingBox
+          ;; каждого примитива), не по расчетным координатам выноски.
+          (setq bbox (cs-entities-bbox ssNew))
+          (if (null bbox) (setq bbox (cs-combine-bbox bbox1 bbox2)))
           (setq bbox3 (cs-draw-frame bbox))
           (setq bbox (cs-combine-bbox bbox bbox3))
           
+          ;; Пересобрать набор с учетом рамки для обертки в блок
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
           (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
           
