@@ -919,6 +919,10 @@
     (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
     (if (and (not (vl-catch-all-error-p o)) o)
       (progn
+        ;; Принудительное обновление примитива: без него AutoCAD может отдать
+        ;; устаревший/усеченный bbox для только что созданных текстов,
+        ;; и рамка по факт-bbox обрезала бы последние строки.
+        (vl-catch-all-apply 'vla-update (list o))
         (setq mn nil)
         (setq mx nil)
         (vl-catch-all-apply 'vla-GetBoundingBox (list o 'mn 'mx))
@@ -1353,6 +1357,7 @@
             (setq csDbgObj (vl-catch-all-apply (quote vlax-ename->vla-object) (list csDbgEnt)))
             (if (not (vl-catch-all-error-p csDbgObj))
               (progn
+                (vl-catch-all-apply (quote vla-update) (list csDbgObj))
                 (setq csDbgMn nil)
                 (setq csDbgMx nil)
                 (vl-catch-all-apply (quote vla-GetBoundingBox) (list csDbgObj (quote csDbgMn) (quote csDbgMx)))
@@ -1387,5 +1392,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 4). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 5: update bbox, диагностика рамки). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
