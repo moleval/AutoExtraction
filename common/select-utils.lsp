@@ -194,7 +194,9 @@
 (defun su-take-preselection (/)
   ;; Ђ¬з€л Ч погасилї: само погашение делает владелец (ex-take-preselected).
   ;; ≈сли диспетчер не загружен (автономный запуск), просто читаем.
-  (if (fboundp 'ex-take-preselected)
+  ;; NB: в AutoLISP нет проверки св€занности ‘”Ќ ÷»» Ч смотрим
+  ;; (type sym) = 'SUBR; несв€занный символ вычисл€етс€ в nil.
+  (if (= (type ex-take-preselected) 'SUBR)
     (ex-take-preselected)
     (su-preselection-value)))
 
