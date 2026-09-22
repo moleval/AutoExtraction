@@ -23,6 +23,37 @@
 (vl-load-com)
 
 ;; ------------------------------------------------------------
+;; Списки модулей - на верхнем уровне файла.
+;; c:RELOAD при каждом запуске перечитывает СЕБЯ с диска (см. ниже),
+;; поэтому эти списки всегда актуальны - даже если команда RELOAD
+;; в памяти AutoCAD определена старой редакцией.
+;; ------------------------------------------------------------
+(setq *ae-reload-common-files*
+  '(
+    "task-utils.lsp"
+    "layer-utils.lsp"
+    "select-utils.lsp"
+    "excel-utils.lsp"
+    "table-utils.lsp"
+    "txt-utils.lsp"
+    "validation-utils.lsp"
+  )
+)
+
+(setq *ae-reload-extraction-files*
+  '(
+    "fasonka.lsp"
+    "subsystem.lsp"
+    "cladding.lsp"
+    "zapolnenie.lsp"
+    "extraction.lsp"
+    "cutline.lsp"
+    "cutsheet.lsp"
+    "blockrename.lsp"
+  )
+)
+
+;; ------------------------------------------------------------
 ;; Автоподгрузка проверки скобок (дешево: только defun'ы,
 ;; без сканирования). Если файла нет - молча пропускаем.
 ;; ------------------------------------------------------------
@@ -211,17 +242,12 @@
       ;; COMMON
       ;; --------------------------------------------------------
 
-      (setq common-files
-        '(
-          "task-utils.lsp"
-          "layer-utils.lsp"
-          "select-utils.lsp"
-          "excel-utils.lsp"
-          "table-utils.lsp"
-          "txt-utils.lsp"
-          "validation-utils.lsp"
-        )
-      )
+      ;; Самообновление: перечитать себя с диска - иначе добавленные
+      ;; модули не загружаются до перезапуска AutoCAD
+      ;; (регрессия 2026-09-22: no function definition TU-PARSE-INT-LIST).
+      (vl-catch-all-apply 'load (list (strcat root "\\reload.lsp")))
+
+      (setq common-files *ae-reload-common-files*)
 
 
       (princ
@@ -252,18 +278,7 @@
       ;; EXTRACTION
       ;; --------------------------------------------------------
 
-      (setq extraction-files
-        '(
-          "fasonka.lsp"
-          "subsystem.lsp"
-          "cladding.lsp"
-          "zapolnenie.lsp"
-          "extraction.lsp"
-          "cutline.lsp"
-          "cutsheet.lsp"
-          "blockrename.lsp"
-        )
-      )
+      (setq extraction-files *ae-reload-extraction-files*)
 
 
       (princ
