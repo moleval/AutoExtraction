@@ -1176,7 +1176,8 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc)
+                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc
+                       csDbgMin csDbgWho csDbgTxt csDbgI csDbgEnt csDbgObj csDbgMn csDbgMx)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1341,6 +1342,32 @@
           ;; ѕересобрать набор с учетом рамки дл€ обертки в блок
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
           (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+
+          ;; ƒ»ј√Ќќ—“» ј (этап отладки рамки): самый низкий примитив карты и его владелец
+          (setq csDbgMin nil)
+          (setq csDbgWho "")
+          (setq csDbgTxt "")
+          (setq csDbgI 0)
+          (while (< csDbgI (sslength ssNew))
+            (setq csDbgEnt (ssname ssNew csDbgI))
+            (setq csDbgObj (vl-catch-all-apply (quote vlax-ename->vla-object) (list csDbgEnt)))
+            (if (not (vl-catch-all-error-p csDbgObj))
+              (progn
+                (setq csDbgMn nil)
+                (setq csDbgMx nil)
+                (vl-catch-all-apply (quote vla-GetBoundingBox) (list csDbgObj (quote csDbgMn) (quote csDbgMx)))
+                (setq csDbgMn (cs-point-array->list csDbgMn))
+                (if csDbgMn
+                  (if (or (null csDbgMin) (< (cadr csDbgMn) csDbgMin))
+                    (progn
+                      (setq csDbgMin (cadr csDbgMn))
+                      (setq csDbgWho (cdr (assoc 0 (entget csDbgEnt))))
+                      (setq csDbgTxt "")
+                      (if (member csDbgWho (quote ("TEXT" "MTEXT")))
+                        (setq csDbgTxt (substr (cdr (assoc 1 (entget csDbgEnt))) 1 24))))))))
+            (setq csDbgI (1+ csDbgI)))
+          (princ (strcat "\n[CUTSHEET] —амый низкий примитив: " csDbgWho " " csDbgTxt
+                          " | его низ Y=" (if csDbgMin (rtos csDbgMin 2 1) "-")))
           
           (if (> (sslength ssNew) 0)
             (progn
