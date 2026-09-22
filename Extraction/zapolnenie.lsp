@@ -1,9 +1,9 @@
 ;;; ============================================================
-;;; ZAPOLNENIE.LSP — Заполнение проёмов
+;;; ZAPOLNENIE.LSP — Заполнение проемов
 ;;; (стеклопакеты, сэндвич-панели, глухие панели, витражное стекло)
 ;;;
 ;;; РЕДАКЦИЯ 28: косметическая переработка — компактная расстановка
-;;; скобок. Функционал ред. 27 сохранён без изменений.
+;;; скобок. Функционал ред. 27 сохранен без изменений.
 ;;;
 ;;; ТЕХНИЧЕСКИЕ ПРАВИЛА (Этап 0):
 ;;;   - Видимость отсутствует -> EffectiveName, не пропускать
@@ -11,7 +11,7 @@
 ;;;   - Ширина: "ШИРИНА В СВЕТУ" -> "ШИРИНА" -> "ДЛИНА"
 ;;;   - Поиск свойства: точное совпадение, затем подстрока
 ;;;   - Припуск: +26 мм; округление размеров: fix (целые мм)
-;;;   - Нулевой размер: пропуск (раздельные счётчики)
+;;;   - Нулевой размер: пропуск (раздельные счетчики)
 ;;;   - Площадь: мм2 -> м2, округление до 2 знаков ДО суммирования
 ;;;   - Отображение площади: 3,00 -> 3
 ;;;   - DETAIL ключ: UPPERCASE(ТИП) | ВЫСОТА | ШИРИНА
@@ -554,20 +554,20 @@
               (setq xlsfile (strcat base-name ".xls"))
               (if (= (strcase report-mode) "DETAIL")
                 (if (eu-export-zapolnenie-detail data xlsfile)
-                  (princ (strcat "\nXLS сохранён: " xlsfile))
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
                   (progn
                     (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
                     (setq csvfile (strcat base-name ".csv"))
                     (if (eu-export-zapolnenie-csv-detail data csvfile)
-                      (princ (strcat "\nCSV сохранён: " csvfile))
+                      (princ (strcat "\nCSV сохранен: " csvfile))
                       (princ "\nНе удалось создать CSV."))))
                 (if (eu-export-zapolnenie-summary summary-data xlsfile)
-                  (princ (strcat "\nXLS сохранён: " xlsfile))
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
                   (progn
                     (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
                     (setq csvfile (strcat base-name ".csv"))
                     (if (eu-export-zapolnenie-csv-summary summary-data csvfile)
-                      (princ (strcat "\nCSV сохранён: " csvfile))
+                      (princ (strcat "\nCSV сохранен: " csvfile))
                       (princ "\nНе удалось создать CSV.")))))))
 
           ;; --- Экспорт GAL ---
@@ -612,7 +612,7 @@
                       " блоков, общая площадь "
                       (zapolnenie-format-area total-area) " м2"))))
 
-        (princ "\nНет данных для отчёта.")))
+        (princ "\nНет данных для отчета.")))
 
     (princ "\nБлоки заполнения не найдены."))
 
@@ -643,7 +643,7 @@
 
   (initget "D S")
   (setq report-mode
-    (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "))
+    (getkword "\nРежим отчета [Подробный(D)/Краткий(S)] <D>: "))
   (if (null report-mode) (setq report-mode "D"))
   (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
 

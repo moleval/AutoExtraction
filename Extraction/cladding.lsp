@@ -230,7 +230,7 @@
   (if (> *cladding-with-arcs* 0)
     (princ (strcat "\nПредупреждение: полилиний со скруглениями (дугами): "
                    (itoa *cladding-with-arcs*)
-                   " - учтены с точным расчётом площади")))
+                   " - учтены с точным расчетом площади")))
   (if (> *cladding-check-mismatch* 0)
     (princ (strcat "\nВНИМАНИЕ: расхождение площади > 1 мм2: "
                    (itoa *cladding-check-mismatch*) " эл.")))
@@ -1002,7 +1002,7 @@
     (setq layers (mapcar '(lambda (x) (strcase (vl-string-trim " " x)))
                          (cl-split-string layers-str ","))))
   (initget "D S")
-  (setq report-mode (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <S>: "))
+  (setq report-mode (getkword "\nРежим отчета [Подробный(D)/Краткий(S)] <S>: "))
   (if (null report-mode) (setq report-mode "S"))
   (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
   (cladding-main layers report-mode nil nil nil nil nil)
@@ -1319,7 +1319,7 @@
               (write-line "   <Row>" f)
               (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
               (write-line (strcat "    <Cell ss:StyleID=\"DataLeft\"><Data ss:Type=\"String\">" (nth 1 rec) "</Data></Cell>") f)
-              ;; Высота и ширина: для _НЕПРЯМОУГ_ со звёздочкой и серый
+              ;; Высота и ширина: для _НЕПРЯМОУГ_ со звездочкой и серый
               (if (= (caddr rec) "_НЕПРЯМОУГ_")
                 (progn
                   (write-line (strcat "    <Cell ss:StyleID=\"Cut\"><Data ss:Type=\"String\">" (itoa (nth 3 rec)) "*</Data></Cell>") f)

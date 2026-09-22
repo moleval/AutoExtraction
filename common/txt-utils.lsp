@@ -44,7 +44,7 @@
       )
 
       (close fgal)
-      (princ (strcat "\nGAL сохранён: " galfile))
+      (princ (strcat "\nGAL сохранен: " galfile))
       T
     )
     (progn
@@ -93,7 +93,7 @@
       )
 
       (close fgal)
-      (princ (strcat "\nGAL сохранён: " galfile))
+      (princ (strcat "\nGAL сохранен: " galfile))
       T
     )
     (progn

@@ -678,7 +678,7 @@
   (if (> aci 90) (setq aci 90))
   (if (< aci 0) (setq aci 0))
   
-  ;; Создаём SOLID БЕЗ кода 62
+  ;; Создаем SOLID БЕЗ кода 62
   (setq res
     (entmake
       (list
@@ -920,12 +920,12 @@
       (if oversized
         (progn
           (write-line "" f)
-          (write-line "НЕРАЗМЕЩЁННЫЕ ДЕТАЛИ" f)
+          (write-line "НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ" f)
           (foreach r oversized
             (write-line (strcat (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
                                 (cs-format-num (nth 6 r) 4)) f))))
       (close f)
-      (princ (strcat "\nCSV сохранён: " fname))
+      (princ (strcat "\nCSV сохранен: " fname))
       T)
     nil))
 
@@ -981,14 +981,14 @@
       (write-line "</Table></Worksheet>" f)
       (if oversized
         (progn
-          (write-line "<Worksheet ss:Name=\"Неразмещённые\"><Table>" f)
-          (write-line "<Row><Cell ss:StyleID=\"T\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Неразмещённые детали</Data></Cell></Row>" f)
+          (write-line "<Worksheet ss:Name=\"Неразмещенные\"><Table>" f)
+          (write-line "<Row><Cell ss:StyleID=\"T\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Неразмещенные детали</Data></Cell></Row>" f)
           (foreach r oversized
             (write-line (strcat "<Row><Cell ss:StyleID=\"D\"><Data ss:Type=\"Number\">" (itoa (car r)) "</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">" (cs-xml-escape (nth 3 r)) "</Data></Cell><Cell ss:StyleID=\"D\"><Data ss:Type=\"String\">" (cs-part-label r) "</Data></Cell><Cell ss:StyleID=\"N\"><Data ss:Type=\"Number\">" (cs-xls-num (nth 6 r) 4) "</Data></Cell></Row>") f))
           (write-line "</Table></Worksheet>" f)))
       (write-line "</Workbook>" f)
       (close f)
-      (princ (strcat "\nXLS сохранён: " fname))
+      (princ (strcat "\nXLS сохранен: " fname))
       T)
     nil))
 
@@ -1031,11 +1031,11 @@
       
       ;; Число INSERT имени blockName ДО -BLOCK (защита от двойного INSERT, Шаг 4):
       ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить], ENTER
-      ;; выбирает «Преобразовать» и вхождение создаётся самим -BLOCK.
+      ;; выбирает «Преобразовать» и вхождение создается самим -BLOCK.
       (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
       (setq oldRefs (if r (sslength r) 0))
       
-      ;; Создаём блок (текстовый -BLOCK; опции Преобразовать/Удалить есть не во всех версиях)
+      ;; Создаем блок (текстовый -BLOCK; опции Преобразовать/Удалить есть не во всех версиях)
       (setq result (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss "")))
       (cond
         ((vl-catch-all-error-p result)
@@ -1151,7 +1151,7 @@
   (if (boundp '*CUTSHEET-CREATE-TABLE*) (setq defaultAcad *CUTSHEET-CREATE-TABLE*))
   
   (setq r (cs-dialog polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad))
-  (if (null r) (progn (princ "\nРаскрой листа отменён.") (princ) (exit)))
+  (if (null r) (progn (princ "\nРаскрой листа отменен.") (princ) (exit)))
   
   (setq choice (nth 0 r) sheetW (nth 1 r) sheetH (nth 2 r) kerf (nth 3 r)
         rotateFlag (nth 4 r) exportXls (nth 5 r) exportAcad (nth 6 r) dynType (nth 7 r))
@@ -1162,7 +1162,7 @@
   
   (setq records (cs-collect-records ss choice dynType))
   (if (null records)
-    (progn (princ "\nПосле фильтрации не осталось деталей с определёнными габаритами.")
+    (progn (princ "\nПосле фильтрации не осталось деталей с определенными габаритами.")
            (princ) (exit)))
   
   (princ (strcat "\nВ раскрой принято деталей: " (itoa (length records))))

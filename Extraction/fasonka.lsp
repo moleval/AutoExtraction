@@ -176,7 +176,7 @@
   )
 
   (initget "D S")
-  (setq report-mode (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "))
+  (setq report-mode (getkword "\nРежим отчета [Подробный(D)/Краткий(S)] <D>: "))
   (if (null report-mode) (setq report-mode "D"))
   (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
 
@@ -241,11 +241,11 @@
   ;; ============================================================
   (defun clean-name (str / prefixes p result found first rest)
     ;; Список возможных префиксов
-    ;; Каждый префикс должен включать завершающий символ (пробел, подчёркивание)
+    ;; Каждый префикс должен включать завершающий символ (пробел, подчеркивание)
     (setq prefixes '("Железо " "Железо_" "ФАСОНКА_" "ФАСОНКА " "Фасонка_" "Фасонка "))
     (setq result str
           found nil)
-    ;; Проверяем каждый префикс (без учёта регистра)
+    ;; Проверяем каждый префикс (без учета регистра)
     (if (and str (> (strlen str) 0))
       (progn
         (foreach p prefixes
@@ -391,23 +391,23 @@
               (setq xlsfile (strcat base-name ".xls"))
               (if (= report-type "DETAIL")
                 (if (eu-export-xls-detail report-data xlsfile)
-                  (princ (strcat "\nXLS сохранён: " xlsfile))
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
                   (progn
                     (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
                     (setq csvfile (strcat base-name ".csv"))
                     (if (eu-export-csv-detail report-data csvfile)
-                      (princ (strcat "\nCSV сохранён: " csvfile))
+                      (princ (strcat "\nCSV сохранен: " csvfile))
                       (princ "\nНе удалось открыть CSV-файл.")
                     )
                   )
                 )
                 (if (eu-export-xls-summary report-data xlsfile)
-                  (princ (strcat "\nXLS сохранён: " xlsfile))
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
                   (progn
                     (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
                     (setq csvfile (strcat base-name ".csv"))
                     (if (eu-export-csv-summary report-data csvfile)
-                      (princ (strcat "\nCSV сохранён: " csvfile))
+                      (princ (strcat "\nCSV сохранен: " csvfile))
                       (princ "\nНе удалось открыть CSV-файл.")
                     )
                   )

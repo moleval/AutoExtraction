@@ -54,7 +54,7 @@
   (setq s (vl-string-subst " " "ОПОРНАЯ" s))
 
   ;; КР-Н и КР-О являются двумя исполнениями одной группы.
-  ;; Для пары берём общий префикс + первую размерную величину.
+  ;; Для пары берем общий префикс + первую размерную величину.
   (cond
     ((setq pos (vl-string-search "КР-Н-" s))
       (setq prefix (substr s 1 pos))
@@ -169,7 +169,7 @@
   ;;   (name length count)
   ;; или
   ;;   (name count sum)
-  ;; Поэтому признак "штучный/мерный" передаётся отдельно
+  ;; Поэтому признак "штучный/мерный" передается отдельно
   ;; через наличие второго поля в вызывающем коде.
 
   (setq na (car a))
@@ -833,7 +833,7 @@
 
                   (princ
                     (strcat
-                      "\nXLS сохранён: "
+                      "\nXLS сохранен: "
                       xlsfile
                     )
                   )
@@ -856,7 +856,7 @@
 
                       (princ
                         (strcat
-                          "\nCSV сохранён: "
+                          "\nCSV сохранен: "
                           csvfile
                         )
                       )
@@ -884,7 +884,7 @@
 
                     (princ
                       (strcat
-                        "\nXLS сохранён: "
+                        "\nXLS сохранен: "
                         xlsfile
                       )
                     )
@@ -908,7 +908,7 @@
 
                         (princ
                           (strcat
-                            "\nCSV сохранён: "
+                            "\nCSV сохранен: "
                             csvfile
                           )
                         )
@@ -1013,7 +1013,7 @@
           )
         )
 
-        (princ "\nНет данных для отчёта.")
+        (princ "\nНет данных для отчета.")
       )
     )
 
@@ -1024,11 +1024,11 @@
 )
 
 ;; ------------------------------------------------------------
-;; Автономная команда (модифицирована: запрос слоёв)
+;; Автономная команда (модифицирована: запрос слоев)
 ;; ------------------------------------------------------------
 
 (defun c:subsystem ( / layers-str layers report-mode export-excel export-txt create-table use-default save-base)
-  ;; Запрос слоёв
+  ;; Запрос слоев
   (setq layers-str (getstring T "\nВведите слои через запятую (Enter — все слои): "))
   (if (= layers-str "")
     (setq layers nil)
@@ -1036,7 +1036,7 @@
   )
 
   (initget "D S")
-  (setq report-mode (getkword "\nРежим отчёта [Подробный(D)/Краткий(S)] <D>: "))
+  (setq report-mode (getkword "\nРежим отчета [Подробный(D)/Краткий(S)] <D>: "))
   (if (null report-mode) (setq report-mode "D"))
   (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
 
