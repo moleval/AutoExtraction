@@ -1326,6 +1326,11 @@
               (princ "\n[CUTSHEET][GUARD] фактический bbox недоступен - рамка по расчетным границам.")
               (setq bbox (cs-combine-bbox bbox1 bbox2))))
           (setq bbox3 (cs-draw-frame bbox))
+          ;; ДИАГНОСТИКА (этап отладки рамки): углы рамки в мировых координатах
+          (princ (strcat "\n[CUTSHEET] Рамка: Y-верх " (rtos (cadr (cadr bbox3)) 2 1)
+                          " Y-низ " (rtos (cadr (car bbox3)) 2 1)
+                          " X-лево " (rtos (car (car bbox3)) 2 1)
+                          " X-право " (rtos (car (cadr bbox3)) 2 1)))
           (setq bbox (cs-combine-bbox bbox bbox3))
           
           ;; Пересобрать набор с учетом рамки для обертки в блок
