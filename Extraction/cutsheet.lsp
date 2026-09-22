@@ -33,7 +33,7 @@
 (setq *CUTSHEET-PALETTE* '(1 2 3 4 5 6 30 210 140 90 40 120))
 (setq *CUTSHEET-TITLE-H* 100.0)
 (setq *CUTSHEET-TEXT-H*  60.0)
-(setq *CUTSHEET-SHEET-GAP* 350.0)
+(setq *CUTSHEET-SHEET-GAP* 190.0)   ; видимый вертикальный зазор = GAP+HEADER(260): 450 (требование пользователя)
 (setq *CUTSHEET-SHEET-HEADER* 260.0)
 (setq *CUTSHEET-GRID-COLS* 3)
 (setq *CUTSHEET-SUMMARY-W* 2000.0)
@@ -1317,8 +1317,14 @@
           
           ;; Этап 2: рамка - по ФАКТИЧЕСКИМ границам результата (GetBoundingBox
           ;; каждого примитива), не по расчетным координатам выноски.
+          ;; Рамка = объединение фактических и расчетных границ:
+          ;; не может зачеркнуть ни одну отрисованную строку.
           (setq bbox (cs-entities-bbox ssNew))
-          (if (null bbox) (setq bbox (cs-combine-bbox bbox1 bbox2)))
+          (if bbox
+            (setq bbox (cs-combine-bbox bbox (cs-combine-bbox bbox1 bbox2)))
+            (progn
+              (princ "\n[CUTSHEET][GUARD] фактический bbox недоступен - рамка по расчетным границам.")
+              (setq bbox (cs-combine-bbox bbox1 bbox2))))
           (setq bbox3 (cs-draw-frame bbox))
           (setq bbox (cs-combine-bbox bbox bbox3))
           
