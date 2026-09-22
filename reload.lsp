@@ -219,6 +219,7 @@
           "excel-utils.lsp"
           "table-utils.lsp"
           "txt-utils.lsp"
+          "validation-utils.lsp"
         )
       )
 

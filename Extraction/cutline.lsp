@@ -864,6 +864,23 @@
 ;; ============================================================
 ;; Диалог параметров раскроя
 ;; ============================================================
+;; Этап 2 (V1+V2): прием диалога = проверка введенных чисел.
+;; Заменяет старый молчаливый пресет на дефолт: теперь мусор
+;; в полях "хлыст"/"рез" не пропускается - диалог остается открытым.
+(defun n1-dialog-accept (/ s k)
+  (setq s *n1-tmp-stock* k *n1-tmp-kerf*)
+  (if (and (tu-valid-bar-length-p s)
+           (tu-valid-kerf-p k)
+           (< k s))
+    (done_dialog 1)
+    (alert (strcat "[AutoExtraction][CUTLINE][VALIDATION]\n"
+                   "Длина хлыста: число > 0 (лимит "
+                   (rtos *n1-max-bar-length* 2 0) " мм).\n"
+                   "Рез: число от 0 до " (rtos *n1-max-kerf* 2 0)
+                   " мм и меньше длины хлыста."))
+  )
+)
+
 (defun n1-cutline-dialog (line-cnt mline-cnt dynblock-cnt
                           ss-for-types
                           default-tol default-stock default-kerf
@@ -1004,16 +1021,16 @@
                 "(n1-on-mline-type-changed $value)")
 
               (n1-safe-action-tile "edt_stock"
-                "(setq *n1-tmp-stock* (atof (vl-string-translate \",\" \".\" $value)))")
+                "(setq *n1-tmp-stock* (tu-parse-number $value))")
               (n1-safe-action-tile "edt_kerf"
-                "(setq *n1-tmp-kerf* (atof (vl-string-translate \",\" \".\" $value)))")
+                "(setq *n1-tmp-kerf* (tu-parse-number $value))")
 
               (n1-safe-action-tile "chk_xls"
                 "(setq *n1-tmp-chk-xls* (= $value \"1\"))")
               (n1-safe-action-tile "chk_acad"
                 "(setq *n1-tmp-chk-acad* (= $value \"1\"))")
 
-              (n1-safe-action-tile "btn_ok"     "(done_dialog 1)")
+              (n1-safe-action-tile "btn_ok"     "(n1-dialog-accept)")
               (n1-safe-action-tile "btn_cancel" "(done_dialog 0)")
 
               (setq result (start_dialog))
@@ -1024,8 +1041,8 @@
                 (list
                   *n1-tmp-choice*
                   default-tol
-                  (if (<= *n1-tmp-stock* 0.0) default-stock *n1-tmp-stock*)
-                  (if (< *n1-tmp-kerf* 0.0) default-kerf *n1-tmp-kerf*)
+                  *n1-tmp-stock*
+                  *n1-tmp-kerf*
                   *n1-tmp-chk-xls*
                   *n1-tmp-chk-acad*
                   *n1-tmp-dynblock-type*

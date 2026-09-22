@@ -378,14 +378,9 @@
 ;; РАЗБОР ИНДЕКСОВ DCL
 ;; ============================================================
 
-(defun extraction-parse-indices (s / x)
-  (if (and (= (type s) 'STR) (/= s ""))
-    (progn
-      (setq x (read (strcat "(" s ")")))
-      (if (= (type x) 'LIST) x nil)
-    )
-    nil
-  )
+;; Этап 2 (V2): единый защищенный парсер списка индексов.
+(defun extraction-parse-indices (s)
+  (tu-parse-int-list s)
 )
 
 
