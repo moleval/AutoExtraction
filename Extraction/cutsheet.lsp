@@ -861,11 +861,20 @@
     (setq i (1+ i)))
   
   (if oversized
-    (progn (setq y (- y rowH))
-           (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
-                              (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)))
+    (progn
+      (setq y (- y rowH))
+      (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                         (strcat "НЕРАЗМЕЩЕНО: " (itoa (length oversized)) " шт.") *CUTSHEET-WASTE-COLOR*)
+      ;; Этап 2: каждая неразмещенная - отдельной строкой «WxH | имя»,
+      ;; как в консоли/XLS; рамка (bbox ниже) расширяется на эти строки.
+      (foreach r oversized
+        (setq y (- y rowH))
+        (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82)
+                      (cs-part-label r) *CUTSHEET-WASTE-COLOR*)
+        (cs-draw-text (list (+ left (* width 0.35)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                      (nth 3 r) *CUTSHEET-WASTE-COLOR*))))
   
-  (list (list left (- top (* rowH (+ rows 13 (if oversized 1 0))))) (list (+ left width) top)))
+  (list (list left (- top (* rowH (+ rows 13 (if oversized (+ 1 (length oversized)) 0))))) (list (+ left width) top)))
 
 (defun cs-draw-frame (bbox / x1 y1 x2 y2)
   (if (not (tblsearch "LAYER" *CUTSHEET-FRAME-LAYER*))
