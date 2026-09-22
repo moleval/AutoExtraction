@@ -901,6 +901,16 @@
 ;; Фактический объемлющий прямоугольник всех примитивов набора.
 ;; Рамка результата строится по реальным границам (GetBoundingBox),
 ;; а не по расчетным координатам - наложение кромки исключено.
+;; SAFEARRAY превращается в список точек независимо от того,
+;; как отдал параметры AutoCAD: SAFEARRAY напрямую или VARIANT(safearray).
+(defun cs-point-array->list (v)
+  (cond ((= (type v) 'SAFEARRAY) (vlax-safearray->list v))
+        ((= (type v) 'VARIANT)
+         (if (= (type (vlax-variant-value v)) 'SAFEARRAY)
+           (vlax-safearray->list (vlax-variant-value v))))
+        ((= (type v) 'LIST) v)
+        (T nil)))
+
 (defun cs-entities-bbox (ss / i e o mn mx x1 y1 x2 y2)
   (setq x1 nil)
   (setq i 0)
@@ -912,10 +922,10 @@
         (setq mn nil)
         (setq mx nil)
         (vl-catch-all-apply 'vla-GetBoundingBox (list o 'mn 'mx))
+        (setq mn (cs-point-array->list mn))
+        (setq mx (cs-point-array->list mx))
         (if (and mn mx)
           (progn
-            (setq mn (vlax-safearray->list (vlax-variant-value mn)))
-            (setq mx (vlax-safearray->list (vlax-variant-value mx)))
             (if (or (null x1) (< (car mn) x1)) (setq x1 (car mn)))
             (if (or (null y1) (< (cadr mn) y1)) (setq y1 (cadr mn)))
             (if (or (null x2) (> (car mx) x2)) (setq x2 (car mx)))
