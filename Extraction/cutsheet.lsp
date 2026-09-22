@@ -884,9 +884,9 @@
                          "НЕРАЗМЕЩЕНО (ВxШ)" *CUTSHEET-TITLE-COLOR*)
       (setq y (- y rowH))
       (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82)
-                    "габариты" *CUTSHEET-HEADER-COLOR*)
+                    "Размер" *CUTSHEET-HEADER-COLOR*)
       (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                    "количество" *CUTSHEET-HEADER-COLOR*)
+                    "Кол-во" *CUTSHEET-HEADER-COLOR*)
       (foreach g skipGroups
         (setq y (- y rowH))
         (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82)
