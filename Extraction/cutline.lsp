@@ -1750,7 +1750,7 @@
             (write-line "   <Row>" f)
             (write-line (strcat "    <Cell ss:Index=\"2\" ss:StyleID=\"SkipDataLeft\"><Data ss:Type=\"Number\">" (itoa (fix (car rec))) "</Data></Cell>") f)
             (write-line (strcat "    <Cell ss:StyleID=\"SkipDataMid\"><Data ss:Type=\"Number\">" (itoa (cadr rec)) "</Data></Cell>") f)
-            (write-line (strcat "    <Cell ss:Index=\"3\" ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"SkipDataRight\"><Data ss:Type=\"Number\">" (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) "</Data></Cell>") f)
             (write-line "   </Row>" f)
           )
 
