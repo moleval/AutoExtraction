@@ -329,6 +329,12 @@
 (defun cs-safe-set-tile (key val) (vl-catch-all-apply 'set_tile (list key val)))
 (defun cs-safe-mode-tile (key mode) (vl-catch-all-apply 'mode_tile (list key mode)))
 
+;; Этап 2 (V7): помещается ли деталь на лист хотя бы в одной из
+;; допустимых ориентаций (рез учитывает солвер; здесь - геометрия).
+(defun cs-part-fits-sheet-p (w h sheetW sheetH rotateFlag)
+  (or (and (<= w sheetW) (<= h sheetH))
+      (and rotateFlag (<= h sheetW) (<= w sheetH))))
+
 (defun cs-cut-sizes-valid-p (w h kerf)
   (and (numberp w) (numberp h) (> w *CUTSHEET-MIN-SIZE*) (> h *CUTSHEET-MIN-SIZE*)
        (< w *CUTSHEET-MAX-SIZE*) (< h *CUTSHEET-MAX-SIZE*)
@@ -1094,7 +1100,7 @@
 (defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes
                       defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad
                       r choice sheetW sheetH kerf rotateFlag exportXls exportAcad dynType
-                      records groups parts nested sheets oversized
+                      records groups parts nested sheets oversized fitSrc impossible
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
@@ -1165,16 +1171,35 @@
     (progn (princ "\nПосле фильтрации не осталось деталей с определенными габаритами.")
            (princ) (exit)))
   
-  (princ (strcat "\nВ раскрой принято деталей: " (itoa (length records))))
+  ;; Этап 2 (V7): детали, не помещающиеся на лист ни в одной ориентации,
+  ;; отсекаются ДО солвера - не попадают ни в статистику, ни в таблицы,
+  ;; только в секции "НЕРАЗМЕЩЕНО" консоли/XLS/CSV.
+  (setq fitSrc nil impossible nil)
+  (foreach r records
+    (if (cs-part-fits-sheet-p (nth 4 r) (nth 5 r) sheetW sheetH rotateFlag)
+      (setq fitSrc (cons r fitSrc))
+      (setq impossible (cons r impossible))))
+  (setq fitSrc (reverse fitSrc) impossible (reverse impossible))
   
-  (setq groups (cs-aggregate records))
-  (setq nested (cs-nest records sheetW sheetH kerf rotateFlag)
+  (if (null fitSrc)
+    (progn
+      (princ (strcat "\nНЕРАЗМЕЩЕНО: " (itoa (length impossible)) " шт."))
+      (foreach r impossible
+        (princ (strcat "\n  " (cs-part-label r) " | " (nth 3 r))))
+      (princ "\nНи одна деталь не помещается на лист. Раскрой невозможен.")
+      (princ) (exit)))
+  
+  (princ (strcat "\nВ раскрой принято деталей: " (itoa (length fitSrc))))
+  
+  (setq groups (cs-aggregate fitSrc))
+  (setq nested (cs-nest fitSrc sheetW sheetH kerf rotateFlag)
         sheets (car nested)
         oversized (cadr nested))
+  (setq oversized (append impossible oversized))
   
-  (setq totalCnt (length records)
-        actualArea (cs-total-actual-area-records records)
-        bboxArea (cs-total-bbox-area-records records)
+  (setq totalCnt (length fitSrc)
+        actualArea (cs-total-actual-area-records fitSrc)
+        bboxArea (cs-total-bbox-area-records fitSrc)
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0))
         kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0)
         kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0))
