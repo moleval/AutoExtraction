@@ -321,7 +321,8 @@
           "select-utils.lsp"
           "excel-utils.lsp"
           "table-utils.lsp"
-          "txt-utils.lsp")
+          "txt-utils.lsp"
+          "validation-utils.lsp")
 
         (setq path (strcat common f))
 

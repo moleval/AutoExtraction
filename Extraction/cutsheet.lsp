@@ -1176,7 +1176,7 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt oldOsmode oldCmddia oldFiledia)
+                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1319,12 +1319,17 @@
           ;; каждого примитива), не по расчетным координатам выноски.
           ;; Рамка = объединение фактических и расчетных границ:
           ;; не может зачеркнуть ни одну отрисованную строку.
-          (setq bbox (cs-entities-bbox ssNew))
-          (if bbox
-            (setq bbox (cs-combine-bbox bbox (cs-combine-bbox bbox1 bbox2)))
+          (setq bboxFact (cs-entities-bbox ssNew))
+          (setq bboxCalc (cs-combine-bbox bbox1 bbox2))
+          ;; ДИАГНОСТИКА (этап отладки рамки): низы источников отдельно
+          (princ (strcat "\n[CUTSHEET] bbox источников: факт-низ "
+                          (if bboxFact (rtos (cadr (car bboxFact)) 2 1) "НЕДОСТУПЕН")
+                          " | расчет-низ " (rtos (cadr (car bboxCalc)) 2 1)))
+          (if bboxFact
+            (setq bbox (cs-combine-bbox bboxFact bboxCalc))
             (progn
               (princ "\n[CUTSHEET][GUARD] фактический bbox недоступен - рамка по расчетным границам.")
-              (setq bbox (cs-combine-bbox bbox1 bbox2))))
+              (setq bbox bboxCalc)))
           (setq bbox3 (cs-draw-frame bbox))
           ;; ДИАГНОСТИКА (этап отладки рамки): углы рамки в мировых координатах
           (princ (strcat "\n[CUTSHEET] Рамка: Y-верх " (rtos (cadr (cadr bbox3)) 2 1)
