@@ -1154,7 +1154,8 @@
 ;; Преобразование списка длин в строку
 ;; ============================================================
 (defun n1-list-to-str (lst sep / s x)
-  (if (null sep) (setq sep " "))
+  ;; Разделитель по умолчанию " + ": Excel сливает "2000 2000" в число
+  (if (null sep) (setq sep " + "))
   (setq s "")
   (foreach x lst
     (setq s (strcat s (if (= s "") "" sep) (itoa (fix x))))
@@ -1433,7 +1434,7 @@
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)))
-    (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces " ")
+    (princ (strcat "\nХлыст " (itoa i) ": " (n1-list-to-str pieces " + ")
                    " | исп. " (rtos used 2 1) " | Отход " (rtos waste 2 1)
                    " | " (rtos util 2 1) "%"))
   )
@@ -1677,7 +1678,7 @@
               util (* 100.0 (/ used stock)))
         (write-line "   <Row>" f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces " ") "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (n1-list-to-str pieces " + ") "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos used 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos waste 2 1) "</Data></Cell>") f)
         (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos util 2 1) "</Data></Cell>") f)
@@ -1785,7 +1786,7 @@
         (setq i (1+ i))
         (setq pieces (cdr bar) waste (car bar) used (- stock waste)
               util (* 100.0 (/ used stock)))
-        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces ", ") ";"
+        (write-line (strcat (itoa i) ";" (n1-list-to-str pieces " + ") ";"
                             (rtos used 2 1) ";" (rtos waste 2 1) ";"
                             (rtos util 2 1)) f)
       )
