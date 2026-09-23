@@ -1887,7 +1887,7 @@
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
-    (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
+    (if uMark (tu-undo-end doc))
     (tu-sysvar-restore svSaved)
     (princ))
   
@@ -2108,7 +2108,7 @@
                                         (list (vlax-get-acad-object))))
           (if (and (not (vl-catch-all-error-p doc)) doc)
             (progn
-              (vla-StartUndoMark doc)
+              (tu-undo-begin)
               (setq uMark T)
             )
           )
@@ -2210,7 +2210,7 @@
 
           (if (and uMark doc)
             (progn
-              (vla-EndUndoMark doc)
+              (tu-undo-end doc)
               (setq uMark nil)
             )
           )

@@ -479,7 +479,7 @@
           (setq pt_wcs (trans pt 1 0))
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
-          (vla-startundomark doc)
+          (tu-undo-begin)
           (setq maxLayerLen 10 maxTypeLen 10)
           (foreach grp data
             (setq layerStr (nth 1 grp))
@@ -583,7 +583,7 @@
                                (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
             (setq chunk-idx (1+ chunk-idx)))
-          (vla-endundomark doc)
+          (tu-undo-end doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
           (princ (strcat "\nВсего создано таблиц блоков: "
                          (itoa total-chunks)))
@@ -611,7 +611,7 @@
           (setq pt_wcs (trans pt 1 0))
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
-          (vla-startundomark doc)
+          (tu-undo-begin)
           (setq layerGroups (cl-group-blocks-by-layer data))
           (setq nCols 4)
           (setq nRows (+ 3 (length layerGroups)))
@@ -652,7 +652,7 @@
               (vla-SetCellAlignment tbl row 3 5)
               (vla-update tbl)
               (princ "\nТаблица блоков (кратко) создана.")))
-          (vla-endundomark doc)
+          (tu-undo-end doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
           T
         )
@@ -1131,7 +1131,7 @@
           (setq pt_wcs (trans pt 1 0))
           (setq oldEcho (getvar "CMDECHO"))
           (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
-          (vla-startundomark doc)
+          (tu-undo-begin)
           (setq maxLayerLen 10)
           (foreach grp data
             (setq layerStr (nth 1 grp))
@@ -1230,7 +1230,7 @@
                 (princ (strcat "\nТаблица " (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
             (setq chunk-idx (1+ chunk-idx)))
-          (vla-endundomark doc)
+          (tu-undo-end doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
           (princ (strcat "\nВсего создано таблиц: " (itoa total-chunks)))
           T

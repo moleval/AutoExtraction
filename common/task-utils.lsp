@@ -178,29 +178,42 @@
 
 ;; ============================================================
 ;; Ётап 3 (V10): единый Undo-guard.
-;; tu-undo-begin  Ч открыть Undo-группу (возвращает doc или nil).
-;; tu-undo-end    Ч закрыть группу: всЄ внутри откатываетс€ одним U.
-;; tu-undo-cancel Ч закрыть и сразу откатить командой UNDO.
-;;   ¬Ќ»ћјЌ»≈: метода vla-Undo в ActiveX Document Ќ≈“; cancel вызывает
-;;   команду UNDO, поэтому его нельз€ использовать внутри *error* Ч
+;; ¬ложенные пары схлопываютс€ по счЄтчику *tu-undo-depth*: реальные
+;; StartUndoMark/EndUndoMark став€тс€ только на внешнем уровне,
+;; поэтому одна задача (с любыми внутренними парами) = одна Undo-
+;; запись = один U.
+;; tu-undo-begin  Ч открыть уровень (возвращает doc или nil).
+;; tu-undo-end    Ч закрыть уровень; на нулевой глубине ставит
+;;   реальный EndUndoMark.
+;; tu-undo-cancel Ч закрыть ¬—≈ уровни и откатить командой UNDO.
+;;   ¬Ќ»ћјЌ»≈: метода vla-Undo в ActiveX Document Ќ≈“; cancel
+;;   запускает команду UNDO, поэтому Ќ≈ вызывать из *error* Ч
 ;;   только из обычного кода (см. V13). ¬ обработчиках Ч tu-undo-end.
 ;; ============================================================
+(if (null (boundp '*tu-undo-depth*)) (setq *tu-undo-depth* 0))
+
 (defun tu-undo-begin ( / doc)
   (setq doc (vl-catch-all-apply
               'vla-get-ActiveDocument (list (vlax-get-acad-object))))
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
-      (vl-catch-all-apply 'vla-StartUndoMark (list doc))
+      (if (= *tu-undo-depth* 0)
+        (vl-catch-all-apply 'vla-StartUndoMark (list doc)))
+      (setq *tu-undo-depth* (1+ *tu-undo-depth*))
       doc)))
 
 (defun tu-undo-end (doc)
-  (if (and doc (not (vl-catch-all-error-p doc)))
-    (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
+  (if (and doc (not (vl-catch-all-error-p doc)) (> *tu-undo-depth* 0))
+    (progn
+      (setq *tu-undo-depth* (1- *tu-undo-depth*))
+      (if (= *tu-undo-depth* 0)
+        (vl-catch-all-apply 'vla-EndUndoMark (list doc)))))
   nil)
 
 (defun tu-undo-cancel (doc)
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
+      (setq *tu-undo-depth* 0)
       (vl-catch-all-apply 'vla-EndUndoMark (list doc))
       (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1"))))
   nil)
