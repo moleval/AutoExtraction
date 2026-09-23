@@ -81,6 +81,11 @@
 (defun u2-parse (fname / f line tokens col res)
   (setq tokens '() col 0)
   (setq f (open fname "r"))
+  (if (null f)
+    (progn
+      (princ (strcat "\n[U2][FAIL] Файл не открывается (нет такого файла?): " fname))
+      (setq tokens (list (list "OPEN-FAIL" fname))))
+    nil)
   (if f
     (progn
       (while (setq line (read-line f))
@@ -104,6 +109,12 @@
   (princ (strcat "\n[U2] старый: " f-old))
   (princ (strcat "\n[U2] новый:  " f-new))
   (setq ta (u2-parse f-old) tb (u2-parse f-new))
+  (if (or (assoc "OPEN-FAIL" ta) (assoc "OPEN-FAIL" tb))
+    (progn
+      (princ "\n[U2][FAIL] diff невозможен: проверьте пути к файлам.")
+      (princ "\n==========================\n")
+      (exit)))
+  
   (setq rows-a  (length (vl-remove-if '(lambda (x) (= (car x) "C")) ta))
         rows-b  (length (vl-remove-if '(lambda (x) (= (car x) "C")) tb))
         cells-a (length (vl-remove-if-not '(lambda (x) (= (car x) "C")) ta))
