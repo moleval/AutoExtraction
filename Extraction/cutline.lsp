@@ -1331,7 +1331,7 @@
   (setq left (car insPt) top (cadr insPt))
 
   (setq tableH (+ (* pad 2)
-                  (* (+ 11.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
+                  (* (+ 9.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
 
   (setq bottom (- top tableH))
   (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
@@ -1341,9 +1341,6 @@
   (setq y (- top pad rowH))
 
   (n1-draw-text (list x1 y) (* th 1.3) "Раскрой хлыста" *NEST-COLOR-TITLE*)
-
-  (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th "Длина" *NEST-COLOR-HEADER*)
 
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Хлыст, мм" *NEST-COLOR-HEADER*)
@@ -1356,10 +1353,7 @@
   (n1-draw-text (list x3 y) th (rtos stock-total-m 2 2) *NEST-COLOR-VALUE*)
 
   (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th "Изделия" *NEST-COLOR-HEADER*)
-
-  (setq y (- y rowH))
-  (n1-draw-text (list x1 y) th "Длина, мм" *NEST-COLOR-HEADER*)
+  (n1-draw-text (list x1 y) th "Изделие, мм" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
 
@@ -2232,5 +2226,5 @@
 (defun c:cutline () (cutline-main 'ASK))
 (defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
 
-(princ "\nCUTLINE.LSP загружен (ред. 2: guard сиспеременных V8). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 3: сводка хлыста). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
