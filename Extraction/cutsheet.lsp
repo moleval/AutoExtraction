@@ -1019,10 +1019,13 @@
     (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
     (if (and (not (vl-catch-all-error-p o)) o)
       (progn
-        ;; Принудительное обновление примитива: без него AutoCAD может отдать
-        ;; устаревший/усеченный bbox для только что созданных текстов,
-        ;; и рамка по факт-bbox обрезала бы последние строки.
-        (vl-catch-all-apply 'vla-update (list o))
+        ;; П2.2 (A/B): vla-update убран - подозреваемый N1 по замеру
+        ;; [PERF] CUTSHEET:bbox 2578 ms на 743 примитива (обновление дисплея
+        ;; по-сущностному). Контроль поведение-сохранения: базовая точка рамки
+        ;; должна совпасть с эталоном 55812.198708,-16982.745892 (тексты шапок
+        ;; формируют верх рамки - усечение bbox сразу видно по координате).
+        ;; Если координата уплыла - откат коммита и fallback: vla-update
+        ;; только для TEXT (~170 из 743).
         (setq mn nil)
         (setq mx nil)
         (vl-catch-all-apply 'vla-GetBoundingBox (list o 'mn 'mx))
@@ -1575,5 +1578,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 17: U2-примитивы, П1-профилировка, П2-метки bbox/wrap-block). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 18: U2-примитивы, П1-профилировка, П2 bbox без vla-update (A/B)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
