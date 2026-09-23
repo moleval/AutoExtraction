@@ -1258,10 +1258,9 @@
 (defun cs-setvar-transparency-display ()
   (vl-catch-all-apply 'setvar (list "TRANSPARENCYDISPLAY" 1)))
 
-(defun cs-unique-block-name (base / name n)
-  (setq n 0 name (strcat base " " (itoa n)))
-  (while (tblsearch "BLOCK" name) (setq n (1+ n) name (strcat base " " (itoa n))))
-  name)
+(defun cs-unique-block-name (base)
+  ;; U3: единый генератор - см. common/task-utils.lsp
+  (tu-unique-block-name base))
 
 (defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r oldRefs si e retained ins-result finalRefs basePtStr insertPt3 acad doc ms result)
   (if (or (null ss) (<= (sslength ss) 0))

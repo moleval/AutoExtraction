@@ -71,6 +71,21 @@
 )
 
 
+(defun ae-reload-rev-count (paths / f cnt found line ff)
+  ;; U3: сколько модулей объявили маркер редакции "(ред. N" в своём файле.
+  ;; Чтение фаилов сырое (байтовое) - ищем подстроку как есть.
+  (setq cnt 0)
+  (foreach f paths
+    (setq found nil ff (open f "r"))
+    (if ff
+      (progn
+        (while (and (not found) (setq line (read-line ff)))
+          (if (vl-string-search "(ред. " line)
+            (setq found T)))
+        (close ff)))
+    (if found (setq cnt (1+ cnt))))
+  cnt)
+
 (defun ae-reload-load-file
        (fullpath / result)
 
@@ -144,7 +159,9 @@
            extraction-files
            ok
            errors
-           missing)
+           missing
+           revcnt
+           revpaths)
 
   ;; ------------------------------------------------------------
   ;; Заголовок
@@ -309,6 +326,18 @@
       ;; Итог
       ;; --------------------------------------------------------
 
+      ;; U3: номер прогона RELOAD за сессию (выживает перечитывание reload.lsp,
+      ;; т.к. сброса на ноль нет) и счётчик маркеров редакции.
+      (if (null (boundp '*ae-reload-run*))
+        (setq *ae-reload-run* 0))
+      (setq *ae-reload-run* (1+ *ae-reload-run*))
+      (setq revpaths '())
+      (foreach f common-files
+        (setq revpaths (cons (strcat common f) revpaths)))
+      (foreach f extraction-files
+        (setq revpaths (cons (strcat extraction-dir f) revpaths)))
+      (setq revcnt (ae-reload-rev-count revpaths))
+
       (princ
         "\n"
       )
@@ -318,7 +347,18 @@
 
       (princ
         (strcat
-          "\n RELOAD завершен."
+          "\n RELOAD завершен (прогон #"
+          (itoa *ae-reload-run*)
+          ")."
+        )
+      )
+      (princ
+        (strcat
+          "\n Маркер редакции: "
+          (itoa revcnt)
+          " из "
+          (itoa (+ (length common-files) (length extraction-files)))
+          " модулей."
         )
       )
 

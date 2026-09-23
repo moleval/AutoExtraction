@@ -246,3 +246,14 @@
 (defun ex-safe-value (cell)    (cadr cell))
 (defun ex-safe-message (cell)  (cadr cell))
 
+;; ------------------------------------------------------------
+;; U3: общий генератор уникальных имён для рапорт-блоков
+;; («Раскрой Эксперимент 0», «Раскрой Эксперимент 1», ...).
+;; Кандидат считается свободным, если его нет в таблице BLOCK.
+;; ------------------------------------------------------------
+(defun tu-unique-block-name (base / n name)
+  (setq n 0 name (strcat base " " (itoa n)))
+  (while (tblsearch "BLOCK" name)
+    (setq n (1+ n) name (strcat base " " (itoa n))))
+  name)
+

@@ -164,13 +164,9 @@
   )
 )
 
-(defun n1-unique-block-name (base / name n)
-  (setq n 0 name (strcat base " " (itoa n)))
-  (while (tblsearch "BLOCK" name)
-    (setq n (1+ n) name (strcat base " " (itoa n)))
-  )
-  name
-)
+(defun n1-unique-block-name (base)
+  ;; U3: единый генератор - см. common/task-utils.lsp
+  (tu-unique-block-name base))
 
 (defun n1-block-insert (name insPt)
   (entmake (list (cons 0 "INSERT") (cons 100 "AcDbEntity")
