@@ -2148,43 +2148,23 @@
             (setq ent (entnext ent)))
 
           (pu-begin "CUTLINE:wrap-block")
-                    (if (> (sslength ssNew) 0)
+          (if (> (sslength ssNew) 0)
             (progn
-              ;; Число INSERT с этим именем ДО упаковки (контракт «ровно 1 новый», Шаг 4)
+              (setq oldEcho (getvar "CMDECHO"))
+              (setvar "CMDECHO" 0)
+              ;; Число INSERT с этим именем ДО -BLOCK (защита от двойного INSERT, Шаг 4):
+              ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить],
+              ;; ENTER выбирает «Преобразовать» и INSERT создается самим -BLOCK.
               (pu-begin "CUTLINE:wrap:ssget")
               (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
               (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
-              ;; П2.3: ActiveX-миграция вместо vl-cmdf "_.-BLOCK" (замер 5.2:
-              ;; команда = 81% стоимости wrap). CopyObjects копирует набор в
-              ;; определение блока, оригиналы стираем, вставляем ровно один INSERT.
               (pu-begin "CUTLINE:wrap:block")
               (setq blkCmdResult
-                    (vl-catch-all-apply
-                      '(lambda ( / acad doc blocks blkDef arr i e)
-                         (setq acad (vlax-get-acad-object)
-                               doc  (vla-get-ActiveDocument acad)
-                               blocks (vla-get-Blocks doc))
-                         (setq blkDef (vla-Add blocks
-                                              (vlax-3d-point (list (car insPt) (cadr insPt) 0.0))
-                                              blockName))
-                         (setq arr (vlax-make-safearray vlax-vbObject
-                                     (cons 0 (1- (sslength ssNew))))
-                               i 0)
-                         (repeat (sslength ssNew)
-                           (vlax-safearray-put-element arr i (vlax-ename->vla-object (ssname ssNew i)))
-                           (setq i (1+ i)))
-                         (vla-CopyObjects doc arr blkDef)
-                         ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
-                         (setq i 0)
-                         (repeat (sslength ssNew)
-                           (setq e (ssname ssNew i))
-                           (if (entget e) (entdel e))
-                           (setq i (1+ i)))
-                         ;; ровно один INSERT в точку вставки раскладки
-                         (n1-block-insert blockName insPt)
-                         T)))
+                    (vl-catch-all-apply 'vl-cmdf
+                      (list "_.-BLOCK" blockName insPt ssNew "")))
               (pu-end "CUTLINE:wrap:block")
+              (setvar "CMDECHO" oldEcho)
               (cond
                 ((vl-catch-all-error-p blkCmdResult)
                  (princ (strcat "\nОшибка при создании блока: "
@@ -2193,16 +2173,37 @@
                  (princ "\nНе удалось создать блок."))
                 (T
                  (progn
-                   (tu-diag "BLOCK" (strcat "блок вставлен: " blockName))
-                   ;; Контроль (Шаг 4): должен остаться ровно один новый INSERT
-                   (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-                   (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
-                   (princ (strcat "\nСоздан блок с раскладкой: " blockName
-                                  " (ссылок до: " (itoa blkRefsBefore)
-                                  ", после: " (itoa blkRefsAfter) ")"
-                                  (if (= blkRefsAfter (1+ blkRefsBefore))
-                                    ""
-                                    " (ВНИМАНИЕ: прирост не равен 1!)"))))))
+                  (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+                  (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
+                  (cond
+                    ((= blkRefsAfter (1+ blkRefsBefore))
+                     ;; Ровно один новый INSERT — его создал сам -BLOCK (Шаг 4), второй не нужен.
+                     (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                    " (INSERT создан самим -BLOCK, ровно 1)")))
+                    ((> blkRefsAfter (1+ blkRefsBefore))
+                     (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                    "\nВНИМАНИЕ: после -BLOCK новых INSERT: " (itoa (- blkRefsAfter blkRefsBefore))
+                                    " (ожидался 1) — повторная вставка отменена.")))
+                    (T
+(progn
+                      ;; INSERT не создан: стираем оригиналы, пережившие -BLOCK
+                      ;; (режим «оставить»), и вставляем ровно один INSERT.
+                      (setq blkIdx 0)
+                      (repeat (sslength ssNew)
+                        (setq ent (ssname ssNew blkIdx))
+                        (if (entget ent) (entdel ent))
+                        (setq blkIdx (1+ blkIdx)))
+                      (n1-block-insert blockName insPt)
+                      (tu-diag "BLOCK" (strcat "блок вставлен: " blockName))
+                      ;; Контроль (Шаг 4): должен остаться ровно один новый INSERT
+                      (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+                      (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
+                      (princ (strcat "\nСоздан блок с раскладкой: " blockName
+                                     " (ссылок до: " (itoa blkRefsBefore)
+                                     ", после: " (itoa blkRefsAfter) ")"
+                                     (if (= blkRefsAfter (1+ blkRefsBefore))
+                                       ""
+                                       " (ВНИМАНИЕ: прирост не равен 1!)")))))))))
             )
             (princ "\nНет объектов для создания блока.")
           )
@@ -2249,5 +2250,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 9: U2-примитивы, П1-профилировка, П2 wrap на ActiveX (CopyObjects)). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 10: U2-примитивы, П1-профилировка, П2 wrap на -BLOCK (CopyObjects отклонён замером: 4141 против 453). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
