@@ -803,23 +803,36 @@
       ent)
     nil))
 
+;; П2.4а: кэш имён текстовых стилей - tblsearch убран из горячего цикла
+;; отрисовки (~260+ вызовов на прогон). Кэш инвалидируется в cutsheet-main
+;; перед отрисовкой карты (после cs-ensure-*-style), поэтому резолв всегда
+;; идёт по актуальному состоянию таблицы стилей текущего прогона.
+(if (null (boundp '*cs-style-cache*)) (setq *cs-style-cache* nil))
+(defun cs-text-style (preferred / a s)
+  (setq a (assoc preferred *cs-style-cache*))
+  (if a
+    (cdr a)
+    (progn
+      (setq s (if (tblsearch "STYLE" preferred) preferred (getvar "TEXTSTYLE")))
+      (setq *cs-style-cache* (cons (cons preferred s) *cs-style-cache*))
+      s)))
+
 (defun cs-draw-text (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Раскрой Italic"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-bold (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Основной стиль (надписи без наклона)")
-                "Основной стиль (надписи без наклона)" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Основной стиль (надписи без наклона)"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-center (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Раскрой Italic"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
@@ -1492,6 +1505,8 @@
         (progn
           (cs-ensure-italic-style)
           (cs-ensure-bold-style)
+          ;; П2.4а: кэш стилей - резолв заново на каждый прогон карты
+          (setq *cs-style-cache* nil)
           (cs-setvar-transparency-display)
           (setq colorMap (cs-build-color-map groups))
           (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list (vlax-get-acad-object))))
@@ -1566,5 +1581,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 20: U2-примитивы, П1-профилировка, П2 bbox принято, wrap на ActiveX (CopyObjects)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 21: U2-примитивы, П1-профилировка, П2 bbox+wrap, кэш текстовых стилей (П2.4а)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
