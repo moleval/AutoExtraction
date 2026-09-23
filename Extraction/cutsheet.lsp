@@ -1296,11 +1296,15 @@
       ;; Число INSERT имени blockName ДО -BLOCK (защита от двойного INSERT, Шаг 4):
       ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить], ENTER
       ;; выбирает «Преобразовать» и вхождение создается самим -BLOCK.
+      (pu-begin "CUTSHEET:wrap:ssget")
       (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+      (pu-end "CUTSHEET:wrap:ssget")
       (setq oldRefs (if r (sslength r) 0))
       
       ;; Создаем блок (текстовый -BLOCK; опции Преобразовать/Удалить есть не во всех версиях)
+      (pu-begin "CUTSHEET:wrap:block")
       (setq result (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss "")))
+      (pu-end "CUTSHEET:wrap:block")
       (cond
         ((vl-catch-all-error-p result)
          (princ (strcat "\n[wrap] Ошибка: " (vl-catch-all-error-message result)))
@@ -1309,6 +1313,7 @@
          (princ "\n[wrap] Блок не создан")
          (setq ok nil))
         (T
+         (pu-begin "CUTSHEET:wrap:insert")
          (setq ok T)
          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
          (setq refs (if r (sslength r) 0))
@@ -1348,6 +1353,7 @@
              (princ (strcat "\n[wrap] Проверка: ссылок до -BLOCK: " (itoa oldRefs)
                             ", после вставки: " (itoa finalRefs)
                             (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)"))))))))
+      (pu-end "CUTSHEET:wrap:insert")
       (setvar "FILEDIA" oldFiledia)
       (setvar "CMDDIA" oldCmddia)
       (setvar "OSMODE" oldOsmode)
@@ -1578,5 +1584,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 18: U2-примитивы, П1-профилировка, П2 bbox без vla-update (A/B)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 19: U2-примитивы, П1-профилировка, П2 bbox A/B, wrap под-метки). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
