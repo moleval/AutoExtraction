@@ -232,11 +232,14 @@
 ;; Оборачиваем ТОЛЬКО внешние вызовы AutoCAD/ActiveX (не кадую строку).
 ;; Точки миграции: docs/v9-activex-migration.md
 ;; ============================================================
-(defun ex-safe-call (fn . args / r)
-  (setq r (vl-catch-all-apply fn args))
-  (if (vl-catch-all-error-p r)
-    (list 'ERROR (vl-catch-all-error-message r))
-    (list 'OK r)))
+(defun ex-safe-call (fn . args)
+  ;; Локаль через lambda: dotted-rest (fn . args) в AutoLISP нельзя
+  ;; совмещать с разделителем "/" (ошибка читателя «лишние cdrs»).
+  ((lambda (r)
+     (if (vl-catch-all-error-p r)
+       (list 'ERROR (vl-catch-all-error-message r))
+       (list 'OK r)))
+   (vl-catch-all-apply fn args)))
 
 (defun ex-safe-ok-p (cell)     (eq (car cell) 'OK))
 (defun ex-safe-value (cell)    (cadr cell))
