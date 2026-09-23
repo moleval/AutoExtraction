@@ -1206,7 +1206,7 @@
 ;; Раскладка хлыстов
 ;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
-    barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util
+    barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util pgi pgn
     curx p str col labelX labelY1 labelY2 centerY
     waste-txt-h waste-center-y waste-x)
 
@@ -1224,7 +1224,11 @@
   ;; ============================================================
 
   (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
+  ;; П3 (п.20): прогресс в статусной строке
+  (setq pgi 0 pgn (length bars))
   (foreach bar bars
+    (setq pgi (1+ pgi))
+    (grtext -1 (strcat "CUTLINE: отрисовка хлыста " (itoa pgi) " из " (itoa pgn)))
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)) miny y0)
@@ -2147,6 +2151,7 @@
             (ssadd ent ssNew)
             (setq ent (entnext ent)))
 
+          (princ "\nCUTLINE: упаковка раскладки в блок...")
           (pu-begin "CUTLINE:wrap-block")
           (if (> (sslength ssNew) 0)
             (progn
@@ -2241,6 +2246,7 @@
   ;; V13: «всё или ничего» - падение/отмена в середине откатывает всю раскладку
   (setq uDoc (tu-undo-begin))
   (setq r (vl-catch-all-apply 'cutline-main (list 'ASK)))
+  (grtext -1 "") ;; П3: очистить прогресс (и при откате по ESC тоже)
   (if (vl-catch-all-error-p r)
     (progn
       (tu-undo-cancel uDoc)
@@ -2250,5 +2256,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 10: U2-примитивы, П1-профилировка, П2 wrap на -BLOCK (CopyObjects отклонён замером: 4141 против 453). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 11: U2-примитивы, П1-профилировка, П2, П3-прогресс/ESC (grtext)). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

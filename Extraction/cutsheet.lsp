@@ -663,12 +663,14 @@
     0.0))
 
 (defun cs-nest (parts sheetW sheetH kerf rotateFlag / result1 result2 result3 bestResult bestSheets bestUtil sheets util)
+  (grtext -1 "CUTSHEET: раскладка, эвристика 1/3 (площадь)...")
   (pu-begin "CUTSHEET:pack:area")
   (setq result1 (cs-pack-rects (cs-sort-by-area parts) sheetW sheetH kerf rotateFlag))
   (pu-end "CUTSHEET:pack:area")
   (setq sheets (car result1) util (cs-calc-utilization sheets sheetW sheetH))
   (setq bestResult result1 bestSheets (length sheets) bestUtil util)
   
+  (grtext -1 "CUTSHEET: раскладка, эвристика 2/3 (макс. сторона)...")
   (pu-begin "CUTSHEET:pack:max-side")
   (setq result2 (cs-pack-rects (cs-sort-by-max-side parts) sheetW sheetH kerf rotateFlag))
   (pu-end "CUTSHEET:pack:max-side")
@@ -676,6 +678,7 @@
   (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result2 bestSheets (length sheets) bestUtil util))
   
+  (grtext -1 "CUTSHEET: раскладка, эвристика 3/3 (мин. сторона)...")
   (pu-begin "CUTSHEET:pack:min-side")
   (setq result3 (cs-pack-rects (cs-sort-by-min-side parts) sheetW sheetH kerf rotateFlag))
   (pu-end "CUTSHEET:pack:min-side")
@@ -683,6 +686,7 @@
   (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result3 bestSheets (length sheets) bestUtil util))
   
+  (grtext -1 "CUTSHEET: оптимизация последнего листа...")
   (setq bestResult (list (cs-optimize-last-sheet (car bestResult) sheetW sheetH kerf rotateFlag) (cadr bestResult)))
   bestResult)
 
@@ -1024,11 +1028,15 @@
         ((= (type v) 'LIST) v)
         (T nil)))
 
-(defun cs-entities-bbox (ss / i e o mn mx x1 y1 x2 y2)
+(defun cs-entities-bbox (ss / i e o mn mx x1 y1 x2 y2 pgi pgn)
   (setq x1 nil)
+  (setq pgi 0 pgn (sslength ss))
   (setq i 0)
   (repeat (sslength ss)
     (setq e (ssname ss i))
+    (setq pgi (1+ pgi))
+    (if (= 0 (rem pgi 50))
+      (grtext -1 (strcat "CUTSHEET: bbox " (itoa pgi) " из " (itoa pgn))))
     (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
     (if (and (not (vl-catch-all-error-p o)) o)
       (progn
@@ -1073,9 +1081,13 @@
                  (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
   (list (list x1 y1) (list x2 y2)))
 
-(defun cs-draw-layout (sheets sheetW sheetH insPt colorMap / n sh col row x y p)
+(defun cs-draw-layout (sheets sheetW sheetH insPt colorMap / n sh col row x y p pgi pgn)
+  ;; П3 (п.20): прогресс в статусной строке (grtext -1 не скроллит командную строку)
   (setq n 0)
+  (setq pgi 0 pgn (length sheets))
   (foreach sh sheets
+    (setq pgi (1+ pgi))
+    (grtext -1 (strcat "CUTSHEET: отрисовка листа " (itoa pgi) " из " (itoa pgn)))
     (setq n (1+ n) col (rem (1- n) *CUTSHEET-GRID-COLS*)
           row (fix (/ (1- n) *CUTSHEET-GRID-COLS*))
           x (+ (car insPt) (* col (+ sheetW *CUTSHEET-SHEET-GAP*)))
@@ -1552,7 +1564,8 @@
           
           (if (> (sslength ssNew) 0)
             (progn
-              (pu-begin "CUTSHEET:wrap-block")
+              (princ "\nCUTSHEET: упаковка карты в блок...")
+          (pu-begin "CUTSHEET:wrap-block")
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
               ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
@@ -1572,6 +1585,7 @@
   ;; V13: «всё или ничего» - падение/отмена в середине откатывает всю карту
   (setq uDoc (tu-undo-begin))
   (setq r (vl-catch-all-apply 'cutsheet-main (list 'ASK)))
+  (grtext -1 "") ;; П3: очистить прогресс (и при откате по ESC тоже)
   (if (vl-catch-all-error-p r)
     (progn
       (tu-undo-cancel uDoc)
@@ -1581,5 +1595,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 21: U2-примитивы, П1-профилировка, П2 bbox+wrap, кэш текстовых стилей (П2.4а)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 22: U2-примитивы, П1-профилировка, П2, П3-прогресс/ESC (grtext)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
