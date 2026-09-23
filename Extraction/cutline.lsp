@@ -98,6 +98,9 @@
 ;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
 (setq *n1-max-parts* 5000)
 
+;; Этап 2 (V6): страж итераций FFD - верхняя граница числа попыток размещения.
+(setq *n1-max-placement-attempts* 1000000)
+
 (defun n1-split-string (str delim / pos result item)
   (setq result '())
   (while (setq pos (vl-string-search delim str))
@@ -520,32 +523,51 @@
 ;; ============================================================
 ;; Алгоритм раскроя FFD
 ;; ============================================================
-(defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip)
+(defun n1-ffd (sorted-pieces stock kerf / bars p placed j bar newbar skip attempts stopGuard)
+  ;; V6: страж итераций - считает попытки размещения; при превышении лимита
+  ;; остаток деталей уходит в пропущенные (честный частичный результат).
   (setq bars '())
   (setq skip 0)
+  (setq attempts 0)
+  (setq stopGuard nil)
   (foreach p sorted-pieces
-    (if (> p stock)
-      (setq skip (1+ skip))
-      (progn
+    (cond
+      (stopGuard
+       (setq skip (1+ skip)))
+      ((> p stock)
+       (setq skip (1+ skip)))
+      (T
         (setq placed nil j 0)
-        (while (and (not placed) (< j (length bars)))
+        (while (and (not placed) (< j (length bars)) (not stopGuard))
           (setq bar (nth j bars))
-          (if (>= (car bar) (+ kerf p))
-            (progn
-              (setq newbar (cons (- (car bar) kerf p)
-                                 (append (cdr bar) (list p))))
-              (setq bars (n1-replace-nth bars j newbar))
-              (setq placed T)
+          (setq attempts (1+ attempts))
+          (if (>= attempts *n1-max-placement-attempts*)
+            (setq stopGuard T)
+            (if (>= (car bar) (+ kerf p))
+              (progn
+                (setq newbar (cons (- (car bar) kerf p)
+                                   (append (cdr bar) (list p))))
+                (setq bars (n1-replace-nth bars j newbar))
+                (setq placed T)
+              )
             )
           )
           (setq j (1+ j))
         )
         (if (not placed)
-          (setq bars (append bars (list (list (- stock p) p))))
+          (if stopGuard
+            (setq skip (1+ skip))
+            (setq bars (append bars (list (list (- stock p) p))))
+          )
         )
       )
     )
   )
+  (if stopGuard
+    (princ (strcat "\n[CUTLINE][GUARD] Алгоритм остановлен ограничителем попыток ("
+                    (itoa *n1-max-placement-attempts*) "). Размещено: "
+                    (itoa (- (length sorted-pieces) skip)) "/"
+                    (itoa (length sorted-pieces)))))
   (if (> skip 0)
     (princ (strcat "\nВНИМАНИЕ: в FFD пропущено деталей длиннее хлыста: " (itoa skip)))
   )

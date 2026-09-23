@@ -62,6 +62,10 @@
 ;; при ошибочной выборке (x100 объектов). »менованный, измен€емый.
 (setq *cs-max-parts* 5000)
 
+;; Ётап 2 (V6): страж итераций MaxRects - верхн€€ граница числа попыток
+;; размещени€ (проверок кандидат-пр€моугольников). »менованный, измен€емый.
+(setq *cs-max-placement-attempts* 1000000)
+
 ;; —осто€ние диалога
 (if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
 (if (not (boundp '*cs-tmp-sheet-w*))   (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
@@ -571,18 +575,29 @@
     (setq out (cons (list 0 (nth 1 p) (nth 2 p) (nth 3 p) (nth 4 p)) out)))
   (reverse out))
 
-(defun cs-pack-rects (parts sheetW sheetH kerf rotateFlag / sheets oversized freeRects part pw ph bestScore bestX bestY bestW bestH bestRot bestSheetIdx found fr fx fy fw fh score sheetIdx sheet)
-  (setq sheets '() oversized '())
+(defun cs-pack-rects (parts sheetW sheetH kerf rotateFlag / sheets oversized freeRects part pw ph bestScore bestX bestY bestW bestH bestRot bestSheetIdx found fr fx fy fw fh score sheetIdx sheet attempts stopGuard)
+  ;; V6: страж итераций - считает попытки размещени€; при превышении лимита
+  ;; остаток деталей уходит в неразмещенные (честный частичный результат).
+  (setq sheets '() oversized '() attempts 0 stopGuard nil)
   (setq sheets (list (list (list (list 0.0 0.0 sheetW sheetH)) '() 0.0 0.0)))
   
   (foreach part parts
+    (if stopGuard
+      (setq oversized (cons part oversized))
+      (progn
     (setq pw (nth 4 part) ph (nth 5 part))
     (setq bestScore 1e15 bestX nil bestY nil bestW nil bestH nil bestRot 0 bestSheetIdx nil found nil)
     (setq sheetIdx 0)
-    
+
     (foreach sheet sheets
       (setq freeRects (car sheet))
       (foreach fr freeRects
+        (if (not stopGuard)
+          (progn
+            (setq attempts (1+ attempts))
+            (if (>= attempts *cs-max-placement-attempts*)
+              (setq stopGuard T)
+              (progn
         (setq fx (nth 0 fr) fy (nth 1 fr) fw (nth 2 fr) fh (nth 3 fr))
         (if (and (<= pw fw) (<= ph fh))
           (progn
@@ -593,10 +608,10 @@
           (progn
             (setq score (cs-score-rect ph pw fx fy fw fh (cs-get-used-parts sheet) sheetIdx sheetW sheetH))
             (if (< score bestScore)
-              (setq bestScore score bestX fx bestY fy bestW ph bestH pw bestRot 1 bestSheetIdx sheetIdx found T)))))
+              (setq bestScore score bestX fx bestY fy bestW ph bestH pw bestRot 1 bestSheetIdx sheetIdx found T)))))))))
       (setq sheetIdx (1+ sheetIdx)))
-    
-    (if (not found)
+
+    (if (and (not found) (not stopGuard))
       (progn
         (setq sheets (append sheets (list (list (list (list 0.0 0.0 sheetW sheetH)) '() 0.0 0.0))))
         (setq sheetIdx (1- (length sheets)))
@@ -623,8 +638,12 @@
                       (+ (nth 2 sheet) (* bestW bestH (/ 1.0 1000000.0)))
                       (+ (nth 3 sheet) (nth 6 part))))
         (setq sheets (subst sheet (nth bestSheetIdx sheets) sheets)))
-      (setq oversized (cons part oversized))))
-  
+      (setq oversized (cons part oversized))))))
+  (if stopGuard
+    (princ (strcat "\n[CUTSHEET][GUARD] јлгоритм остановлен ограничителем попыток ("
+                    (itoa *cs-max-placement-attempts*) "). –азмещено: "
+                    (itoa (- (length parts) (length oversized))) "/"
+                    (itoa (length parts)))))
   (list sheets (reverse oversized)))
 
 (defun cs-sort-by-area (records)
