@@ -185,16 +185,15 @@
 ;; tu-undo-begin  — открыть уровень (возвращает doc или nil).
 ;; tu-undo-end    — закрыть уровень; на нулевой глубине ставит
 ;;   реальный EndUndoMark.
-;; tu-undo-cancel — закрыть ВСЕ уровни и откатить созданное группой:
-;;   детерминированный откат по метке entlast (все объекты, появившиеся
-;;   после внешнего begin, удаляются через entdel). Команда UNDO НЕ
-;;   используется (в тестах UNDO _1 обломки не убирал); vla-Undo не
-;;   существует. Вызывать только из обычного кода, не из *error*.
+;; tu-undo-cancel — закрыть ВСЕ уровни и откатить командой UNDO.
+;;   ВНИМАНИЕ: метода vla-Undo в ActiveX Document НЕТ; cancel
+;;   запускает команду UNDO, поэтому НЕ вызывать из *error* —
+;;   только из обычного кода (см. V13). В обработчиках — tu-undo-end.
 ;; ============================================================
 (if (null (boundp '*tu-undo-depth*)) (setq *tu-undo-depth* 0))
-;; Метка последнего объекта БД на момент внешнего begin: откат = entdel
-;; всех объектов, созданных ПОСЛЕ неё (объекты пользователя не задеваются).
-(if (null (boundp '*tu-undo-entlast*)) (setq *tu-undo-entlast* nil))
+;; Счётчик модификаций БД на момент открытия внешней группы (предохранитель
+;; tu-undo-cancel: ESC на промпте = группа пуста, UNDO НЕ выполнять).
+(if (null (boundp '*tu-undo-dbmod*)) (setq *tu-undo-dbmod* 0))
 
 (defun tu-undo-begin ( / doc)
   (setq doc (vl-catch-all-apply
@@ -203,7 +202,7 @@
     (progn
       (if (= *tu-undo-depth* 0)
         (progn
-          (setq *tu-undo-entlast* (entlast))
+          (setq *tu-undo-dbmod* (getvar "DBMOD"))
           (vl-catch-all-apply 'vla-StartUndoMark (list doc))))
       (setq *tu-undo-depth* (1+ *tu-undo-depth*))
       doc)))
@@ -216,24 +215,15 @@
         (vl-catch-all-apply 'vla-EndUndoMark (list doc)))))
   nil)
 
-(defun tu-undo-rollback-new ( / e nxt cnt)
-  ;; Удалить все объекты модели, созданные после метки *tu-undo-entlast*.
-  ;; Возвращает число удалённых. Метку и более старые объекты не трогает.
-  (setq e *tu-undo-entlast* cnt 0)
-  (while (setq nxt (entnext e))
-    (entdel nxt)
-    (setq cnt (1+ cnt) e nxt))
-  cnt)
-
 (defun tu-undo-cancel (doc)
+  ;; Откат ТОЛЬКО если в группе реально были изменения БД (DBMOD сдвинулся),
+  ;; иначе UNDO _1 зацепил бы постороннюю правку пользователя.
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
       (setq *tu-undo-depth* 0)
       (vl-catch-all-apply 'vla-EndUndoMark (list doc))
-      (if (> (tu-undo-rollback-new) 0)
-        (princ "\n[rollback] Удалено объектов недоделанной операции: "
-               nil)
-      )))
+      (if (/= (getvar "DBMOD") *tu-undo-dbmod*)
+        (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1")))))
   nil)
 
 ;; ============================================================
