@@ -1181,7 +1181,8 @@
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
                       blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc
-                       csDbgMin csDbgWho csDbgTxt csDbgI csDbgEnt csDbgObj csDbgMn csDbgMx)
+                       csDbgMin csDbgWho csDbgTxt csDbgI csDbgEnt csDbgObj csDbgMn csDbgMx
+                       csDbgTextMin csDbgTextVal csDbgTextBaseY)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1341,6 +1342,11 @@
                           " Y-низ " (rtos (cadr (car bbox3)) 2 1)
                           " X-лево " (rtos (car (car bbox3)) 2 1)
                           " X-право " (rtos (car (cadr bbox3)) 2 1)))
+          ;; ДИАГНОСТИКА (этап отладки рамки): мировые Y ориентиров карты
+          (princ (strcat "\n[CUTSHEET] Ориентиры: insPt=низ листа1 Y=" (rtos (cadr insPt) 2 1)
+                          " | верх листа1 Y=" (rtos (+ (cadr insPt) sheetH) 2 1)
+                          " | текст 0 листа1 Y=" (rtos (- (cadr insPt) (* *CUTSHEET-SHEET-HEADER* 0.35)) 2 1)
+                          " | ЛИСТ 1 Y=" (rtos (+ (cadr insPt) sheetH (* *CUTSHEET-SHEET-HEADER* 0.5)) 2 1)))
           (setq bbox (cs-combine-bbox bbox bbox3))
           
           ;; Пересобрать набор с учетом рамки для обертки в блок
@@ -1351,6 +1357,9 @@
           (setq csDbgMin nil)
           (setq csDbgWho "")
           (setq csDbgTxt "")
+          (setq csDbgTextMin nil)
+          (setq csDbgTextVal "")
+          (setq csDbgTextBaseY nil)
           (setq csDbgI 0)
           (while (< csDbgI (sslength ssNew))
             (setq csDbgEnt (ssname ssNew csDbgI))
@@ -1363,6 +1372,13 @@
                 (vl-catch-all-apply (quote vla-GetBoundingBox) (list csDbgObj (quote csDbgMn) (quote csDbgMx)))
                 (setq csDbgMn (cs-point-array->list csDbgMn))
                 (if csDbgMn
+                  (if (= (cdr (assoc 0 (entget csDbgEnt))) "TEXT")
+                    (if (or (null csDbgTextMin) (< (cadr csDbgMn) csDbgTextMin))
+                      (progn
+                        (setq csDbgTextMin (cadr csDbgMn))
+                        (setq csDbgTextVal (substr (cdr (assoc 1 (entget csDbgEnt))) 1 24))
+                        (setq csDbgTextBaseY (cadr (assoc 10 (entget csDbgEnt))))))))
+                (if csDbgMn
                   (if (or (null csDbgMin) (< (cadr csDbgMn) csDbgMin))
                     (progn
                       (setq csDbgMin (cadr csDbgMn))
@@ -1373,6 +1389,9 @@
             (setq csDbgI (1+ csDbgI)))
           (princ (strcat "\n[CUTSHEET] Самый низкий примитив: " csDbgWho " " csDbgTxt
                           " | его низ Y=" (if csDbgMin (rtos csDbgMin 2 1) "-")))
+          (princ (strcat "\n[CUTSHEET] Самый низкий TEXT: " csDbgTextVal
+                          " | baseline Y=" (if csDbgTextBaseY (rtos csDbgTextBaseY 2 1) "-")
+                          " | bbox-низ Y=" (if csDbgTextMin (rtos csDbgTextMin 2 1) "-")))
           
           (if (> (sslength ssNew) 0)
             (progn
@@ -1392,5 +1411,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 5: update bbox, диагностика рамки). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 6: диагностика рамки, ориентиры). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
