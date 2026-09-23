@@ -671,16 +671,16 @@
            (progn
              ;; Вставляем блок из временного файла через vla-InsertBlock
              (setq newBlockObj
-               (vl-catch-all-apply 'vla-InsertBlock
-                 (list ms
-                       (vlax-3d-point insPt)
-                       tempFile
-                       1.0 1.0 1.0 0.0)))
+               (ex-safe-call 'vla-InsertBlock
+                 ms
+                 (vlax-3d-point insPt)
+                 tempFile
+                 1.0 1.0 1.0 0.0))
 
              ;; Переименовываем вставленный блок в нужное имя
-             (if (and (not (vl-catch-all-error-p newBlockObj))
-                      newBlockObj)
+             (if (ex-safe-ok-p newBlockObj)
                (progn
+                 (setq newBlockObj (ex-safe-value newBlockObj))
                  ;; Получаем имя вставленного блока
                  (setq insertedName (vla-get-EffectiveName newBlockObj))
 

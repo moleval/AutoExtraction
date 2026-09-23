@@ -1244,10 +1244,10 @@
                    doc (vla-get-ActiveDocument acad)
                    ms (vla-get-ModelSpace doc)
                    insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-             (setq ins-result (vl-catch-all-apply 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
-             (if (vl-catch-all-error-p ins-result)
-               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (vl-catch-all-error-message ins-result)))
-               (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2))))
+             (setq ins-result (ex-safe-call 'vla-InsertBlock ms insertPt3 blockName 1.0 1.0 1.0 0.0))
+             (if (ex-safe-ok-p ins-result)
+               (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
              ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
              (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
              (setq finalRefs (if r (sslength r) 0))
@@ -1460,5 +1460,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 12: guard сиспеременных V8). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 13: safe-call V9). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

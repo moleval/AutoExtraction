@@ -218,3 +218,19 @@
       (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1"))))
   nil)
 
+;; ============================================================
+;; Этап 3 (V9): единый контракт вызова ActiveX/AutoCAD API.
+;; ex-safe-call: возвращает (OK значение) | (ERROR "текст").
+;; Оборачиваем ТОЛЬКО внешние вызовы AutoCAD/ActiveX (не кадую строку).
+;; Точки миграции: docs/v9-activex-migration.md
+;; ============================================================
+(defun ex-safe-call (fn . args / r)
+  (setq r (vl-catch-all-apply fn args))
+  (if (vl-catch-all-error-p r)
+    (list 'ERROR (vl-catch-all-error-message r))
+    (list 'OK r)))
+
+(defun ex-safe-ok-p (cell)     (eq (car cell) 'OK))
+(defun ex-safe-value (cell)    (cadr cell))
+(defun ex-safe-message (cell)  (cadr cell))
+
