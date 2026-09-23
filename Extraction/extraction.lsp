@@ -1490,7 +1490,9 @@
 
                  (extraction-handle-module-result r "CUTLINE")
                  (if (vl-catch-all-error-p r)
-                   (tu-undo-cancel uDoc)
+                   (progn
+                     (tu-undo-cancel uDoc)
+                     (princ "\n[EX][GUARD] ѕрервано посреди создани€. ≈сли недоделанное уже было в чертеже - оно откачено автоматически."))
                    (tu-undo-end uDoc))
                 )
 
@@ -1503,7 +1505,9 @@
 
                  (extraction-handle-module-result r "CUTSHEET")
                  (if (vl-catch-all-error-p r)
-                   (tu-undo-cancel uDoc)
+                   (progn
+                     (tu-undo-cancel uDoc)
+                     (princ "\n[EX][GUARD] ѕрервано посреди создани€. ≈сли недоделанное уже было в чертеже - оно откачено автоматически."))
                    (tu-undo-end uDoc))
                 )
               )
