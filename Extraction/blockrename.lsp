@@ -726,7 +726,14 @@
 ;; АВТОНОМНАЯ КОМАНДА КОПИРОВАНИЯ БЛОКА
 ;; ============================================================
 
-(defun c:blockcopy ( / name)
+(defun c:blockcopy ( / *error* svSaved name)
+  ;; V8: guard сиспеременных - обрыв копирования вернёт CMDECHO/FILEDIA/EXPERT
+  (defun *error* (msg)
+    (tu-sysvar-restore svSaved)
+    (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+      (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
+    (princ))
+  (setq svSaved (tu-sysvar-save '("CMDECHO" "FILEDIA" "EXPERT")))
   (princ "\n--- Копирование блока ---")
   (setq name (getstring T "\nИмя блока для копирования: "))
   (cond
@@ -847,7 +854,14 @@
 ;; АВТОНОМНАЯ КОМАНДА
 ;; ============================================================
 
-(defun c:blockrename ( / old-name new-name success)
+(defun c:blockrename ( / *error* svSaved old-name new-name success)
+  ;; V8: guard сиспеременных - обрыв переименования вернёт CMDECHO/FILEDIA/EXPERT
+  (defun *error* (msg)
+    (tu-sysvar-restore svSaved)
+    (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+      (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
+    (princ))
+  (setq svSaved (tu-sysvar-save '("CMDECHO" "FILEDIA" "EXPERT")))
   (princ "\n--- Переименование определения блока ---")
 
   (setq old-name

@@ -1262,6 +1262,7 @@
 
 ;; ================= ГЛАВНАЯ ФУНКЦИЯ =================
 (defun cutsheet-main (layers-from-caller / *error* ss polyCnt dynCnt dynTypes
+                      svSaved
                       defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad
                       r choice sheetW sheetH kerf rotateFlag exportXls exportAcad dynType
                       records groups parts nested sheets oversized fitSrc impossible
@@ -1274,10 +1275,7 @@
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTSHEET ERROR] " msg)))
     (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
-    (if oldEcho (setvar "CMDECHO" oldEcho))
-    (if oldOsmode (setvar "OSMODE" oldOsmode))
-    (if oldCmddia (setvar "CMDDIA" oldCmddia))
-    (if oldFiledia (setvar "FILEDIA" oldFiledia))
+    (tu-sysvar-restore svSaved)
     (setq *cs-tmp-choice* 'ALL *cs-tmp-dyn-type* "")
     (princ))
   
@@ -1285,6 +1283,8 @@
         oldCmddia (getvar "CMDDIA")
         oldFiledia (getvar "FILEDIA")
         oldEcho (getvar "CMDECHO"))
+  ;; V8: guard - любой обрыв вернёт исходные значения через *error*
+  (setq svSaved (tu-sysvar-save '("CMDECHO" "OSMODE" "CMDDIA" "FILEDIA")))
   
   (princ "\n=== РАСКРОЙ ЛИСТА ===")
   
@@ -1460,5 +1460,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 11: строка Пропил в сводке). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 12: guard сиспеременных V8). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

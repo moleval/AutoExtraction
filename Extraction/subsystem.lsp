@@ -757,7 +757,7 @@
 
 (defun subsystem-main
        (layers report-mode export-excel export-txt create-table save-base
-        / *error*
+        / *error* svSaved
           inserts data
           csvfile xlsfile base-name
           total-count total-length
@@ -781,8 +781,12 @@
       )
       (princ (strcat "\nОшибка: " msg))
     )
+    (tu-sysvar-restore svSaved)
     (princ)
   )
+
+  ;; V8: guard - обрыв вернёт CMDECHO
+  (setq svSaved (tu-sysvar-save '("CMDECHO")))
 
   (setq inserts (su-select-inserts layers))
 

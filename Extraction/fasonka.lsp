@@ -211,7 +211,7 @@
 ;; ќ—Ќќ¬Ќјя ‘”Ќ ÷»я
 ;; ------------------------------------------------------------
 (defun fasonka-main (layers report-mode export-excel export-txt create-table save-base
-                     / *error*
+                     / *error* svSaved
                      csvfile
                      val name len acc rec found
                      inserts i ent obj effname dynprops prop
@@ -230,8 +230,12 @@
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\nќшибка: " msg))
     )
+    (tu-sysvar-restore svSaved)
     (princ)
   )
+
+  ;; V8: guard - обрыв вернЄт CMDECHO
+  (setq svSaved (tu-sysvar-save '("CMDECHO")))
 
   ;; ============================================================
   ;; ќчистка имени блока от префикса

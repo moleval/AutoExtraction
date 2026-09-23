@@ -1883,14 +1883,17 @@
                        default-xls default-acad
                        default-stock default-kerf
                        dialog-result r xls-ok
-                       old-transparency-display)
+                       old-transparency-display svSaved)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
     (if (and uMark doc) (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
-    (if oldEcho (setvar "CMDECHO" oldEcho))
+    (tu-sysvar-restore svSaved)
     (princ))
   
+
+  ;; V8: guard - любой обрыв вернёт исходные значения через *error*
+  (setq svSaved (tu-sysvar-save (list "CMDECHO")))
 
   (princ "\n=== Линейный раскрой мерного материала ===")
 
@@ -2229,5 +2232,5 @@
 (defun c:cutline () (cutline-main 'ASK))
 (defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
 
-(princ "\nCUTLINE.LSP загружен (ред. 1: лимиты V5/V6). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 2: guard сиспеременных V8). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

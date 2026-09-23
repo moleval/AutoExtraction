@@ -512,7 +512,7 @@
 ;; ---------- ÎÑÍÎÂÍÀß ÔÓÍÊÖÈß ----------
 (defun zapolnenie-main (layers report-mode export-excel export-txt
                         create-table save-base
-                        / *error* inserts data summary-data
+                        / *error* svSaved inserts data summary-data
                           base-name xlsfile csvfile
                           total-count total-area skipped-total rec)
 
@@ -524,7 +524,11 @@
              (not (wcmatch (strcase msg)
                     "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\nÎøèáêà: " msg)))
+    (tu-sysvar-restore svSaved)
     (princ))
+
+  ;; V8: guard - îáğûâ âåğí¸ò CMDECHO
+  (setq svSaved (tu-sysvar-save '("CMDECHO")))
 
   (setq inserts (su-select-inserts layers))
 

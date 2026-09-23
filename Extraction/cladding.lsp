@@ -896,15 +896,19 @@
 ;; ============================================================
 (defun cladding-main (layers report-mode export-excel export-txt
                       create-table save-base do-blocks
-                      / *error* records data xls-base xlsfile csvfile
+                      / *error* svSaved records data xls-base xlsfile csvfile
                         brec bgroups bxls-base bxls bcsv)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg)
                            "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*ПРЕРВА*")))
       (princ (strcat "\nОшибка: " msg))
     )
+    (tu-sysvar-restore svSaved)
     (princ)
   )
+
+  ;; V8: guard - обрыв вернёт CMDECHO
+  (setq svSaved (tu-sysvar-save '("CMDECHO")))
 
   ;; ---------- Часть 1: полилинии ----------
   (princ "\n=== Облицовка: сбор полилиний ===")
