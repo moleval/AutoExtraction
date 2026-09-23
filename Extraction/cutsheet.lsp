@@ -53,6 +53,11 @@
 (setq *CUTSHEET-FRAME-PAD-BOTTOM* 200.0)
 (setq *CUTSHEET-MIN-TEXT-AREA* 50000.0)
 
+;; Этап 2 (V4): именованные SOFT-пределы размеров детали (мм).
+;; Аномалии не роняют модуль: объект исключается и попадает в сводку причин.
+(setq *CUTSHEET-MIN-PART-DIM* 1.0)
+(setq *CUTSHEET-MAX-PART-DIM* 100000.0)
+
 ;; Состояние диалога
 (if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
 (if (not (boundp '*cs-tmp-sheet-w*))   (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
@@ -238,25 +243,61 @@
   (if (> (sslength out) 0) out nil))
 
 ;; ================= ЗАПИСЬ ЧАСТЕЙ =================
-(defun cs-poly-record (ent id / ed layer bb wh area arc type nominal)
-  (setq ed (entget ent) layer (cdr (assoc 8 ed)) bb (cs-get-bbox ent))
-  (if (and (cs-poly-closed-p ent) bb)
+;; ================= ВАЛИДАЦИЯ ГЕОМЕТРИИ (V4) =================
+;; *cs-rejects* - assoc-счетчик причин отсева за сбор: (причина . количество).
+;; *cs-reject-reason* - причина, выставленная последней попыткой построения записи.
+
+(defun cs-reject-note (reason / cell)
+  (if (or (null reason) (= reason "")) (setq reason "причина не зафиксирована"))
+  (setq cell (assoc reason *cs-rejects*))
+  (if cell
+    (setq *cs-rejects* (subst (cons reason (1+ (cdr cell))) cell *cs-rejects*))
+    (setq *cs-rejects* (cons (cons reason 1) *cs-rejects*))))
+
+(defun cs-print-rejects ( / cell total)
+  (setq total 0)
+  (foreach cell *cs-rejects* (setq total (+ total (cdr cell))))
+  (if (> total 0)
     (progn
+      (princ (strcat "\n[CUTSHEET][VALIDATION] Исключено объектов: " (itoa total)))
+      (foreach cell (reverse *cs-rejects*)
+        (princ (strcat "\n  " (car cell) ": " (itoa (cdr cell))))))))
+
+(defun cs-poly-record (ent id / ed layer bb wh area arc type nominal)
+  ;; V4: отказ всегда с причиной в *cs-reject-reason* - объект не падает в раскрой молча.
+  (setq ed (entget ent) layer (cdr (assoc 8 ed)) bb (cs-get-bbox ent)
+        *cs-reject-reason* nil)
+  (cond
+    ((not (cs-poly-closed-p ent))
+      (setq *cs-reject-reason* "полилиния не замкнута") nil)
+    ((null bb)
+      (setq *cs-reject-reason* "нет габаритного контейнера") nil)
+    (T
       (setq wh (cs-bbox-w-h ent) area (cs-poly-area ent) arc (cs-poly-has-arcs ent))
-      (if (and wh (> (car wh) 0.0) (> (cadr wh) 0.0) (> area 0.0))
-        (progn
+      (cond
+        ((or (null wh) (not (numberp (car wh))) (not (numberp (cadr wh)))
+             (<= (car wh) 0.0) (<= (cadr wh) 0.0))
+          (setq *cs-reject-reason* "стороны <= 0 или не числовые") nil)
+        ((<= area 0.0)
+          (setq *cs-reject-reason* "площадь <= 0") nil)
+        ((or (< (car wh) *CUTSHEET-MIN-PART-DIM*) (< (cadr wh) *CUTSHEET-MIN-PART-DIM*))
+          (setq *cs-reject-reason* "стороны меньше минимума") nil)
+        ((or (> (car wh) *CUTSHEET-MAX-PART-DIM*) (> (cadr wh) *CUTSHEET-MAX-PART-DIM*))
+          (setq *cs-reject-reason* "стороны больше максимума") nil)
+        (T
           (setq type (if arc "Полилиния (дуги)" "Полилиния"))
           (setq nominal (strcat (cs-itoa-safe (car wh)) "x" (cs-itoa-safe (cadr wh))))
-          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent))
-        nil))
-    nil))
+          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent))))))
 
 (defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH area nominal source)
+  ;; V4: отказ всегда с причиной в *cs-reject-reason*.
   (setq ed (entget ent) layer (cdr (assoc 8 ed))
-        obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
-  (if (vl-catch-all-error-p obj)
-    nil
-    (progn
+        obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent))
+        *cs-reject-reason* nil)
+  (cond
+    ((vl-catch-all-error-p obj)
+      (setq *cs-reject-reason* "ActiveX объекта недоступен") nil)
+    (T
       (setq props (cs-block-all-props obj) typName (cs-get-dyn-type-name ent))
       (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
       (if (not (numberp pW)) (setq pW nil))
@@ -268,28 +309,44 @@
           (if (and wh (numberp (car wh)) (numberp (cadr wh)) (> (car wh) 0.0) (> (cadr wh) 0.0))
             (setq w (car wh) h (cadr wh) source "BoundingBox")
             (setq w nil h nil source nil))))
-      (if (and w h (numberp w) (numberp h) (> w 0.0) (> h 0.0))
-        (progn
+      (cond
+        ((or (null w) (null h))
+          (setq *cs-reject-reason* "размеры не числовые (свойства и BoundingBox)") nil)
+        ((or (<= w 0.0) (<= h 0.0))
+          (setq *cs-reject-reason* "стороны <= 0") nil)
+        ((or (< w *CUTSHEET-MIN-PART-DIM*) (< h *CUTSHEET-MIN-PART-DIM*))
+          (setq *cs-reject-reason* "стороны меньше минимума") nil)
+        ((or (> w *CUTSHEET-MAX-PART-DIM*) (> h *CUTSHEET-MAX-PART-DIM*))
+          (setq *cs-reject-reason* "стороны больше максимума") nil)
+        (T
           (setq area (/ (* w h) 1000000.0))
           (setq nominal (strcat (cs-itoa-safe w) "x" (cs-itoa-safe h)))
-          (list id "DYN" layer typName w h area nominal source ent))
-        nil))))
+          (list id "DYN" layer typName w h area nominal source ent))))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
-  (setq out '() i 0 id 0)
+  (setq out '() i 0 id 0 *cs-rejects* '())
   (if ss
     (repeat (sslength ss)
       (setq ent (ssname ss i) typ (cdr (assoc 0 (entget ent))) rec nil)
       (cond
         ((and (= typ "LWPOLYLINE") (or (eq choice 'ALL) (eq choice 'POLY)))
-         (setq id (1+ id)) (setq rec (cs-poly-record ent id)))
+         (setq id (1+ id))
+         (setq rec (cs-poly-record ent id))
+         (if (null rec) (cs-reject-note *cs-reject-reason*)))
         ((and (= typ "INSERT") (or (eq choice 'ALL) (eq choice 'DYN)))
          (cond
-           ((eq choice 'ALL) (setq id (1+ id)) (setq rec (cs-block-record ent id)))
+           ((eq choice 'ALL)
+            (setq id (1+ id))
+            (setq rec (cs-block-record ent id))
+            (if (null rec) (cs-reject-note *cs-reject-reason*)))
            ((or (null dynType) (= dynType "") (= dynType "Все типы блоков"))
-            (setq id (1+ id)) (setq rec (cs-block-record ent id)))
+            (setq id (1+ id))
+            (setq rec (cs-block-record ent id))
+            (if (null rec) (cs-reject-note *cs-reject-reason*)))
            ((= (cs-get-dyn-type-name ent) dynType)
-            (setq id (1+ id)) (setq rec (cs-block-record ent id))))))
+            (setq id (1+ id))
+            (setq rec (cs-block-record ent id))
+            (if (null rec) (cs-reject-note *cs-reject-reason*))))))
       (if rec (setq out (cons rec out)))
       (setq i (1+ i))))
   (reverse out))
@@ -1246,6 +1303,7 @@
         *CUTSHEET-LAST-XLS* exportXls *CUTSHEET-LAST-ACAD* exportAcad)
   
   (setq records (cs-collect-records ss choice dynType))
+  (cs-print-rejects)
   (if (null records)
     (progn (princ "\nПосле фильтрации не осталось деталей с определенными габаритами.")
            (princ) (exit)))
@@ -1359,5 +1417,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 8). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 9). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
