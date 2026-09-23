@@ -1448,5 +1448,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 9). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 10: лимиты V5/V6). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

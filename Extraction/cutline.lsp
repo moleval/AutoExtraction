@@ -2225,5 +2225,5 @@
 (defun c:cutline () (cutline-main 'ASK))
 (defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
 
-(princ "\nCUTLINE.LSP загружен. Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 1: лимиты V5/V6). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
