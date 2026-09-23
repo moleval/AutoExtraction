@@ -58,6 +58,10 @@
 (setq *CUTSHEET-MIN-PART-DIM* 1.0)
 (setq *CUTSHEET-MAX-PART-DIM* 100000.0)
 
+;; Этап 2 (V5): лимит количества деталей - защита от зависания
+;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
+(setq *cs-max-parts* 5000)
+
 ;; Состояние диалога
 (if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
 (if (not (boundp '*cs-tmp-sheet-w*))   (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
@@ -1304,6 +1308,14 @@
   
   (setq records (cs-collect-records ss choice dynType))
   (cs-print-rejects)
+
+  ;; Этап 2 (V5): лимит количества деталей
+  (if (> (length records) *cs-max-parts*)
+    (progn
+      (princ (strcat "\n[CUTSHEET][GUARD] Обнаружено " (itoa (length records))
+                      " деталей. Обработка остановлена. Лимит: " (itoa *cs-max-parts*)
+                      ". Проверьте выборку/слои."))
+      (princ) (exit)))
   (if (null records)
     (progn (princ "\nПосле фильтрации не осталось деталей с определенными габаритами.")
            (princ) (exit)))

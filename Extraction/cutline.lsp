@@ -94,6 +94,10 @@
 (if (not (boundp '*CUTLINE-LAST-ACAD*))  (setq *CUTLINE-LAST-ACAD*  T))
 
 ;; ---------- Утилиты ----------
+;; Этап 2 (V5): лимит количества деталей - защита от зависания
+;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
+(setq *n1-max-parts* 5000)
+
 (defun n1-split-string (str delim / pos result item)
   (setq result '())
   (while (setq pos (vl-string-search delim str))
@@ -1893,6 +1897,14 @@
 
   (setq total-input (sslength ss))
   (princ (strcat "\nВыбрано объектов: " (itoa total-input)))
+
+  ;; Этап 2 (V5): лимит количества деталей
+  (if (> total-input *n1-max-parts*)
+    (progn
+      (princ (strcat "\n[CUTLINE][GUARD] Обнаружено " (itoa total-input)
+                      " деталей. Обработка остановлена. Лимит: " (itoa *n1-max-parts*)
+                      ". Проверьте выборку/слои."))
+      (princ) (exit)))
 
   (setq type-counts (n1-count-by-type ss))
   (n1-print-type-counts type-counts)
