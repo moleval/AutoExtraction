@@ -672,10 +672,10 @@
              ;; Вставляем блок из временного файла через vla-InsertBlock
              (setq newBlockObj
                (ex-safe-call 'vla-InsertBlock
-                 ms
-                 (vlax-3d-point insPt)
-                 tempFile
-                 1.0 1.0 1.0 0.0))
+                 (list ms
+                       (vlax-3d-point insPt)
+                       tempFile
+                       1.0 1.0 1.0 0.0)))
 
              ;; Переименовываем вставленный блок в нужное имя
              (if (ex-safe-ok-p newBlockObj)

@@ -1244,7 +1244,7 @@
                    doc (vla-get-ActiveDocument acad)
                    ms (vla-get-ModelSpace doc)
                    insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-             (setq ins-result (ex-safe-call 'vla-InsertBlock ms insertPt3 blockName 1.0 1.0 1.0 0.0))
+             (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
              (if (ex-safe-ok-p ins-result)
                (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
                (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))

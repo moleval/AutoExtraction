@@ -228,18 +228,19 @@
 
 ;; ============================================================
 ;; Этап 3 (V9): единый контракт вызова ActiveX/AutoCAD API.
-;; ex-safe-call: возвращает (OK значение) | (ERROR "текст").
+;; ex-safe-call: (fn (list args...)) -> (OK значение) | (ERROR "текст").
 ;; Оборачиваем ТОЛЬКО внешние вызовы AutoCAD/ActiveX (не кадую строку).
 ;; Точки миграции: docs/v9-activex-migration.md
 ;; ============================================================
-(defun ex-safe-call (fn . args)
-  ;; Локаль через lambda: dotted-rest (fn . args) в AutoLISP нельзя
-  ;; совмещать с разделителем "/" (ошибка читателя «лишние cdrs»).
-  ((lambda (r)
-     (if (vl-catch-all-error-p r)
-       (list 'ERROR (vl-catch-all-error-message r))
-       (list 'OK r)))
-   (vl-catch-all-apply fn args)))
+(defun ex-safe-call (fn args / r)
+  ;; fn - символ ActiveX/API-функции, args - список аргументов (как в
+  ;; vl-catch-all-apply). Возвращает (OK значение) | (ERROR "текст").
+  ;; Точечная нотация dot-rest НЕ используется (читатель AutoCAD на ней
+  ;; выдавал ошибку загрузки).
+  (setq r (vl-catch-all-apply fn args))
+  (if (vl-catch-all-error-p r)
+    (list 'ERROR (vl-catch-all-error-message r))
+    (list 'OK r)))
 
 (defun ex-safe-ok-p (cell)     (eq (car cell) 'OK))
 (defun ex-safe-value (cell)    (cadr cell))
