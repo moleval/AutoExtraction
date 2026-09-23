@@ -788,8 +788,9 @@
   (foreach rec groups (setq col (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))))
     (if (> (strlen col) maxLabelLen) (setq maxLabelLen (strlen col))))
   (setq width (max *CUTSHEET-SUMMARY-W* (+ 600.0 (* maxLabelLen 40.0))))
-  (cs-draw-rect (list left (- top (* rowH (+ rows 13 (if oversized 1 0)))))
-                (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
+  ;; ВНИМАНИЕ: внутренняя рамка колонки НЕ рисуется здесь расчетной формулой -
+  ;; она строится в конце функции по фактической нижней линии текста,
+  ;; иначе секция "НЕРАЗМЕЩЕНО" (её высота меняется) оказывается зачеркнутой.
   
   (setq y (- top (* rowH 0.72)))
   (cs-draw-text-bold (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 1.45) "РАСКРОЙ ЛИСТА" *CUTSHEET-TITLE-COLOR*)
@@ -894,8 +895,10 @@
         (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
                       (itoa (nth 3 g)) *CUTSHEET-WASTE-COLOR*))))
   
-  ;; Рамка - по фактической нижней линии текста (запас 0.8 строки):
-  ;; секция неразмещенных конструктивно не может быть зачеркнута.
+  ;; Внутренняя рамка колонки и возвращаемый bbox - по фактической нижней
+  ;; линии текста (запас 0.8 строки): секция неразмещенных целиком внутри.
+  (cs-draw-rect (list left (- y (* rowH 0.8)))
+                (list (+ left width) top) *CUTSHEET-OUTLINE-COLOR*)
   (list (list left (- y (* rowH 0.8))) (list (+ left width) top)))
 
 ;; Фактический объемлющий прямоугольник всех примитивов набора.
@@ -1411,5 +1414,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 6: диагностика рамки, ориентиры). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 7: рамка колонки по факт-низу). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
