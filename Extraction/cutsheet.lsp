@@ -1527,7 +1527,9 @@
           ;; каждого примитива), не по расчетным координатам выноски.
           ;; Рамка = объединение фактических и расчетных границ:
           ;; не может зачеркнуть ни одну отрисованную строку.
+          (pu-begin "CUTSHEET:bbox")
           (setq bboxFact (cs-entities-bbox ssNew))
+          (pu-end "CUTSHEET:bbox")
           (setq bboxCalc (cs-combine-bbox bbox1 bbox2))
           (if bboxFact
             (setq bbox (cs-combine-bbox bboxFact bboxCalc))
@@ -1544,11 +1546,13 @@
           
           (if (> (sslength ssNew) 0)
             (progn
+              (pu-begin "CUTSHEET:wrap-block")
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
               ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
               (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
-              (cs-wrap-to-block blockName blockBasePt ssNew))
+              (cs-wrap-to-block blockName blockBasePt ssNew)
+              (pu-end "CUTSHEET:wrap-block"))
   (tu-diag "BLOCK" (strcat "блок вставлен: " blockName)))
           
           (if uMark (progn (tu-undo-end doc) (setq uMark nil)))
@@ -1571,5 +1575,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 16: U2-примитивы, П1-профилировка). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 17: U2-примитивы, П1-профилировка, П2-метки bbox/wrap-block). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

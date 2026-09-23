@@ -2147,6 +2147,7 @@
             (ssadd ent ssNew)
             (setq ent (entnext ent)))
 
+          (pu-begin "CUTLINE:wrap-block")
           (if (> (sslength ssNew) 0)
             (progn
               (setq oldEcho (getvar "CMDECHO"))
@@ -2202,6 +2203,7 @@
             )
             (princ "\nНет объектов для создания блока.")
           )
+          (pu-end "CUTLINE:wrap-block")
 
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
           (setq bbox (n1-combine-bbox bbox-frame
@@ -2244,5 +2246,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 6: U2-примитивы, П1-профилировка). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 7: U2-примитивы, П1-профилировка, П2-метка wrap-block). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
