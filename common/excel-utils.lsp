@@ -1023,16 +1023,21 @@
   (write-line " </Worksheet>" f)
   T)
 
-(defun eu-column (f width)
+(defun eu-column (f width autofit)
+  ;; width: строка (как есть) или число (rtos 2 1); autofit "0"/"1"
   (write-line (strcat "   <Column ss:Index=\"" (itoa *eu-col*)
-                      "\" ss:AutoFitWidth=\"0\" ss:Width=\""
-                      (rtos (float width) 2 1) "\"/>") f)
+                      "\" ss:AutoFitWidth=\"" autofit
+                      "\" ss:Width=\"" (if (numberp width) (rtos (float width) 2 1) width)
+                      "\"/>") f)
   (setq *eu-col* (1+ *eu-col*))
   T)
 
-(defun eu-row-begin (f / )
+(defun eu-row-begin (f attrs / )
+  ;; attrs: доп. атрибуты строки строкой ("" = обычная <Row>)
   (setq *eu-col* 1)
-  (write-line "   <Row>" f)
+  (if (and attrs (/= attrs ""))
+    (write-line (strcat "   <Row " attrs ">") f)
+    (write-line "   <Row>" f))
   T)
 
 (defun eu-cell (f style type value attrs / )
