@@ -144,3 +144,16 @@
 
 (princ "\nTASK-UTILS.LSP загружен.")
 (princ)
+
+;; ============================================================
+;; Этап 2 (V11): единый диагностический протокол.
+;; Тумблер *EXTRACTION-DIAGNOSTIC*: nil (по умолчанию) - тишина;
+;; T - этапные строки [SCAN]/[FILTER]/[VALIDATION]/[PACK]/[DRAW]/[BLOCK].
+;; Включается из командной строки AutoCAD: (setq *EXTRACTION-DIAGNOSTIC* T).
+;; ============================================================
+(setq *EXTRACTION-DIAGNOSTIC* nil)
+
+(defun tu-diag (tag text)
+  (if *EXTRACTION-DIAGNOSTIC*
+    (princ (strcat "\n[" tag "] " text))))
+

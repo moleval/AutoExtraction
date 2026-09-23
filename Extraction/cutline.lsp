@@ -1927,6 +1927,7 @@
                       " деталей. Обработка остановлена. Лимит: " (itoa *n1-max-parts*)
                       ". Проверьте выборку/слои."))
       (princ) (exit)))
+  (tu-diag "SCAN" (strcat "объектов в выборке: " (itoa total-input)))
 
   (setq type-counts (n1-count-by-type ss))
   (n1-print-type-counts type-counts)
@@ -2031,6 +2032,7 @@
                                   *CUTLINE-MIN-LENGTH* *CUTLINE-MAX-LENGTH*))
   (if (null pieces)
     (progn (princ "\nНе удалось извлечь длины.") (princ) (exit)))
+  (tu-diag "FILTER" (strcat "групп длин: " (itoa (length pieces))))
 
   (setq total-cnt 0)
   (foreach rec pieces (setq total-cnt (+ total-cnt (cadr rec))))
@@ -2051,6 +2053,7 @@
 
   (setq sorted (n1-expand pieces-ok))
   (setq bars (n1-ffd sorted stock kerf))
+  (tu-diag "PACK" (strcat "хлыстов: " (itoa (length bars))))
   (n1-report bars stock kerf)
 
   (setq num-bars (length bars))
@@ -2181,6 +2184,7 @@
                         (if (entget ent) (entdel ent))
                         (setq blkIdx (1+ blkIdx)))
                       (n1-block-insert blockName insPt)
+                      (tu-diag "BLOCK" (strcat "блок вставлен: " blockName))
                       ;; Контроль (Шаг 4): должен остаться ровно один новый INSERT
                       (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
                       (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))

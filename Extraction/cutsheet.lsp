@@ -1301,6 +1301,7 @@
         dynTypes (cs-collect-dyn-types ss))
   
   (princ (strcat "\nПолилиний: " (itoa polyCnt) ", динамических блоков: " (itoa dynCnt)))
+  (tu-diag "SCAN" (strcat "объектов в выборке: " (itoa (+ polyCnt dynCnt))))
   
   (if (= (+ polyCnt dynCnt) 0)
     (progn (princ "\nПодходящих исходных объектов нет.") (princ) (exit)))
@@ -1327,6 +1328,8 @@
   
   (setq records (cs-collect-records ss choice dynType))
   (cs-print-rejects)
+  (tu-diag "FILTER" (strcat "принято деталей: " (itoa (length records))
+                             ", исключено: " (itoa (apply (quote +) (mapcar (quote cdr) *cs-rejects*)))))
 
   ;; Этап 2 (V5): лимит количества деталей
   (if (> (length records) *cs-max-parts*)
@@ -1364,6 +1367,7 @@
         sheets (car nested)
         oversized (cadr nested))
   (setq oversized (append impossible oversized))
+  (tu-diag "PACK" (strcat "листов: " (itoa (length sheets)) ", неразмещено записей: " (itoa (length oversized))))
   
   (setq totalCnt (length fitSrc)
         actualArea (cs-total-actual-area-records fitSrc)
@@ -1410,6 +1414,7 @@
           ;; Собрать созданные примитивы для фактического bbox
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
           (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          (tu-diag "DRAW" (strcat "примитивов карты: " (itoa (sslength ssNew))))
           
           ;; Этап 2: рамка - по ФАКТИЧЕСКИМ границам результата (GetBoundingBox
           ;; каждого примитива), не по расчетным координатам выноски.
@@ -1436,7 +1441,8 @@
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
               ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
               (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
-              (cs-wrap-to-block blockName blockBasePt ssNew)))
+              (cs-wrap-to-block blockName blockBasePt ssNew))
+  (tu-diag "BLOCK" (strcat "блок вставлен: " blockName)))
           
           (if (and doc uMark) (progn (vla-EndUndoMark doc) (setq uMark nil)))
           (cs-zoom-bbox bbox))
