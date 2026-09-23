@@ -982,5 +982,78 @@
   )
 )
 
+
+
+;; ============================================================
+;; Ётап 4 (U1): примитивы XLS.
+;; eu-doc-begin/end, eu-worksheet/end - оболочки документа.
+;; eu-column - колонка: ss:Index ставитс€ —јћ по курсору (1..N);
+;;   задать его руками нельз€ - класс дефектов bde9b71 невозможен.
+;; eu-row-begin/eu-row-end, eu-cell, eu-cell-skip - писатель строк:
+;;   *eu-col* - курсор колонки, тикает сам после каждой €чейки.
+;; «начени€ - всегда строки (числа формировать rtos/itoa до вызова);
+;;   текст экранируетс€ eu-xml-escape-ом внутри eu-cell.
+;; attrs - доп. атрибуты €чейки строкой (ss:Formula, ss:MergeAcross);
+;;   ss:Index через attrs не задавать (контракт шага).
+;; ============================================================
+(if (null (boundp '*eu-col*)) (setq *eu-col* 1))
+
+(defun eu-doc-begin (f)
+  (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+  (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+  (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+  (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+  (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+  (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+  (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+  T)
+
+(defun eu-doc-end (f)
+  (write-line "</Workbook>" f)
+  T)
+
+(defun eu-worksheet (f name)
+  (write-line (strcat " <Worksheet ss:Name=\"" (eu-xml-escape name) "\">") f)
+  (write-line "  <Table>" f)
+  (setq *eu-col* 1)
+  T)
+
+(defun eu-worksheet-end (f)
+  (write-line "  </Table>" f)
+  (write-line " </Worksheet>" f)
+  T)
+
+(defun eu-column (f width)
+  (write-line (strcat "   <Column ss:Index=\"" (itoa *eu-col*)
+                      "\" ss:AutoFitWidth=\"0\" ss:Width=\""
+                      (rtos (float width) 2 1) "\"/>") f)
+  (setq *eu-col* (1+ *eu-col*))
+  T)
+
+(defun eu-row-begin (f / )
+  (setq *eu-col* 1)
+  (write-line "   <Row>" f)
+  T)
+
+(defun eu-cell (f style type value attrs / )
+  (write-line (strcat "    <Cell"
+                      (if (/= style "") (strcat " ss:StyleID=\"" style "\"") "")
+                      (if (and attrs (/= attrs "")) (strcat " " attrs) "")
+                      "><Data ss:Type=\"" type "\">"
+                      (eu-xml-escape value)
+                      "</Data></Cell>") f)
+  (setq *eu-col* (1+ *eu-col*))
+  T)
+
+(defun eu-cell-skip (f n / )
+  (repeat n
+    (write-line "    <Cell/>" f)
+    (setq *eu-col* (1+ *eu-col*)))
+  T)
+
+(defun eu-row-end (f)
+  (write-line "   </Row>" f)
+  T)
+
 (princ "\nEXCEL-UTILS.LSP загружен.")
 (princ)
