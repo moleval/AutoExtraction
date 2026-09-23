@@ -995,7 +995,12 @@
     (T
      (princ "\nНеизвестная задача."))
   )
-  (tu-undo-end uDoc)
+  ;; V13: «всё или ничего» - обломки неудачного прогона откатываются автоматически
+  (if (vl-catch-all-error-p r)
+    (progn
+      (tu-undo-cancel uDoc)
+      (princ "\n[EX] Незавершённая операция откачена (обломков не осталось)."))
+    (tu-undo-end uDoc))
 )
 
 
@@ -1209,7 +1214,7 @@
 ;; ============================================================
 
 (defun c:extraction
-       ( / *error* dcl-file save-base modules-dir r)
+       ( / *error* dcl-file save-base modules-dir r uDoc)
 
   (vl-load-com)
 
@@ -1477,19 +1482,29 @@
                 )
 
                 ((eq *EXTRACTION-ACTION* 'CUTLINE)
+                 ;; V13: откат недоделанной раскладки при падении в середине
+                 (setq uDoc (tu-undo-begin))
                  (setq r
                    (vl-catch-all-apply 'cutline-main
                      (list *EXTRACTION-SELECTED-LAYERS*)))
 
                  (extraction-handle-module-result r "CUTLINE")
+                 (if (vl-catch-all-error-p r)
+                   (tu-undo-cancel uDoc)
+                   (tu-undo-end uDoc))
                 )
 
                 ((eq *EXTRACTION-ACTION* 'CUTSHEET)
+                 ;; V13: откат недоделанной карты при падении в середине
+                 (setq uDoc (tu-undo-begin))
                  (setq r
                    (vl-catch-all-apply 'cutsheet-main
                      (list *EXTRACTION-SELECTED-LAYERS*)))
 
                  (extraction-handle-module-result r "CUTSHEET")
+                 (if (vl-catch-all-error-p r)
+                   (tu-undo-cancel uDoc)
+                   (tu-undo-end uDoc))
                 )
               )
 

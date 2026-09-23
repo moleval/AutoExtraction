@@ -1457,8 +1457,18 @@
   (princ))
 
 ;; ================= КОМАНДЫ =================
-(defun c:CUTSHEET () (cutsheet-main 'ASK))
-(defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
+(defun c:CUTSHEET ( / uDoc r)
+  ;; V13: «всё или ничего» - падение/отмена в середине откатывает всю карту
+  (setq uDoc (tu-undo-begin))
+  (setq r (vl-catch-all-apply 'cutsheet-main (list 'ASK)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (tu-undo-cancel uDoc)
+      (princ (strcat "\n[CUTSHEET] Операция прервана и откачена: "
+                     (vl-catch-all-error-message r))))
+    (tu-undo-end uDoc))
+  (princ))
+(defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 13: safe-call V9). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 14: транзакционность V13). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

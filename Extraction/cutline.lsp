@@ -2223,8 +2223,18 @@
 ;; ============================================================
 ;; Автономные команды
 ;; ============================================================
-(defun c:cutline () (cutline-main 'ASK))
-(defun c:РАСКРОЙХЛЫСТА () (cutline-main 'ASK))
+(defun c:cutline ( / uDoc r)
+  ;; V13: «всё или ничего» - падение/отмена в середине откатывает всю раскладку
+  (setq uDoc (tu-undo-begin))
+  (setq r (vl-catch-all-apply 'cutline-main (list 'ASK)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (tu-undo-cancel uDoc)
+      (princ (strcat "\n[CUTLINE] Операция прервана и откачена: "
+                     (vl-catch-all-error-message r))))
+    (tu-undo-end uDoc))
+  (princ))
+(defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 3: сводка хлыста). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 4: транзакционность V13). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
