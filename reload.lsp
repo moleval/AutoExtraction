@@ -80,7 +80,9 @@
     (if ff
       (progn
         (while (and (not found) (setq line (read-line ff)))
-          (if (vl-string-search "(ред. " line)
+          ;; признак: "(ред. N" (стандарт) или ", ред. N" (стиль CLADDING)
+          (if (or (vl-string-search "(ред. " line)
+                  (vl-string-search ", ред. " line))
             (setq found T)))
         (close ff)))
     (if found (setq cnt (1+ cnt))))
