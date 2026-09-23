@@ -730,8 +730,8 @@
   ;; V8: guard сиспеременных - обрыв копирования вернёт CMDECHO/FILEDIA/EXPERT
   (defun *error* (msg)
     (tu-sysvar-restore svSaved)
-    ;; V10: обрыв посреди копирования - откатить группу целиком
-    (tu-undo-cancel uDoc)
+    ;; V10: обрыв посреди копирования - закрыть группу (одно U откатит всё)
+    (tu-undo-end uDoc)
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
     (princ))
@@ -862,8 +862,8 @@
   ;; V8: guard сиспеременных - обрыв переименования вернёт CMDECHO/FILEDIA/EXPERT
   (defun *error* (msg)
     (tu-sysvar-restore svSaved)
-    ;; V10: обрыв посреди переименования - откатить группу целиком
-    (tu-undo-cancel uDoc)
+    ;; V10: обрыв посреди переименования - закрыть группу (одно U откатит всё)
+    (tu-undo-end uDoc)
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
     (princ))

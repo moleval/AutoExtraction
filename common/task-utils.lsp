@@ -180,7 +180,10 @@
 ;; Ётап 3 (V10): единый Undo-guard.
 ;; tu-undo-begin  Ч открыть Undo-группу (возвращает doc или nil).
 ;; tu-undo-end    Ч закрыть группу: всЄ внутри откатываетс€ одним U.
-;; tu-undo-cancel Ч закрыть и сразу откатить (дл€ мелких команд).
+;; tu-undo-cancel Ч закрыть и сразу откатить командой UNDO.
+;;   ¬Ќ»ћјЌ»≈: метода vla-Undo в ActiveX Document Ќ≈“; cancel вызывает
+;;   команду UNDO, поэтому его нельз€ использовать внутри *error* Ч
+;;   только из обычного кода (см. V13). ¬ обработчиках Ч tu-undo-end.
 ;; ============================================================
 (defun tu-undo-begin ( / doc)
   (setq doc (vl-catch-all-apply
@@ -199,6 +202,6 @@
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
       (vl-catch-all-apply 'vla-EndUndoMark (list doc))
-      (vl-catch-all-apply 'vla-Undo (list doc))))
+      (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1"))))
   nil)
 
