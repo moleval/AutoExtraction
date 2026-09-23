@@ -2044,8 +2044,12 @@
     )
   )
 
+  (pu-begin "CUTLINE:expand")
   (setq sorted (n1-expand pieces-ok))
+  (pu-end "CUTLINE:expand")
+  (pu-begin "CUTLINE:ffd")
   (setq bars (n1-ffd sorted stock kerf))
+  (pu-end "CUTLINE:ffd")
   (tu-diag "PACK" (strcat "хлыстов: " (itoa (length bars))))
   (n1-report bars stock kerf)
 
@@ -2068,9 +2072,11 @@
 
   (if export-xls
     (progn
+      (pu-begin "CUTLINE:xls")
       (setq xls-ok
         (n1-write-xls bars stock kerf pieces-oversized
                       num-bars stock-total-mm total-product-mm kpd))
+      (pu-end "CUTLINE:xls")
       (if (not xls-ok)
         (progn
           (princ "\nНе удалось создать XLS. Сохраняю CSV...")
@@ -2106,14 +2112,20 @@
           (setq lastEnt (entlast))
 
           ;; ШАПКА КАРТЫ РАСКРОЯ (над первым хлыстом)
+          (pu-begin "CUTLINE:draw-header")
           (setq bbox0 (n1-draw-header insPt stock kerf))
+          (pu-end "CUTLINE:draw-header")
 
           ;; Раскладка хлыстов
+          (pu-begin "CUTLINE:draw-layout")
           (setq bbox1 (n1-draw-layout bars stock kerf insPt color-map))
+          (pu-end "CUTLINE:draw-layout")
           (setq barHeight (/ stock 30.0))
 
           ;; РАМКА вокруг шапки и хлыстов (без таблиц)
+          (pu-begin "CUTLINE:draw-frame")
           (setq bbox-frame (n1-draw-frame (n1-combine-bbox bbox0 bbox1)))
+          (pu-end "CUTLINE:draw-frame")
 
           ;; Таблицы сдвинуты правее рамки, чтобы не пересекаться
           (setq sumInsPt (list (+ (car (cadr bbox-frame)) (* barHeight 2.0))
@@ -2232,5 +2244,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 5: U2-примитивы). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 6: U2-примитивы, П1-профилировка). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

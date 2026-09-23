@@ -31,6 +31,7 @@
 (setq *ae-reload-common-files*
   '(
     "task-utils.lsp"
+    "perf-utils.lsp"
     "layer-utils.lsp"
     "select-utils.lsp"
     "excel-utils.lsp"
