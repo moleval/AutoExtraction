@@ -176,3 +176,29 @@
     (vl-catch-all-apply 'setvar (list (car p) (cdr p))))
   nil)
 
+;; ============================================================
+;; Ётап 3 (V10): единый Undo-guard.
+;; tu-undo-begin  Ч открыть Undo-группу (возвращает doc или nil).
+;; tu-undo-end    Ч закрыть группу: всЄ внутри откатываетс€ одним U.
+;; tu-undo-cancel Ч закрыть и сразу откатить (дл€ мелких команд).
+;; ============================================================
+(defun tu-undo-begin ( / doc)
+  (setq doc (vl-catch-all-apply
+              'vla-get-ActiveDocument (list (vlax-get-acad-object))))
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (vl-catch-all-apply 'vla-StartUndoMark (list doc))
+      doc)))
+
+(defun tu-undo-end (doc)
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (vl-catch-all-apply 'vla-EndUndoMark (list doc)))
+  nil)
+
+(defun tu-undo-cancel (doc)
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (vl-catch-all-apply 'vla-EndUndoMark (list doc))
+      (vl-catch-all-apply 'vla-Undo (list doc))))
+  nil)
+

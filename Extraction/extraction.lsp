@@ -932,7 +932,10 @@
 ;; ============================================================
 (defun run-task
        (task-id layers report-mode export-excel export-txt
-                create-table save-base / r)
+                create-table save-base / r uDoc)
+
+  ;; V10: Undo-группа - весь прогон задачи откатывается одним U
+  (setq uDoc (tu-undo-begin))
 
   (cond
     ((eq task-id 'FASONKA)
@@ -992,6 +995,7 @@
     (T
      (princ "\nНеизвестная задача."))
   )
+  (tu-undo-end uDoc)
 )
 
 

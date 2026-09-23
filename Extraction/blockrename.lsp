@@ -726,14 +726,17 @@
 ;; АВТОНОМНАЯ КОМАНДА КОПИРОВАНИЯ БЛОКА
 ;; ============================================================
 
-(defun c:blockcopy ( / *error* svSaved name)
+(defun c:blockcopy ( / *error* svSaved uDoc name)
   ;; V8: guard сиспеременных - обрыв копирования вернёт CMDECHO/FILEDIA/EXPERT
   (defun *error* (msg)
     (tu-sysvar-restore svSaved)
+    ;; V10: обрыв посреди копирования - откатить группу целиком
+    (tu-undo-cancel uDoc)
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
     (princ))
   (setq svSaved (tu-sysvar-save '("CMDECHO" "FILEDIA" "EXPERT")))
+  (setq uDoc (tu-undo-begin))
   (princ "\n--- Копирование блока ---")
   (setq name (getstring T "\nИмя блока для копирования: "))
   (cond
@@ -743,6 +746,7 @@
      (princ (strcat "\nБлок \"" name "\" не найден.")))
     (T
      (blockrename-copy-block name)))
+  (tu-undo-end uDoc)
   (princ)
 )
 
@@ -854,14 +858,17 @@
 ;; АВТОНОМНАЯ КОМАНДА
 ;; ============================================================
 
-(defun c:blockrename ( / *error* svSaved old-name new-name success)
+(defun c:blockrename ( / *error* svSaved uDoc old-name new-name success)
   ;; V8: guard сиспеременных - обрыв переименования вернёт CMDECHO/FILEDIA/EXPERT
   (defun *error* (msg)
     (tu-sysvar-restore svSaved)
+    ;; V10: обрыв посреди переименования - откатить группу целиком
+    (tu-undo-cancel uDoc)
     (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
       (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
     (princ))
   (setq svSaved (tu-sysvar-save '("CMDECHO" "FILEDIA" "EXPERT")))
+  (setq uDoc (tu-undo-begin))
   (princ "\n--- Переименование определения блока ---")
 
   (setq old-name
@@ -923,6 +930,7 @@
     )
   )
 
+  (tu-undo-end uDoc)
   (princ)
 )
 
