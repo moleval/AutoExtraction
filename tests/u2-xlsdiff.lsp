@@ -1,65 +1,91 @@
 ;;; ============================================================
 ;;; tests/u2-xlsdiff.lsp - семантический diff двух XLS (SpreadsheetML)
-;;; »гнорирует <Styles>, ширины колонок и —ѕќ—ќЅ задани€ ss:Index:
-;;;   сравниваетс€ поток €чеек (колонка | стиль | merge | значение)
-;;;   по пор€дку следовани€ в файле.
+;;; —канер тегов: обрабатывает Ќ≈— ќЋ№ ќ €чеек на одной строке файла
+;;;   (формат CUTSHEET с "<Row><Cell..>...</Row>" тоже парситс€).
+;;; »гнорирует <Styles>, ширины колонок и способ задани€ ss:Index:
+;;;   сравниваетс€ поток €чеек (колонка | стиль | merge | значение).
 ;;; »спользование:
 ;;;   (load "D:/AutoExtraction/tests/u2-xlsdiff.lsp")
 ;;;   (u2-diff "D:/masters/old.xls" "D:/path/new.xls")
 ;;; ============================================================
 
-(defun u2-attr (line name / pat p q)
+(defun u2-attr (txt name / pat p q)
   (setq pat (strcat name "=\""))
-  (setq p (vl-string-search pat line))
+  (setq p (vl-string-search pat txt))
   (if p
     (progn
       (setq p (+ p (strlen pat)))
-      (setq q (vl-string-search "\"" line p))
-      (if q (substr line (1+ p) (- q p)) ""))
+      (setq q (vl-string-search "\"" txt p))
+      (if q (substr txt (1+ p) (- q p)) ""))
     nil))
 
-(defun u2-parse-cell (line col / idx style merge q r e val)
-  ;; возвращает (“ќ ≈Ќ, NEW-COL)
-  (setq idx (u2-attr line "ss:Index"))
+;; ѕарс одной €чейки по точному фрагменту; col - курсор колонки.
+;; ¬озвращает (“ќ ≈Ќ | nil, NEW-COL): пуста€ €чейка-пропуск в поток не идЄт.
+(defun u2-parse-cell (txt col / idx style merge q r e val)
+  (setq idx (u2-attr txt "ss:Index"))
   (if idx (setq col (atoi idx)) (setq col (1+ col)))
-  (setq style (u2-attr line "ss:StyleID"))
+  (setq style (u2-attr txt "ss:StyleID"))
   (if (null style) (setq style ""))
-  (setq merge (u2-attr line "ss:MergeAcross"))
+  (setq merge (u2-attr txt "ss:MergeAcross"))
   (if (null merge) (setq merge ""))
-  (if (or (not (vl-string-search "<Data" line))
-          (and (vl-string-search "/>" line)
-               (< (vl-string-search "/>" line)
-                  (vl-string-search "<Data" line))))
-    (setq val "")   ; пуста€ €чейка <Cell/> или <Cell ... />
+  (if (not (vl-string-search "<Data" txt))
+    (setq val "")
     (progn
-      (setq q (vl-string-search "<Data" line))
-      (setq r (vl-string-search ">" line q))
-      (setq e (vl-string-search "</Data>" line))
+      (setq q (vl-string-search "<Data" txt))
+      (setq r (vl-string-search ">" txt q))
+      (setq e (vl-string-search "</Data>" txt))
       (setq val (if (and r e (>= (- e r 1) 0))
-                  (substr line (+ r 2) (- e r 1))
-                  ""))))
-  ;; пуста€ €чейка-пропуск (без стил€/merge/значени€) в поток токенов не идЄт -
-  ;; она лишь двигает курсор колонки (замена ss:Index)
+                  (substr txt (+ r 2) (- e r 1)) ""))))
   (if (and (= style "") (= merge "") (= val ""))
     (list nil col)
     (list (list "C" col style merge val) col)))
 
-(defun u2-parse (fname / f line tokens col pair)
+;; —канер одной строки файла: все событи€ "<Row" / "</Row>" / "<Cell".
+(defun u2-scan-line (line col tokens / i a b p m ev c1 c2 txt pair L)
+  (setq i 0 L (strlen line))
+  (while (< i L)
+    (setq a (vl-string-search "<Cell" line i))
+    (setq b (vl-string-search "</Row>" line i))
+    (setq p (vl-string-search "<Row" line i))
+    (setq ev nil m L)
+    (if (and a (< a m)) (setq ev 'cell m a))
+    (if (and b (< b m)) (setq ev 'rowend m b))
+    (if (and p (< p m)) (setq ev 'row m p))
+    (if (null ev)
+      (setq i (1+ L))
+      (cond
+        ((= ev 'row)
+         (setq col 0 i (+ m 4)))
+        ((= ev 'rowend)
+         (setq tokens (cons (list "R") tokens)) (setq i (+ m 6)))
+        (t
+         ;; спан €чейки: до "</Cell>" (c1), либо самозакрыта€ "/>" (c2)
+         (setq c1 (vl-string-search "</Cell>" line m))
+         (setq c2 (vl-string-search "/>" line m))
+         (if (and c2 (or (null c1) (< c2 c1)))
+           (progn
+             (setq txt (substr line (1+ m) (- (+ c2 2) m)))
+             (setq i (+ c2 2)))
+           (if c1
+             (progn
+               (setq txt (substr line (1+ m) (- (+ c1 7) m)))
+               (setq i (+ c1 7)))
+             (progn
+               (setq txt (substr line (1+ m) (min 500 (- L m))))
+               (setq i L))))
+         (setq pair (u2-parse-cell txt col))
+         (if (car pair) (setq tokens (cons (car pair) tokens)))
+         (setq col (cadr pair))))))
+  (list tokens col))
+
+(defun u2-parse (fname / f line tokens col res)
   (setq tokens '() col 0)
   (setq f (open fname "r"))
   (if f
     (progn
       (while (setq line (read-line f))
-        (cond
-          ((vl-string-search "</Row>" line)
-           (setq tokens (cons (list "R") tokens)))
-          ((vl-string-search "<Row" line)
-           (setq col 0))
-          ((vl-string-search "<Cell" line)
-           (setq pair (u2-parse-cell line col))
-           (if (car pair)
-             (setq tokens (cons (car pair) tokens)))
-           (setq col (cadr pair)))))
+        (setq res (u2-scan-line line col tokens))
+        (setq tokens (car res) col (cadr res)))
       (close f)))
   (reverse tokens))
 
@@ -97,5 +123,5 @@
   (princ "\n==========================\n")
   (null mis))
 
-(princ "\nU2-XLSDIFF.LSP загружен. »спользование: (u2-diff old-file new-file)")
+(princ "\nU2-XLSDIFF.LSP загружен (редакци€ сканера: много €чеек на строку).")
 (princ)

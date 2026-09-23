@@ -1505,7 +1505,7 @@
         )
       )
 
-      (eu-doc-begin f)
+      (eu-doc-begin f "FULL")
 (write-line " <Styles>" f)
 
       (write-line "  <Style ss:ID=\"Default\" ss:Name=\"Normal\">" f)

@@ -28,7 +28,7 @@
   (if (null f)
     (princ (strcat "\n[U1][FAIL] Не удалось открыть файл на запись: " out))
     (progn
-      (eu-doc-begin f)
+      (eu-doc-begin f "FULL")
       (write-line (eu-xml-styles "0.00") f)
       (eu-worksheet f "U1-TEST")
       (eu-column f "40" "0")

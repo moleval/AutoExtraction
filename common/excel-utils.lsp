@@ -998,14 +998,25 @@
 ;; ============================================================
 (if (null (boundp '*eu-col*)) (setq *eu-col* 1))
 
-(defun eu-doc-begin (f)
-  (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
-  (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
-  (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
-  (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
-  (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
-  (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
-  (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+(defun eu-doc-begin (f flavor)
+  ;; flavor "FULL"  - шапка с xmlns:html (формат CUTLINE/фасонки);
+  ;; flavor "BASIC" - компактная шапка, ">" на строке ss (формат CUTSHEET)
+  (cond
+    ((= flavor "BASIC")
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">" f))
+    (t
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)))
   T)
 
 (defun eu-doc-end (f)
