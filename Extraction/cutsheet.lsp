@@ -663,16 +663,22 @@
     0.0))
 
 (defun cs-nest (parts sheetW sheetH kerf rotateFlag / result1 result2 result3 bestResult bestSheets bestUtil sheets util)
+  (pu-begin "CUTSHEET:pack:area")
   (setq result1 (cs-pack-rects (cs-sort-by-area parts) sheetW sheetH kerf rotateFlag))
+  (pu-end "CUTSHEET:pack:area")
   (setq sheets (car result1) util (cs-calc-utilization sheets sheetW sheetH))
   (setq bestResult result1 bestSheets (length sheets) bestUtil util)
   
+  (pu-begin "CUTSHEET:pack:max-side")
   (setq result2 (cs-pack-rects (cs-sort-by-max-side parts) sheetW sheetH kerf rotateFlag))
+  (pu-end "CUTSHEET:pack:max-side")
   (setq sheets (car result2) util (cs-calc-utilization sheets sheetW sheetH))
   (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result2 bestSheets (length sheets) bestUtil util))
   
+  (pu-begin "CUTSHEET:pack:min-side")
   (setq result3 (cs-pack-rects (cs-sort-by-min-side parts) sheetW sheetH kerf rotateFlag))
+  (pu-end "CUTSHEET:pack:min-side")
   (setq sheets (car result3) util (cs-calc-utilization sheets sheetW sheetH))
   (if (or (< (length sheets) bestSheets) (and (= (length sheets) bestSheets) (> util bestUtil)))
     (setq bestResult result3 bestSheets (length sheets) bestUtil util))
@@ -692,12 +698,18 @@
           (if (or (null lastParts) (<= (length lastParts) 1))
             sheets
             (progn
+              (pu-begin "CUTSHEET:pack:lastsheet:area")
               (setq result1 (cs-pack-rects (cs-sort-by-area lastParts) sheetW sheetH kerf rotateFlag))
+              (pu-end "CUTSHEET:pack:lastsheet:area")
               (setq bestResult result1 bestScore (cs-calc-utilization (car result1) sheetW sheetH))
+              (pu-begin "CUTSHEET:pack:lastsheet:area-rev")
               (setq result2 (cs-pack-rects (reverse (cs-sort-by-area lastParts)) sheetW sheetH kerf rotateFlag))
+              (pu-end "CUTSHEET:pack:lastsheet:area-rev")
               (setq score (cs-calc-utilization (car result2) sheetW sheetH))
               (if (> score bestScore) (setq bestResult result2 bestScore score))
+              (pu-begin "CUTSHEET:pack:lastsheet:min-side")
               (setq result3 (cs-pack-rects (cs-sort-by-min-side lastParts) sheetW sheetH kerf rotateFlag))
+              (pu-end "CUTSHEET:pack:lastsheet:min-side")
               (setq score (cs-calc-utilization (car result3) sheetW sheetH))
               (if (> score bestScore) (setq bestResult result3 bestScore score))
               (setq newSheets (append (reverse (cdr (reverse sheets))) (car bestResult)))
@@ -1410,7 +1422,9 @@
         *CUTSHEET-LAST-KERF* kerf *CUTSHEET-LAST-ROTATE* rotateFlag
         *CUTSHEET-LAST-XLS* exportXls *CUTSHEET-LAST-ACAD* exportAcad)
   
+  (pu-begin "CUTSHEET:collect")
   (setq records (cs-collect-records ss choice dynType))
+  (pu-end "CUTSHEET:collect")
   (cs-print-rejects)
   (tu-diag "FILTER" (strcat "принято деталей: " (itoa (length records))
                              ", исключено: " (itoa (apply (quote +) (mapcar (quote cdr) *cs-rejects*)))))
@@ -1447,9 +1461,11 @@
   (princ (strcat "\nВ раскрой принято деталей: " (itoa (length fitSrc))))
   
   (setq groups (cs-aggregate fitSrc))
+  (pu-begin "CUTSHEET:nest")
   (setq nested (cs-nest fitSrc sheetW sheetH kerf rotateFlag)
         sheets (car nested)
         oversized (cadr nested))
+  (pu-end "CUTSHEET:nest")
   (setq oversized (append impossible oversized))
   (tu-diag "PACK" (strcat "листов: " (itoa (length sheets)) ", неразмещено записей: " (itoa (length oversized))))
   
@@ -1470,11 +1486,13 @@
       (foreach r oversized
         (princ (strcat "\n  " (cs-part-label r) " | " (nth 3 r))))))
   
+  (pu-begin "CUTSHEET:xls")
   (if exportXls
     (if (not (cs-write-xls groups sheets oversized sheetW sheetH kerf))
       (progn
         (princ "\nXLS не создан — выполняется fallback CSV.")
         (cs-write-csv sheets oversized sheetW sheetH kerf))))
+  (pu-end "CUTSHEET:xls")
   
   (if exportAcad
     (progn
@@ -1491,10 +1509,14 @@
           
           (setq lastEnt (entlast))
           
+          (pu-begin "CUTSHEET:draw-layout")
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
+          (pu-end "CUTSHEET:draw-layout")
+          (pu-begin "CUTSHEET:draw-summary")
           (setq bbox2 (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
                     (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))
                     kerf))
+          (pu-end "CUTSHEET:draw-summary")
           
           ;; Собрать созданные примитивы для фактического bbox
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
@@ -1549,5 +1571,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 15: U2-примитивы). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 16: U2-примитивы, П1-профилировка). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
