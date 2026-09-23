@@ -1,9 +1,9 @@
 ;;; ============================================================
-;;; tests/u1-selftest.lsp вЂ” СЃР°РјРѕС‚РµСЃС‚ РїСЂРёРјРёС‚РёРІРѕРІ U1 (Р­С‚Р°Рї 4)
-;;; Р—Р°РїСѓСЃРє: (load "D:/AutoExtraction/tests/u1-selftest.lsp")
-;;; Р“РµРЅРµСЂРёСЂСѓРµС‚ D:\AutoExtraction\tests\u1-selftest-out.xls,
-;;; РїСЂРѕРІРµСЂСЏРµС‚: РїР°СЂРЅРѕСЃС‚СЊ С‚РµРіРѕРІ Cell/Row Рё РєРѕРЅС‚СЂР°РєС‚ РєРѕР»РѕРЅРѕРє
-;;; (eu-cell СЃР°Рј С‚РёРєР°РµС‚ РєСѓСЂСЃРѕСЂ вЂ” ss:Index СЂСѓРєР°РјРё РЅРµ Р·Р°РґР°С‘С‚СЃСЏ).
+;;; tests/u1-selftest.lsp — самотест примитивов U1 (Этап 4)
+;;; Запуск: (load "D:/AutoExtraction/tests/u1-selftest.lsp")
+;;; Генерирует D:\AutoExtraction\tests\u1-selftest-out.xls,
+;;; проверяет: парность тегов Cell/Row и контракт колонок
+;;; (eu-cell сам тикает курсор — ss:Index руками не задаётся).
 ;;; ============================================================
 
 (defun u1-count-lines (fname sub / f line cnt)
@@ -20,13 +20,13 @@
 (defun u1-selftest ( / f out ok cellsOpen cellsClose rowsOpen rowsClose)
   (princ "\n=== U1 selftest ===")
   (setq out (strcat (getvar "ROAMABLEROOTPREFIX") "u1-selftest-out.xls"))
-  ;; Р’ РїСЂРѕРµРєС‚Рµ ROAMABLEROOTPREFIX РјРѕР¶РµС‚ Р±С‹С‚СЊ РЅРµРґРѕСЃС‚СѓРїРµРЅ РІ РєРѕРЅС‚РµРєСЃС‚Рµ РєРѕРјР°РЅРґС‹ вЂ”
-  ;; С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ РїСѓС‚СЊ СЂСЏРґРѕРј СЃ С‚РµСЃС‚РѕРј:
+  ;; В проекте ROAMABLEROOTPREFIX может быть недоступен в контексте команды —
+  ;; фиксированный путь рядом с тестом:
   (setq out "D:\\AutoExtraction\\tests\\u1-selftest-out.xls")
   (setq f (open out "w"))
   (setq ok nil)
   (if (null f)
-    (princ (strcat "\n[U1][FAIL] РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р» РЅР° Р·Р°РїРёСЃСЊ: " out))
+    (princ (strcat "\n[U1][FAIL] Не удалось открыть файл на запись: " out))
     (progn
       (eu-doc-begin f)
       (write-line (eu-xml-styles "0.00") f)
@@ -36,20 +36,20 @@
       (eu-column f 60.0)
 
       (eu-row-begin f)
-      (eu-cell f "Header" "String" "РРјСЏ" "")
-      (eu-cell f "Header" "String" "РћРїРёСЃР°РЅРёРµ & <С‚РµРіРё>" "")
-      (eu-cell f "Header" "String" "Р§РёСЃР»Рѕ" "")
+      (eu-cell f "Header" "String" "Имя" "")
+      (eu-cell f "Header" "String" "Описание & <теги>" "")
+      (eu-cell f "Header" "String" "Число" "")
       (eu-row-end f)
 
       (eu-row-begin f)
-      (eu-cell f "Data" "String" "РђР»СЊС„Р°" "")
-      (eu-cell f "Data" "String" "РїРµСЂРІР°СЏ СЃС‚СЂРѕРєР°" "")
+      (eu-cell f "Data" "String" "Альфа" "")
+      (eu-cell f "Data" "String" "первая строка" "")
       (eu-cell f "Num" "Number" "12.5" "")
       (eu-row-end f)
 
-      ;; РЎС‚СЂРѕРєР° СЃ РїСЂРѕРїСѓСЃРєРѕРј СЃСЂРµРґРЅРµР№ РєРѕР»РѕРЅРєРё (Р±РµР· СЂСѓС‡РЅРѕРіРѕ ss:Index)
+      ;; Строка с пропуском средней колонки (без ручного ss:Index)
       (eu-row-begin f)
-      (eu-cell f "Data" "String" "Р‘РµС‚Р°" "")
+      (eu-cell f "Data" "String" "Бета" "")
       (eu-cell-skip f 1)
       (eu-cell f "Num" "Number" "7" "")
       (eu-row-end f)
@@ -62,22 +62,22 @@
             cellsClose (u1-count-lines out "</Cell>")
             rowsOpen   (u1-count-lines out "<Row>")
             rowsClose  (u1-count-lines out "</Row>"))
-      ;; cellsOpen СЃС‡РёС‚Р°РµС‚ Рё Р·Р°РєСЂС‹РІР°СЋС‰РёРµ С‚РµРіРё (С‚Р°Рј С‚РѕР¶Рµ РµСЃС‚СЊ "<Cell"), РїРѕСЌС‚РѕРјСѓ
-      ;; РѕС‚РєСЂС‹РІР°СЋС‰РёС… = cellsOpen - cellsClose; РєР°Р¶РґРѕР№ РїР°СЂРµ <Cell ...> </Cell>
-      ;; СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓРµС‚ РґРІР° С‚СЌРіР° РЅР° РѕРґРЅРѕР№ СЃС‚СЂРѕРєРµ, РїСѓСЃС‚С‹Рµ СЏС‡РµР№РєРё - РѕРґРёРЅРѕРєРёРµ <Cell/>.
-      (princ (strcat "\n[U1] rows: " (itoa rowsOpen) " РѕС‚РєСЂС‹С‚Рѕ / " (itoa rowsClose) " Р·Р°РєСЂС‹С‚Рѕ"))
-      (princ (strcat "\n[U1] cell-С‚РµРіРѕРІ РІСЃРµРіРѕ (СЃ Р·Р°РєСЂС‹РІР°СЋС‰РёРјРё): " (itoa cellsOpen)
-                     ", Р·Р°РєСЂС‹РІР°СЋС‰РёС…: " (itoa cellsClose)))
+      ;; cellsOpen считает и закрывающие теги (там тоже есть "<Cell"), поэтому
+      ;; открывающих = cellsOpen - cellsClose; каждой паре <Cell ...> </Cell>
+      ;; соответствует два тэга на одной строке, пустые ячейки - одинокие <Cell/>.
+      (princ (strcat "\n[U1] rows: " (itoa rowsOpen) " открыто / " (itoa rowsClose) " закрыто"))
+      (princ (strcat "\n[U1] cell-тегов всего (с закрывающими): " (itoa cellsOpen)
+                     ", закрывающих: " (itoa cellsClose)))
       (if (and (= rowsOpen rowsClose 3)
                (> cellsOpen cellsClose))
         (progn
           (setq ok T)
-          (princ "\n[U1][OK] РЎС‚СЂСѓРєС‚СѓСЂР° СЃС‚СЂРѕРє/СЏС‡РµРµРє СЃРѕРіР»Р°СЃРѕРІР°РЅР°."))
-        (princ "\n[U1][FAIL] РќРµСЃРѕРіР»Р°СЃРѕРІР°РЅРЅРѕСЃС‚СЊ СЃС‚СЂСѓРєС‚СѓСЂС‹."))
-      (princ (strcat "\n[U1] С„Р°Р№Р»: " out))
+          (princ "\n[U1][OK] Структура строк/ячеек согласована."))
+        (princ "\n[U1][FAIL] Несогласованность структуры."))
+      (princ (strcat "\n[U1] файл: " out))
     )
   )
-  (princ "\n=== U1 selftest Р·Р°РІРµСЂС€С‘РЅ ===\n")
+  (princ "\n=== U1 selftest завершён ===\n")
   ok)
 
 (u1-selftest)
