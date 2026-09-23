@@ -856,7 +856,7 @@
                          (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
                          (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*)))
 
-(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g)
+(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
@@ -883,6 +883,11 @@
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
                 (strcat "Изделий: " (itoa totalCnt) " шт.") *CUTSHEET-VALUE-COLOR*)
+  (setq y (- y rowH))
+  (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
+                (strcat "Пропил: "
+                        (if (= kerf (float (fix kerf))) (itoa (fix kerf)) (rtos kerf 2 1))
+                        " мм") *CUTSHEET-VALUE-COLOR*)
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 50.0) y) *CUTSHEET-TEXT-H*
                 (if rotateFlag "Поворот деталей разрешен" "Поворот деталей запрещен") *CUTSHEET-VALUE-COLOR*)
@@ -1409,7 +1414,8 @@
           
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
           (setq bbox2 (cs-draw-summary groups sheets oversized sheetW sheetH rotateFlag
-                    (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))))
+                    (list (+ (car (cadr bbox1)) *CUTSHEET-SUMMARY-GAP*) (cadr (cadr bbox1)))
+                    kerf))
           
           ;; Собрать созданные примитивы для фактического bbox
           (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
@@ -1454,5 +1460,5 @@
 (defun c:CUTSHEET () (cutsheet-main 'ASK))
 (defun c:РАСКРОЙЛИСТА () (cutsheet-main 'ASK))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 10: лимиты V5/V6). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 11: строка Пропил в сводке). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
