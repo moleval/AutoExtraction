@@ -2147,6 +2147,7 @@
             (ssadd ent ssNew)
             (setq ent (entnext ent)))
 
+          (pu-begin "CUTLINE:wrap-block")
           (if (> (sslength ssNew) 0)
             (progn
               (setq oldEcho (getvar "CMDECHO"))
@@ -2154,11 +2155,15 @@
               ;; Число INSERT с этим именем ДО -BLOCK (защита от двойного INSERT, Шаг 4):
               ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить],
               ;; ENTER выбирает «Преобразовать» и INSERT создается самим -BLOCK.
+              (pu-begin "CUTLINE:wrap:ssget")
               (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
+              (pu-begin "CUTLINE:wrap:block")
               (setq blkCmdResult
                     (vl-catch-all-apply 'vl-cmdf
                       (list "_.-BLOCK" blockName insPt ssNew "")))
+              (pu-end "CUTLINE:wrap:block")
               (setvar "CMDECHO" oldEcho)
               (cond
                 ((vl-catch-all-error-p blkCmdResult)
@@ -2202,6 +2207,7 @@
             )
             (princ "\nНет объектов для создания блока.")
           )
+          (pu-end "CUTLINE:wrap-block")
 
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
           (setq bbox (n1-combine-bbox bbox-frame
@@ -2244,5 +2250,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 6: U2-примитивы, П1-профилировка). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 10: U2-примитивы, П1-профилировка, П2 wrap на -BLOCK (CopyObjects отклонён замером: 4141 против 453). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

@@ -803,23 +803,36 @@
       ent)
     nil))
 
+;; П2.4а: кэш имён текстовых стилей - tblsearch убран из горячего цикла
+;; отрисовки (~260+ вызовов на прогон). Кэш инвалидируется в cutsheet-main
+;; перед отрисовкой карты (после cs-ensure-*-style), поэтому резолв всегда
+;; идёт по актуальному состоянию таблицы стилей текущего прогона.
+(if (null (boundp '*cs-style-cache*)) (setq *cs-style-cache* nil))
+(defun cs-text-style (preferred / a s)
+  (setq a (assoc preferred *cs-style-cache*))
+  (if a
+    (cdr a)
+    (progn
+      (setq s (if (tblsearch "STYLE" preferred) preferred (getvar "TEXTSTYLE")))
+      (setq *cs-style-cache* (cons (cons preferred s) *cs-style-cache*))
+      s)))
+
 (defun cs-draw-text (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Раскрой Italic"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-bold (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Основной стиль (надписи без наклона)")
-                "Основной стиль (надписи без наклона)" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Основной стиль (надписи без наклона)"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-center (pt h txt color / style)
-  (setq style (if (tblsearch "STYLE" "Раскрой Italic") "Раскрой Italic" (getvar "TEXTSTYLE")))
+  (setq style (cs-text-style "Раскрой Italic"))
   (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
@@ -1019,10 +1032,10 @@
     (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
     (if (and (not (vl-catch-all-error-p o)) o)
       (progn
-        ;; Принудительное обновление примитива: без него AutoCAD может отдать
-        ;; устаревший/усеченный bbox для только что созданных текстов,
-        ;; и рамка по факт-bbox обрезала бы последние строки.
-        (vl-catch-all-apply 'vla-update (list o))
+        ;; П2.2 (принято): vla-update здесь НЕ нужен и был дорог - замер
+        ;; [PERF] CUTSHEET:bbox: 2578 -> 532 ms на 743 примитива (x4.8).
+        ;; GetBoundingBox сразу после entmake даёт корректные границы:
+        ;; рамка не режет тексты шапок, [wrap]-контракт 0/1 подтверждён.
         (setq mn nil)
         (setq mx nil)
         (vl-catch-all-apply 'vla-GetBoundingBox (list o 'mn 'mx))
@@ -1274,30 +1287,40 @@
   ;; U3: единый генератор - см. common/task-utils.lsp
   (tu-unique-block-name base))
 
-(defun cs-wrap-to-block (blockName basePt ss / oldEcho oldOsmode oldCmddia oldFiledia ok refs r oldRefs si e retained ins-result finalRefs basePtStr insertPt3 acad doc ms result)
+(defun cs-wrap-to-block (blockName basePt ss / ok r oldRefs si e retained ins-result finalRefs insertPt3 acad doc ms result)
+  ;; П2.3: упаковка набора в блок через ActiveX (замер 5.2: vl-cmdf "_.-BLOCK"
+  ;; = 93% стоимости wrap - 1140 мс на 743 примитива). CopyObjects копирует
+  ;; набор в определение блока (базовая точка = basePt), оригиналы стираем,
+  ;; вставляем ровно один INSERT. Детерминированно, без версионных режимов
+  ;; [Преобразовать/Удалить]; UNDO-контракт накрыт V13 снаружи.
   (if (or (null ss) (<= (sslength ss) 0))
     (progn (princ "\n[wrap] Нет объектов для блока.") nil)
     (progn
-      (setq oldEcho (getvar "CMDECHO")
-            oldOsmode (getvar "OSMODE")
-            oldCmddia (getvar "CMDDIA")
-            oldFiledia (getvar "FILEDIA"))
-      
-      (setq basePtStr (strcat (rtos (car basePt) 2 6) "," (rtos (cadr basePt) 2 6) ",0"))
-      
-      (setvar "CMDECHO" 1)
-      (setvar "OSMODE" 0)
-      (setvar "CMDDIA" 0)
-      (setvar "FILEDIA" 0)
-      
-      ;; Число INSERT имени blockName ДО -BLOCK (защита от двойного INSERT, Шаг 4):
-      ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить], ENTER
-      ;; выбирает «Преобразовать» и вхождение создается самим -BLOCK.
+      ;; Число INSERT имени blockName ДО упаковки (контракт «ровно 1 новый», Шаг 4)
+      (pu-begin "CUTSHEET:wrap:ssget")
       (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+      (pu-end "CUTSHEET:wrap:ssget")
       (setq oldRefs (if r (sslength r) 0))
-      
-      ;; Создаем блок (текстовый -BLOCK; опции Преобразовать/Удалить есть не во всех версиях)
-      (setq result (vl-catch-all-apply 'vl-cmdf (list "_.-BLOCK" blockName basePtStr ss "")))
+      (setq acad (vlax-get-acad-object)
+            doc  (vla-get-ActiveDocument acad)
+            ms   (vla-get-ModelSpace doc))
+      (pu-begin "CUTSHEET:wrap:block")
+      (setq result
+        (vl-catch-all-apply
+          '(lambda ( / blocks blkDef arr i)
+             (setq blocks (vla-get-Blocks doc)
+                   blkDef (vla-Add blocks
+                                  (vlax-3d-point (list (car basePt) (cadr basePt) 0.0))
+                                  blockName))
+             (setq arr (vlax-make-safearray vlax-vbObject
+                         (cons 0 (1- (sslength ss))))
+                   i 0)
+             (repeat (sslength ss)
+               (vlax-safearray-put-element arr i (vlax-ename->vla-object (ssname ss i)))
+               (setq i (1+ i)))
+             (vla-CopyObjects doc arr blkDef)
+             T)))
+      (pu-end "CUTSHEET:wrap:block")
       (cond
         ((vl-catch-all-error-p result)
          (princ (strcat "\n[wrap] Ошибка: " (vl-catch-all-error-message result)))
@@ -1306,49 +1329,30 @@
          (princ "\n[wrap] Блок не создан")
          (setq ok nil))
         (T
+         (pu-begin "CUTSHEET:wrap:insert")
          (setq ok T)
+         (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa oldRefs)))
+         ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
+         (setq si 0 retained 0)
+         (repeat (sslength ss)
+           (setq e (ssname ss si))
+           (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
+           (setq si (1+ si)))
+         (if (> retained 0)
+           (princ (strcat "\n[wrap] Удалено оригиналов после копии в блок: " (itoa retained))))
+         ;; Вставляем ровно один INSERT обратно в базовую точку
+         (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+         (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
+         (if (ex-safe-ok-p ins-result)
+           (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+           (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
+         ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-         (setq refs (if r (sslength r) 0))
-         (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa refs)))
-(cond
-           ((= refs (1+ oldRefs))
-            ;; Ровно один новый INSERT — его создал сам -BLOCK (режим «Преобразовать»).
-            ;; Второй не добавляем (двойное вхождение, Шаг 4).
-            (princ "\n[wrap] INSERT создан самим -BLOCK (ровно 1 новый, режим Преобразовать) — повторная вставка не требуется."))
-           ((> refs (1+ oldRefs))
-            ;; Аномалия: новых INSERT больше одного — ничего не добавляем, только сигнал.
-            (princ (strcat "\n[wrap] ВНИМАНИЕ: новых INSERT после -BLOCK: " (itoa (- refs oldRefs))
-                           " (ожидался 1) — повторная вставка отменена.")))
-           (T
-(progn
-             ;; INSERT не создан. Если оригиналы пережили -BLOCK (режим «оставить»),
-             ;; стираем их, чтобы под INSERT не осталась дублирующая геометрия.
-             (setq si 0 retained 0)
-             (repeat (sslength ss)
-               (setq e (ssname ss si))
-               (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
-               (setq si (1+ si)))
-             (if (> retained 0)
-               (princ (strcat "\n[wrap] Удалено оригиналов, оставшихся после -BLOCK: " (itoa retained))))
-             ;; Вставляем ровно один INSERT обратно в ту же точку (базовая точка = точка вставки)
-             (setq acad (vlax-get-acad-object)
-                   doc (vla-get-ActiveDocument acad)
-                   ms (vla-get-ModelSpace doc)
-                   insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-             (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
-             (if (ex-safe-ok-p ins-result)
-               (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
-               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
-             ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
-             (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-             (setq finalRefs (if r (sslength r) 0))
-             (princ (strcat "\n[wrap] Проверка: ссылок до -BLOCK: " (itoa oldRefs)
-                            ", после вставки: " (itoa finalRefs)
-                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)"))))))))
-      (setvar "FILEDIA" oldFiledia)
-      (setvar "CMDDIA" oldCmddia)
-      (setvar "OSMODE" oldOsmode)
-      (setvar "CMDECHO" oldEcho)
+         (setq finalRefs (if r (sslength r) 0))
+         (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
+                        ", после вставки: " (itoa finalRefs)
+                        (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)")))
+         (pu-end "CUTSHEET:wrap:insert")))
       ok)))
 
 ;; ================= ГЛАВНАЯ ФУНКЦИЯ =================
@@ -1501,6 +1505,8 @@
         (progn
           (cs-ensure-italic-style)
           (cs-ensure-bold-style)
+          ;; П2.4а: кэш стилей - резолв заново на каждый прогон карты
+          (setq *cs-style-cache* nil)
           (cs-setvar-transparency-display)
           (setq colorMap (cs-build-color-map groups))
           (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list (vlax-get-acad-object))))
@@ -1527,7 +1533,9 @@
           ;; каждого примитива), не по расчетным координатам выноски.
           ;; Рамка = объединение фактических и расчетных границ:
           ;; не может зачеркнуть ни одну отрисованную строку.
+          (pu-begin "CUTSHEET:bbox")
           (setq bboxFact (cs-entities-bbox ssNew))
+          (pu-end "CUTSHEET:bbox")
           (setq bboxCalc (cs-combine-bbox bbox1 bbox2))
           (if bboxFact
             (setq bbox (cs-combine-bbox bboxFact bboxCalc))
@@ -1544,11 +1552,13 @@
           
           (if (> (sslength ssNew) 0)
             (progn
+              (pu-begin "CUTSHEET:wrap-block")
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
                     blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
               ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
               (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
-              (cs-wrap-to-block blockName blockBasePt ssNew))
+              (cs-wrap-to-block blockName blockBasePt ssNew)
+              (pu-end "CUTSHEET:wrap-block"))
   (tu-diag "BLOCK" (strcat "блок вставлен: " blockName)))
           
           (if uMark (progn (tu-undo-end doc) (setq uMark nil)))
@@ -1571,5 +1581,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 16: U2-примитивы, П1-профилировка). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 21: U2-примитивы, П1-профилировка, П2 bbox+wrap, кэш текстовых стилей (П2.4а)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
