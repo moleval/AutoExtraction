@@ -38,7 +38,11 @@
       (setq val (if (and r e (>= (- e r 1) 0))
                   (substr line (+ r 2) (- e r 1))
                   ""))))
-  (list (list "C" col style merge val) col))
+  ;; пуста€ €чейка-пропуск (без стил€/merge/значени€) в поток токенов не идЄт -
+  ;; она лишь двигает курсор колонки (замена ss:Index)
+  (if (and (= style "") (= merge "") (= val ""))
+    (list nil col)
+    (list (list "C" col style merge val) col)))
 
 (defun u2-parse (fname / f line tokens col pair)
   (setq tokens '() col 0)
@@ -53,7 +57,8 @@
            (setq col 0))
           ((vl-string-search "<Cell" line)
            (setq pair (u2-parse-cell line col))
-           (setq tokens (cons (car pair) tokens))
+           (if (car pair)
+             (setq tokens (cons (car pair) tokens)))
            (setq col (cadr pair)))))
       (close f)))
   (reverse tokens))
