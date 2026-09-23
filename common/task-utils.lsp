@@ -191,6 +191,9 @@
 ;;   только из обычного кода (см. V13). В обработчиках — tu-undo-end.
 ;; ============================================================
 (if (null (boundp '*tu-undo-depth*)) (setq *tu-undo-depth* 0))
+;; Счётчик модификаций БД на момент открытия внешней группы (предохранитель
+;; tu-undo-cancel: ESC на промпте = группа пуста, UNDO НЕ выполнять).
+(if (null (boundp '*tu-undo-dbmod*)) (setq *tu-undo-dbmod* 0))
 
 (defun tu-undo-begin ( / doc)
   (setq doc (vl-catch-all-apply
@@ -198,7 +201,9 @@
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
       (if (= *tu-undo-depth* 0)
-        (vl-catch-all-apply 'vla-StartUndoMark (list doc)))
+        (progn
+          (setq *tu-undo-dbmod* (getvar "DBMOD"))
+          (vl-catch-all-apply 'vla-StartUndoMark (list doc))))
       (setq *tu-undo-depth* (1+ *tu-undo-depth*))
       doc)))
 
@@ -211,11 +216,14 @@
   nil)
 
 (defun tu-undo-cancel (doc)
+  ;; Откат ТОЛЬКО если в группе реально были изменения БД (DBMOD сдвинулся),
+  ;; иначе UNDO _1 зацепил бы постороннюю правку пользователя.
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
       (setq *tu-undo-depth* 0)
       (vl-catch-all-apply 'vla-EndUndoMark (list doc))
-      (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1"))))
+      (if (/= (getvar "DBMOD") *tu-undo-dbmod*)
+        (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1")))))
   nil)
 
 ;; ============================================================
