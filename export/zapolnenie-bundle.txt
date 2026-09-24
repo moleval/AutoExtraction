@@ -1,0 +1,2792 @@
+================================================================================
+ZAPOLNENIE (Заполнение проёмов) — бандл для передачи в другую программу
+Ветка: arena/01a0cef7-autoextraction, HEAD: cbb956a
+Сгенерировано: 2026-09-23
+================================================================================
+
+ЧТО ЭТО
+Модуль извлечения заполнений проёмов (стеклопакеты, сэндвич-панели, глухие
+панели, витражное стекло) из динамических блоков чертежа AutoCAD.
+Формирует:
+  1. Таблицы AutoCAD (ActiveX vla-AddTable, модель): DETAIL-таблицы по группам
+     + сводная SUMMARY-таблица.
+  2. XLS (XML Spreadsheet 2003) — файлы детальной и сводной ведомостей.
+  3. CSV — fallback, если XLS-файл не открылся на запись.
+  4. TXT-отчёт (по флагу export-txt).
+
+ТОЧКИ ВХОДА
+  Команды:       ZAPOLNENIE  /  ЗАПОЛНЕНИЕ   (интерактив: слои, режимы, база имени)
+  Программный:   (zapolnenie-main layers report-mode export-excel export-txt
+                              create-table save-base)
+    layers       - список имён слоёв или nil (все); выбор блоков su-select-inserts
+    report-mode  - 'DETAIL / 'SUMMARY / оба (см. c:zapolnenie, строка ~626)
+    export-excel - T/nil    создать XLS
+    export-txt   - T/nil    создать TXT
+    create-table - T/nil    создать таблицы AutoCAD
+    save-base    - полный путь БЕЗ расширения (имя файлов: base.xls/.csv/.txt)
+
+СОСТАВ БАНДЛА (4 файла, ниже по тексту, исходники в cp1251, здесь — UTF-8)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+FILE: Extraction/zapolnenie.lsp
+НАЗНАЧЕНИЕ: ядро: сбор данных, агрегация, команды ZAPOLNENIE/ЗАПОЛНЕНИЕ
+ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
+--------------------------------------------------------------------------------
+
+;;; ============================================================
+;;; ZAPOLNENIE.LSP — Заполнение проемов
+;;; (стеклопакеты, сэндвич-панели, глухие панели, витражное стекло)
+;;;
+;;; РЕДАКЦИЯ 28: косметическая переработка — компактная расстановка
+;;; скобок. Функционал ред. 27 сохранен без изменений.
+;;;
+;;; ТЕХНИЧЕСКИЕ ПРАВИЛА (Этап 0):
+;;;   - Видимость отсутствует -> EffectiveName, не пропускать
+;;;   - Высота: "ВЫСОТА В СВЕТУ" -> "ВЫСОТА"
+;;;   - Ширина: "ШИРИНА В СВЕТУ" -> "ШИРИНА" -> "ДЛИНА"
+;;;   - Поиск свойства: точное совпадение, затем подстрока
+;;;   - Припуск: +26 мм; округление размеров: fix (целые мм)
+;;;   - Нулевой размер: пропуск (раздельные счетчики)
+;;;   - Площадь: мм2 -> м2, округление до 2 знаков ДО суммирования
+;;;   - Отображение площади: 3,00 -> 3
+;;;   - DETAIL ключ: UPPERCASE(ТИП) | ВЫСОТА | ШИРИНА
+;;;   - SUMMARY строится из DETAIL (один проход)
+;;;   - Сортировка DETAIL: Тип -> Высота -> Ширина
+;;;   - Сортировка SUMMARY: Тип (алфавит)
+;;;
+;;; Р3.1: числовая сортировка артикулов ("526" < "1226") через
+;;;       zp-leading-number и zp-str-smart-less.
+;;; ============================================================
+
+(vl-load-com)
+
+;; ---------- КОНСТАНТЫ ----------
+(setq *ZAPOLNENIE-FRAME-ALLOWANCE* 26)
+(setq *ZAPOLNENIE-SHEET-SIZE* "3210x2250")
+(setq *ZAPOLNENIE-ROTATE* "вращать")
+
+(setq *ZAPOLNENIE-HEIGHT-KEYWORDS* '("ВЫСОТА В СВЕТУ" "ВЫСОТА"))
+(setq *ZAPOLNENIE-WIDTH-KEYWORDS*  '("ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА"))
+
+(setq *zapolnenie-skipped-no-height* 0)
+(setq *zapolnenie-skipped-no-width* 0)
+
+;; ---------- ОКРУГЛЕНИЕ И ФОРМАТИРОВАНИЕ ----------
+(defun zapolnenie-round2 (x)
+  (/ (fix (+ (* x 100.0) 0.5)) 100.0))
+
+(defun zapolnenie-format-area (area / int-part frac)
+  (setq int-part (fix area))
+  (setq frac (fix (+ (* (- area int-part) 100.0) 0.5)))
+  (cond
+    ((= frac 0) (itoa int-part))
+    ((= (rem frac 10) 0) (strcat (itoa int-part) "," (itoa (/ frac 10))))
+    ((< frac 10) (strcat (itoa int-part) ",0" (itoa frac)))
+    (T (strcat (itoa int-part) "," (itoa frac)))))
+
+;; ---------- УМНАЯ СОРТИРОВКА СТРОК (Р3.1) ----------
+(defun zp-leading-number (s / n ch)
+  (if (/= (type s) 'STR)
+    nil
+    (progn
+      (setq s (vl-string-trim " \t" s) n "")
+      (while (and (> (strlen s) 0)
+                  (setq ch (substr s 1 1))
+                  (>= (ascii ch) 48)
+                  (<= (ascii ch) 57))
+        (setq n (strcat n ch))
+        (setq s (substr s 2)))
+      (if (= n "") nil (atoi n)))))
+
+(defun zp-str-smart-less (a b / na nb)
+  (setq na (zp-leading-number a) nb (zp-leading-number b))
+  (if (and na nb)
+    (if (= na nb) (< (strcase a) (strcase b)) (< na nb))
+    (< (strcase a) (strcase b))))
+
+;; ---------- ИМЯ ЭЛЕМЕНТА (ТИП) ----------
+(defun zapolnenie-element-name (obj / effname vis)
+  (setq effname (su-get-effective-name obj))
+  (setq vis (su-get-visibility obj))
+  (if (and vis (/= vis ""))
+    vis
+    (if effname effname "Без имени")))
+
+;; ---------- ПОИСК СВОЙСТВА (точное совпадение -> подстрока) ----------
+(defun zapolnenie-find-property (obj keyword / dynprops prop pname value result)
+  (setq dynprops
+    (vl-catch-all-apply 'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)))
+  (if (vl-catch-all-error-p dynprops)
+    nil
+    (progn
+      (setq result nil)
+
+      (foreach prop dynprops
+        (if (null result)
+          (progn
+            (setq pname
+              (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+            (if (and (not (vl-catch-all-error-p pname)) pname
+                     (= (type pname) 'STR)
+                     (= (strcase pname) (strcase keyword)))
+              (progn
+                (setq value
+                  (vl-catch-all-apply 'vla-get-Value (list prop)))
+                (if (not (vl-catch-all-error-p value))
+                  (setq result (su-value-to-number value))))))))
+
+      (if (null result)
+        (foreach prop dynprops
+          (if (null result)
+            (progn
+              (setq pname
+                (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+              (if (and (not (vl-catch-all-error-p pname)) pname
+                       (= (type pname) 'STR)
+                       (vl-string-search (strcase keyword) (strcase pname)))
+                (progn
+                  (setq value
+                    (vl-catch-all-apply 'vla-get-Value (list prop)))
+                  (if (not (vl-catch-all-error-p value))
+                    (setq result (su-value-to-number value)))))))))
+
+      result)))
+
+(defun zapolnenie-get-dimension (obj keywords-priority / result kw)
+  (setq result nil)
+  (foreach kw keywords-priority
+    (if (null result)
+      (setq result (zapolnenie-find-property obj kw))))
+  result)
+
+;; ---------- РАЗМЕРЫ С ПРИПУСКОМ ----------
+(defun zapolnenie-compute-dims (obj / raw-h raw-w h w)
+  (setq raw-h (zapolnenie-get-dimension obj *ZAPOLNENIE-HEIGHT-KEYWORDS*))
+  (setq raw-w (zapolnenie-get-dimension obj *ZAPOLNENIE-WIDTH-KEYWORDS*))
+
+  (cond
+    ((or (null raw-h) (<= raw-h 0.0))
+     (setq *zapolnenie-skipped-no-height*
+           (1+ *zapolnenie-skipped-no-height*))
+     nil)
+
+    ((or (null raw-w) (<= raw-w 0.0))
+     (setq *zapolnenie-skipped-no-width*
+           (1+ *zapolnenie-skipped-no-width*))
+     nil)
+
+    (T
+     (setq h (fix (+ raw-h *ZAPOLNENIE-FRAME-ALLOWANCE*)))
+     (setq w (fix (+ raw-w *ZAPOLNENIE-FRAME-ALLOWANCE*)))
+     (list h w))))
+
+;; ---------- СОРТИРОВКА DETAIL ----------
+(defun zapolnenie-sort-less (a b / ta tb ha hb wa wb)
+  (setq ta (strcase (car a)) tb (strcase (car b))
+        ha (cadr a) hb (cadr b)
+        wa (caddr a) wb (caddr b))
+  (cond
+    ((zp-str-smart-less ta tb) T)
+    ((zp-str-smart-less tb ta) nil)
+    ((< ha hb) T)
+    ((> ha hb) nil)
+    ((< wa wb) T)
+    ((> wa wb) nil)
+    (T nil)))
+
+;; ---------- АГРЕГАЦИЯ ----------
+;; Внутренняя структура: (key name h w count)
+;; Возвращаемая:         (name h w count)
+(defun zapolnenie-aggregate (inserts /
+    i ent obj name dims h w key rec found acc display-names)
+  (setq acc '() display-names '() i 0)
+  (setq *zapolnenie-skipped-no-height* 0
+        *zapolnenie-skipped-no-width* 0)
+
+  (repeat (length inserts)
+    (setq ent (nth i inserts))
+    (setq obj (vlax-ename->vla-object ent))
+    (setq name (zapolnenie-element-name obj))
+    (setq dims (zapolnenie-compute-dims obj))
+
+    (if dims
+      (progn
+        (setq h (car dims) w (cadr dims))
+        (setq key (strcat (strcase name) "|" (itoa h) "|" (itoa w)))
+        (setq found (assoc key acc))
+
+        (if found
+          (setq acc
+            (subst
+              (list key
+                    (cadr found)
+                    (caddr found)
+                    (cadddr found)
+                    (1+ (car (cddddr found))))
+              found acc))
+          (progn
+            (if (not (assoc (strcase name) display-names))
+              (setq display-names
+                (cons (cons (strcase name) name) display-names)))
+            (setq acc
+              (cons (list key name h w 1) acc))))))
+
+    (setq i (1+ i)))
+
+  (setq acc (vl-sort acc 'zapolnenie-sort-less))
+
+  (mapcar
+    '(lambda (r)
+       (list (cadr r) (caddr r) (cadddr r) (cadddr (cdr r))))
+    acc))
+
+;; ---------- SUMMARY ИЗ DETAIL ----------
+(defun zapolnenie-build-summary (data /
+    summary rec name h w cnt area key found)
+  (setq summary '())
+
+  (foreach rec data
+    (setq name (car rec)
+          h    (cadr rec)
+          w    (caddr rec)
+          cnt  (cadddr rec)
+          area (zapolnenie-round2 (/ (* h w cnt) 1000000.0))
+          key  (strcase name))
+    (setq found (assoc key summary))
+
+    (if found
+      (setq summary
+        (subst
+          (list key (cadr found)
+                (+ (caddr found) cnt)
+                (+ (cadddr found) area))
+          found summary))
+      (setq summary
+        (cons (list key name cnt area) summary))))
+
+  (setq summary
+    (vl-sort summary
+      '(lambda (a b) (zp-str-smart-less (car a) (car b)))))
+
+  (mapcar
+    '(lambda (r) (list (cadr r) (caddr r) (cadddr r)))
+    summary))
+
+;; ---------- КУСКОВАНИЕ: ПЛОСКИЙ СПИСОК ----------
+;; Группы по типу, каждая с подитогом.
+(defun zp-build-flat-items (data / items groups grp grpName grpRows
+                                   rec h w cnt area totalCnt totalArea groupIndex)
+  (setq items '() groupIndex 0)
+  (setq groups '())
+
+  (foreach rec data
+    (setq grpName (car rec))
+    (setq grp (assoc grpName groups))
+    (if grp
+      (setq groups (subst (append grp (list (list rec))) grp groups))
+      (setq groups (append groups (list (list grpName (list rec)))))))
+
+  (foreach grp groups
+    (setq groupIndex (1+ groupIndex))
+    (setq grpName (car grp))
+    (setq grpRows (cdr grp))
+    (setq totalCnt 0 totalArea 0.0)
+
+    (foreach rec grpRows
+      (setq rec (car rec))
+      (setq items (append items (list (cons 'data (cons groupIndex rec)))))
+      (setq h (cadr rec) w (caddr rec) cnt (cadddr rec))
+      (setq area (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
+      (setq totalCnt  (+ totalCnt cnt))
+      (setq totalArea (+ totalArea area)))
+
+    (setq items
+      (append items
+        (list (list 'subtotal groupIndex grpName totalCnt totalArea)))))
+
+  items)
+
+(defun zp-build-units (data idealRows / items chunks ch result)
+  (setq items (zp-build-flat-items data))
+  (setq chunks (tc-partition-flat items idealRows))
+  (setq result '())
+  (foreach ch chunks
+    (setq result (append result (list (cons (length ch) ch)))))
+  result)
+
+;; ---------- ТАБЛИЦА DETAIL (кускованная) ----------
+(defun zapolnenie-create-table-detail (data /
+    pt pt_wcs units total-chunks chunk-idx is-last chunk items item
+    nCols nRows space tbl row oldEcho doc
+    lastGroupIdx rowInGroup maxNameLen nameStr
+    tip h w cnt area total-cnt total-area
+    grpName grpCnt grpArea
+    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width)
+
+  (if (null data)
+    (progn (princ "\nНет данных для таблицы Заполнения.") nil)
+    (progn
+      (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+      (if (null pt)
+        (progn (princ "\nТаблица пропущена.") nil)
+        (progn
+          (setq doc (vlax-get-acad-object))
+          (setq doc (vla-get-activedocument doc))
+          (setq space (vla-get-modelspace doc))
+          (setq pt_wcs (trans pt 1 0))
+          (setq oldEcho (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (vla-startundomark doc)
+
+          (setq maxNameLen 10)
+          (foreach item data
+            (setq nameStr (car item))
+            (if (> (strlen nameStr) maxNameLen)
+              (setq maxNameLen (strlen nameStr))))
+
+          (setq maxNumLen 3)
+          (setq zpGroups '())
+          (foreach item data
+            (setq grpName (car item))
+            (if (not (assoc grpName zpGroups))
+              (setq zpGroups (cons (list grpName 0) zpGroups))))
+          (foreach item data
+            (setq grpName (car item))
+            (setq grpEntry (assoc grpName zpGroups))
+            (if grpEntry
+              (setq zpGroups
+                (subst (list grpName (1+ (cadr grpEntry)))
+                       grpEntry zpGroups))))
+          (setq grpIdx 1)
+          (foreach grpEntry (reverse zpGroups)
+            (setq numStr (strcat (itoa grpIdx) "." (itoa (cadr grpEntry))))
+            (if (> (strlen numStr) maxNumLen)
+              (setq maxNumLen (strlen numStr)))
+            (setq grpIdx (1+ grpIdx)))
+          (setq col0Width (max 15.0 (* (+ maxNumLen 1) 3.5)))
+          (setq col1Width (max 75.0 (* maxNameLen 3.0)))
+
+          (setq total-cnt 0 total-area 0.0)
+          (foreach item data
+            (setq total-cnt (+ total-cnt (cadddr item)))
+            (setq total-area (+ total-area
+              (zapolnenie-round2
+                (/ (* (cadr item) (caddr item) (cadddr item)) 1000000.0)))))
+
+          (setq units (zp-build-units data *TU-IDEAL-ROWS*))
+          (setq total-chunks (length units))
+          (setq chunk-idx 0 nCols 6)
+
+          (setq lastGroupIdx -1 rowInGroup 0)
+
+          (foreach chunk units
+            (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
+            (setq nRows (+ 2 (car chunk)))
+            (if is-last (setq nRows (1+ nRows)))
+            (setq items (cdr chunk))
+            (setq tbl (vl-catch-all-apply 'vla-addtable
+              (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+
+            (if (vl-catch-all-error-p tbl)
+              (princ (strcat "\nОшибка создания таблицы Заполнения: "
+                             (vl-catch-all-error-message tbl)))
+              (progn
+                (vla-SetColumnWidth tbl 0 col0Width)
+                (vla-SetColumnWidth tbl 1 col1Width)
+                (vla-SetColumnWidth tbl 2 30.0)
+                (vla-SetColumnWidth tbl 3 30.0)
+                (vla-SetColumnWidth tbl 4 30.0)
+                (vla-SetColumnWidth tbl 5 35.0)
+
+                (ts-ac-title tbl 0 "Заполнение" 6)
+
+                (ts-ac-header tbl 1
+                  '("№" "Тип" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
+
+                (setq row 2)
+
+                (foreach item items
+                  (if (eq (car item) 'data)
+                    (progn
+                      (setq groupIdx (cadr item))
+                      (setq tip (caddr item))
+                      (setq h   (cadddr item))
+                      (setq w   (caddr (cddr item)))
+                      (setq cnt (cadddr (cddr item)))
+                      (setq area
+                        (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
+
+                      (if (/= groupIdx lastGroupIdx)
+                        (progn
+                          (setq lastGroupIdx groupIdx)
+                          (setq rowInGroup 0)))
+                      (setq rowInGroup (1+ rowInGroup))
+
+                      (vla-SetText tbl row 0
+                        (strcat (itoa groupIdx) "." (itoa rowInGroup)))
+                      (vla-SetText tbl row 1 tip)
+                      (vla-SetText tbl row 2 (itoa h))
+                      (vla-SetText tbl row 3 (itoa w))
+                      (vla-SetText tbl row 4 (itoa cnt))
+                      (vla-SetText tbl row 5 (zapolnenie-format-area area))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 2 5)
+                      (vla-SetCellAlignment tbl row 3 5)
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetCellAlignment tbl row 5 5)
+
+                      (setq row (1+ row)))
+
+                    (progn
+                      (setq grpName (nth 2 item))
+                      (setq grpCnt  (nth 3 item))
+                      (setq grpArea (nth 4 item))
+
+                      (ts-ac-subtotal tbl row groupIdx
+                        (strcat "   {\\L" grpName "}") 1 3)
+                      (vla-SetText tbl row 4 (itoa grpCnt))
+                      (vla-SetText tbl row 5
+                        (zapolnenie-format-area grpArea))
+
+                      (vla-SetCellAlignment tbl row 0 5)
+                      (vla-SetCellAlignment tbl row 1 4)
+                      (vla-SetCellAlignment tbl row 4 5)
+                      (vla-SetCellAlignment tbl row 5 5)
+
+                      (setq row (1+ row)))))
+
+                (if is-last
+                  (progn
+                    (ts-ac-total tbl row
+                      "           {\\LИтого по всем позициям:}" 0 3 4)
+                    (vla-SetText tbl row 4 (itoa total-cnt))
+                    (vla-SetCellAlignment tbl row 4 5)
+                    (vla-SetText tbl row 5
+                      (zapolnenie-format-area total-area))
+                    (vla-SetCellAlignment tbl row 5 5)))
+
+                (vla-update tbl)
+                (princ (strcat "\nТаблица Заполнения "
+                               (itoa (1+ chunk-idx)) " создана."))
+                (setq pt_wcs
+                  (tu-next-table-point pt_wcs nRows 10.0 20.0))))
+
+            (setq chunk-idx (1+ chunk-idx)))
+
+          (vla-endundomark doc)
+          (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
+          (princ (strcat "\nВсего создано таблиц Заполнения: "
+                         (itoa total-chunks)))
+          T)))))
+
+;; ---------- ТАБЛИЦА SUMMARY ----------
+(defun zapolnenie-create-table-summary (data /
+    pt tbl row nRows nCols space rec tip cnt area total-cnt total-area)
+
+  (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
+
+  (if pt
+    (progn
+      (setvar "CMDECHO" 0)
+      (setq nCols 4)
+      (setq nRows (+ 3 (length data)))
+      (setq space
+        (vla-get-modelspace
+          (vla-get-activedocument (vlax-get-acad-object))))
+      (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
+
+      (vla-SetColumnWidth tbl 0 15.0)
+      (vla-SetColumnWidth tbl 1 75.0)
+      (vla-SetColumnWidth tbl 2 30.0)
+      (vla-SetColumnWidth tbl 3 35.0)
+
+      (ts-ac-title tbl 0 "Заполнение" 4)
+
+      (ts-ac-header tbl 1 '("№" "Тип" "Кол-во, шт." "Площадь, м2"))
+
+      (setq row 2 total-cnt 0 total-area 0.0)
+
+      (foreach rec data
+        (setq tip  (car rec))
+        (setq cnt  (cadr rec))
+        (setq area (caddr rec))
+
+        (if (null cnt)  (setq cnt 0))
+        (if (null area) (setq area 0.0))
+
+        (setq total-cnt  (+ total-cnt cnt))
+        (setq total-area (+ total-area area))
+
+        (vla-SetText tbl row 0 (itoa (1+ (- row 2))))
+        (vla-SetText tbl row 1 tip)
+        (vla-SetText tbl row 2 (itoa cnt))
+        (vla-SetText tbl row 3 (zapolnenie-format-area area))
+
+        (vla-SetCellAlignment tbl row 0 5)
+        (vla-SetCellAlignment tbl row 1 4)
+        (vla-SetCellAlignment tbl row 2 5)
+        (vla-SetCellAlignment tbl row 3 5)
+
+        (setq row (1+ row)))
+
+      (ts-ac-total tbl row "{   \\LИтого по всем позициям:}" 0 1 5)
+      (vla-SetText tbl row 2 (itoa total-cnt))
+      (vla-SetText tbl row 3 (zapolnenie-format-area total-area))
+
+      (vla-SetCellAlignment tbl row 0 5)
+      (vla-SetCellAlignment tbl row 2 5)
+      (vla-SetCellAlignment tbl row 3 5)
+
+      (vla-update tbl)
+      (setvar "CMDECHO" 1)
+      tbl)))
+
+;; ---------- ОСНОВНАЯ ФУНКЦИЯ ----------
+(defun zapolnenie-main (layers report-mode export-excel export-txt
+                        create-table save-base
+                        / *error* svSaved inserts data summary-data
+                          base-name xlsfile csvfile
+                          total-count total-area skipped-total rec)
+
+  (vl-load-com)
+  (sssetfirst nil nil)
+
+  (defun *error* (msg)
+    (if (and msg
+             (not (wcmatch (strcase msg)
+                    "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+      (princ (strcat "\nОшибка: " msg)))
+    (tu-sysvar-restore svSaved)
+    (princ))
+
+  ;; V8: guard - обрыв вернёт CMDECHO
+  (setq svSaved (tu-sysvar-save '("CMDECHO")))
+
+  (setq inserts (su-select-inserts layers))
+
+  (if inserts
+    (progn
+      (setq data (zapolnenie-aggregate inserts))
+
+      (if data
+        (progn
+          (if (null save-base)
+            (setq base-name
+              (strcat (getvar "dwgprefix")
+                      (vl-filename-base (getvar "dwgname"))
+                      " Заполнение "
+                      (if (= (strcase report-mode) "DETAIL")
+                        "подробный" "краткий")))
+            (setq base-name
+              (strcat save-base " "
+                      (if (= (strcase report-mode) "DETAIL")
+                        "подробный" "краткий"))))
+
+          (setq summary-data (zapolnenie-build-summary data))
+
+          ;; --- Экспорт XLS / CSV ---
+          (if export-excel
+            (progn
+              (setq xlsfile (strcat base-name ".xls"))
+              (if (= (strcase report-mode) "DETAIL")
+                (if (eu-export-zapolnenie-detail data xlsfile)
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
+                  (progn
+                    (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+                    (setq csvfile (strcat base-name ".csv"))
+                    (if (eu-export-zapolnenie-csv-detail data csvfile)
+                      (princ (strcat "\nCSV сохранен: " csvfile))
+                      (princ "\nНе удалось создать CSV."))))
+                (if (eu-export-zapolnenie-summary summary-data xlsfile)
+                  (princ (strcat "\nXLS сохранен: " xlsfile))
+                  (progn
+                    (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
+                    (setq csvfile (strcat base-name ".csv"))
+                    (if (eu-export-zapolnenie-csv-summary summary-data csvfile)
+                      (princ (strcat "\nCSV сохранен: " csvfile))
+                      (princ "\nНе удалось создать CSV.")))))))
+
+          ;; --- Экспорт GAL ---
+          (if export-txt
+            (tx-export-gal-zapolnenie data base-name
+              *ZAPOLNENIE-SHEET-SIZE* *ZAPOLNENIE-ROTATE*))
+
+          ;; --- Таблица AutoCAD ---
+          (if create-table
+            (if (= (strcase report-mode) "DETAIL")
+              (zapolnenie-create-table-detail data)
+              (zapolnenie-create-table-summary summary-data)))
+
+          ;; --- Итоговое сообщение ---
+          (setq total-count 0 total-area 0.0)
+
+          (foreach rec data
+            (setq total-count (+ total-count (cadddr rec)))
+            (setq total-area
+              (+ total-area
+                 (zapolnenie-round2
+                   (/ (* (cadr rec) (caddr rec) (cadddr rec)) 1000000.0)))))
+
+          (setq skipped-total
+            (+ *zapolnenie-skipped-no-height*
+               *zapolnenie-skipped-no-width*))
+
+          (if (> skipped-total 0)
+            (progn
+              (princ
+                (strcat "\nЗаполнение: обработано " (itoa total-count)
+                        " блоков, общая площадь "
+                        (zapolnenie-format-area total-area)
+                        " м2, пропущено " (itoa skipped-total) "."))
+              (princ
+                (strcat "\n  Без высоты: "
+                        (itoa *zapolnenie-skipped-no-height*)
+                        ", без ширины: "
+                        (itoa *zapolnenie-skipped-no-width*))))
+            (princ
+              (strcat "\nЗаполнение: обработано " (itoa total-count)
+                      " блоков, общая площадь "
+                      (zapolnenie-format-area total-area) " м2"))))
+
+        (princ "\nНет данных для отчета.")))
+
+    (princ "\nБлоки заполнения не найдены."))
+
+  (princ))
+
+;; ---------- АВТОНОМНАЯ КОМАНДА ----------
+(defun c:zapolnenie ( / layers-str layers report-mode
+                        export-excel export-txt create-table
+                        use-default save-base)
+
+  (if (not (and (type 'su-select-inserts)
+                (type 'eu-export-zapolnenie-detail)
+                (type 'tx-export-gal-zapolnenie)))
+    (progn
+      (princ "\nНе загружены зависимости. Запустите EXTRACTION или RELOAD.")
+      (princ)
+      (exit)))
+
+  (setq layers-str
+    (getstring T "\nВведите слои через запятую (Enter — все слои): "))
+
+  (if (= layers-str "")
+    (setq layers nil)
+    (setq layers
+      (mapcar
+        '(lambda (x) (strcase (vl-string-trim " " x)))
+        (split-string layers-str ","))))
+
+  (initget "D S")
+  (setq report-mode
+    (getkword "\nРежим отчета [Подробный(D)/Краткий(S)] <D>: "))
+  (if (null report-mode) (setq report-mode "D"))
+  (setq report-mode (if (= report-mode "D") "DETAIL" "SUMMARY"))
+
+  (initget "Y N")
+  (setq export-excel
+    (getkword "\nЭкспорт в Excel? [Да(Y)/Нет(N)] <N>: "))
+  (if (or (null export-excel) (= export-excel "N"))
+    (setq export-excel nil)
+    (setq export-excel T))
+
+  (initget "Y N")
+  (setq export-txt
+    (getkword "\nЭкспорт в TXT (GAL)? [Да(Y)/Нет(N)] <N>: "))
+  (if (or (null export-txt) (= export-txt "N"))
+    (setq export-txt nil)
+    (setq export-txt T))
+
+  (initget "Y N")
+  (setq create-table
+    (getkword "\nСоздать таблицу AutoCAD? [Да(Y)/Нет(N)] <Y>: "))
+  (if (or (null create-table) (= create-table "Y"))
+    (setq create-table T)
+    (setq create-table nil))
+
+  (initget "Y N")
+  (setq use-default
+    (getkword "\nИспользовать путь по умолчанию? [Да(Y)/Нет(N)] <Y>: "))
+  (if (or (null use-default) (= use-default "Y"))
+    (setq save-base nil)
+    (setq save-base
+      (getstring T "\nБазовое имя файла (без расширения): ")))
+
+  (zapolnenie-main layers report-mode
+    export-excel export-txt create-table save-base)
+  (princ))
+
+(defun c:ЗАПОЛНЕНИЕ () (c:zapolnenie))
+
+(princ "\nZAPOLNENIE.LSP загружен (ред. 28). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ")
+(princ)
+
+
+
+--------------------------------------------------------------------------------
+FILE: common/excel-utils.lsp
+НАЗНАЧЕНИЕ: писатели XLS (XML 2003) и CSV: eu-export-zapolnenie-detail/summary, csv-detail/summary
+ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
+--------------------------------------------------------------------------------
+
+;;; ============================================================
+;;; common/excel-utils.lsp
+;;; Экспорт отчетов в Excel (XML Spreadsheet) и CSV
+;;; Функции для Фасонки, Подсистемы и Заполнения
+;;; ============================================================
+
+(vl-load-com)
+
+;; ------------------------------------------------------------
+;; Экранирование XML-спецсимволов
+;; ------------------------------------------------------------
+(defun eu-xml-escape (str / result ch)
+  (setq result "")
+  (while (/= str "")
+    (setq ch (substr str 1 1))
+    (cond
+      ((= ch "&") (setq result (strcat result "&amp;")))
+      ((= ch "<") (setq result (strcat result "&lt;")))
+      ((= ch ">") (setq result (strcat result "&gt;")))
+      ((= ch "\"") (setq result (strcat result "&quot;")))
+      ((= ch "'") (setq result (strcat result "&apos;")))
+      (t (setq result (strcat result ch)))
+    )
+    (setq str (substr str 2))
+  )
+  result
+)
+
+;; ------------------------------------------------------------
+;; Экранирование текстового значения для CSV
+;; Заключает в кавычки, если есть точка с запятой, кавычка или перевод строки
+;; Внутренние кавычки удваиваются
+;; ------------------------------------------------------------
+(defun eu-csv-quote (str / result)
+  (if (null str)
+    ""
+    (if (or (vl-string-search ";" str)
+            (vl-string-search "\"" str)
+            (vl-string-search "\n" str))
+      (progn
+        (setq result (vl-string-subst "\"\"" "\"" str))
+        (strcat "\"" result "\"")
+      )
+      str
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Генерация блока XML-стилей для Excel
+;; num-format: "0.00" для Фасонки/Подсистемы, "0.##" для Заполнения
+;; Возвращает строку с полным блоком <Styles>...</Styles>
+;; ------------------------------------------------------------
+(defun eu-xml-styles (num-format / styles)
+  (setq styles
+    (strcat
+      " <Styles>\n"
+      "  <Style ss:ID=\"Default\" ss:Name=\"Normal\">\n"
+      "   <Alignment ss:Vertical=\"Center\"/>\n"
+      "  </Style>\n"
+      "  <Style ss:ID=\"Data\">\n"
+      "   <Alignment ss:Vertical=\"Center\"/>\n"
+      "   <Borders>\n"
+      "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "   </Borders>\n"
+      "  </Style>\n"
+      "  <Style ss:ID=\"Header\">\n"
+      "   <Font ss:Bold=\"1\" ss:Size=\"12\" ss:Underline=\"Single\"/>\n"
+      "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>\n"
+      "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>\n"
+      "   <Borders>\n"
+      "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "   </Borders>\n"
+      "  </Style>\n"
+      "  <Style ss:ID=\"BoldUnderline\">\n"
+      "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>\n"
+      "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>\n"
+      "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>\n"
+      "   <Borders>\n"
+      "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "   </Borders>\n"
+      "  </Style>\n"
+      "  <Style ss:ID=\"BoldUnderlineNum\">\n"
+      "   <Font ss:Bold=\"1\" ss:Underline=\"Single\"/>\n"
+      "   <Interior ss:Color=\"#D9D9D9\" ss:Pattern=\"Solid\"/>\n"
+      "   <NumberFormat ss:Format=\"" num-format "\"/>\n"
+      "   <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>\n"
+      "   <Borders>\n"
+      "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "   </Borders>\n"
+      "  </Style>\n"
+      "  <Style ss:ID=\"Num\">\n"
+      "   <NumberFormat ss:Format=\"" num-format "\"/>\n"
+      "   <Borders>\n"
+      "    <Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "    <Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>\n"
+      "   </Borders>\n"
+      "  </Style>\n"
+      " </Styles>"))
+  styles
+)
+
+;; ============================================================
+;; ФУНКЦИИ ДЛЯ ФАСОНКИ (восстановлены полностью)
+;; ============================================================
+
+(defun eu-export-xls-detail (data xlsfile / f rowNum groupIndex name recs rec itemNum len count startRow endRow sum totalSum)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      ;; Заголовок XML и стили
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.00") f)
+
+      (write-line " <Worksheet ss:Name=\"Lengths\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">Фасонное железо</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип фасонки</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Длина, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3)
+      (foreach ig data
+        (setq groupIndex (car ig)
+              name       (cadr ig)
+              recs       (caddr ig)
+              startRow   rowNum
+              itemNum    0
+              totalSum   0.0)
+
+        (foreach rec recs
+          (setq itemNum (1+ itemNum)
+                len     (cadr rec)
+                count   (caddr rec)
+                sum     (/ (* len count) 1000.0)
+                totalSum (+ totalSum sum))
+
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (itoa groupIndex) "." (itoa itemNum) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape name) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos len 2 0) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa count) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-2]*RC[-1]/1000\"><Data ss:Type=\"Number\">" (rtos sum 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+
+          (setq rowNum (1+ rowNum))
+        )
+
+        (setq endRow (1- rowNum))
+        (write-line "   <Row>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (itoa groupIndex) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (eu-xml-escape name) "</Data></Cell>") f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C5:R" (itoa endRow) "C5)\"><Data ss:Type=\"Number\">" (rtos totalSum 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+
+        (setq rowNum (1+ rowNum))
+      )
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+(defun eu-export-xls-summary (data xlsfile / f rowNum i totalCount totalSum)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.00") f)
+      (write-line " <Worksheet ss:Name=\"Summary\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"200\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Фасонное железо</Data></Cell>" f)
+      (write-line "   </Row>" f)
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип фасонки</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3
+            i 0)
+      (foreach rec data
+        (setq i (1+ i)
+              name  (car rec)
+              count (cadr rec)
+              sum   (caddr rec))
+        (write-line "   <Row>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape name) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa count) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos sum 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+      )
+
+      ;; Итоговая строка
+      (setq totalCount 0
+            totalSum   0.0)
+      (foreach rec data
+        (setq totalCount (+ totalCount (cadr rec))
+              totalSum   (+ totalSum (caddr rec)))
+      )
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">Итого</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"Number\">" (itoa totalCount) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"Number\">" (rtos totalSum 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Фасонка DETAIL в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; data: список (номер-группы имя-группы список-записей)
+;;   где запись: (номер длина количество)
+;; ------------------------------------------------------------
+(defun eu-export-csv-detail (data csvfile / f groupIndex name recs rec itemNum len count sum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Фасонное железо" f)
+      (write-line "№;Тип фасонки;Длина, мм;Кол-во, шт.;Сумма, м.п." f)
+
+      (foreach ig data
+        (setq groupIndex (car ig)
+              name       (cadr ig)
+              recs       (caddr ig)
+              itemNum    0)
+
+        (foreach rec recs
+          (setq itemNum (1+ itemNum)
+                len     (cadr rec)
+                count   (caddr rec)
+                sum     (/ (* len count) 1000.0))
+
+          (write-line
+            (strcat (itoa groupIndex) "-" (itoa itemNum) ";"   ; ? дефис здесь
+                    (eu-csv-quote name) ";"
+                    (rtos len 2 0) ";"
+                    (itoa count) ";"
+                    "\"" (vl-string-translate "." "," (rtos sum 2 2)) "\"")
+            f)
+        )
+      )
+
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Фасонка SUMMARY в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; data: список (имя количество сумма)
+;; ------------------------------------------------------------
+(defun eu-export-csv-summary (data csvfile / f i name count sum totalCount totalSum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Фасонное железо" f)
+      (write-line "№;Тип фасонки;Кол-во, шт.;Сумма, м.п." f)
+
+      (setq i 0 totalCount 0 totalSum 0.0)
+      (foreach rec data
+        (setq i (1+ i)
+              name  (car rec)
+              count (cadr rec)
+              sum   (caddr rec))
+        (setq totalCount (+ totalCount count)
+              totalSum   (+ totalSum sum))
+
+        (write-line
+          (strcat (itoa i) ";"
+                  (eu-csv-quote name) ";"
+                  (itoa count) ";"
+                  "\"" (vl-string-translate "." "," (rtos sum 2 2)) "\"")
+            f)
+      )
+
+      ;; Итоговая строка
+      (write-line
+        (strcat "Итого по всем позициям:;;"
+                (itoa totalCount) ";"
+                "\"" (vl-string-translate "." "," (rtos totalSum 2 2)) "\"")
+        f)
+
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ============================================================
+;; ФУНКЦИИ ДЛЯ ПОДСИСТЕМЫ
+;; ============================================================
+
+(defun eu-export-subsystem-detail (data xlsfile / f rowNum i name len cnt sum
+                                    totalSum groupIndex itemNum groupName groupRows startRow endRow)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.00") f)
+
+      (write-line " <Worksheet ss:Name=\"SubsystemDetail\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"250\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"4\"><Data ss:Type=\"String\">Подсистема</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Наименование</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Длина, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3
+            itemNum 0)
+
+      ;; Штучные блоки
+      (foreach rec data
+        (setq name (car rec)
+              len  (cadr rec)
+              cnt  (caddr rec))
+        (if (null len)
+          (progn
+            (setq itemNum (1+ itemNum))
+            (write-line "   <Row>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape name) "</Data></Cell>") f)
+            (write-line "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\"></Data></Cell>" f)
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+            (write-line "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\"></Data></Cell>" f)
+            (write-line "   </Row>" f)
+            (setq rowNum (1+ rowNum))
+          )
+        )
+      )
+
+      ;; Мерные блоки: группировка по наименованию
+      (setq groups '())
+      (foreach rec data
+        (if (cadr rec)
+          (if (not (assoc (car rec) groups))
+            (setq groups (cons (list (car rec)) groups))
+          )
+        )
+      )
+      (setq groups (vl-sort groups '(lambda (a b) (< (car a) (car b)))))
+
+      (foreach grp groups
+        (setq groupName (car grp)
+              groupRows '()
+              totalSum 0.0
+              startRow rowNum)
+        (foreach rec data
+          (if (and (= (car rec) groupName) (cadr rec))
+            (setq groupRows (append groupRows (list rec)))
+          )
+        )
+        (foreach rec groupRows
+          (setq len (cadr rec)
+                cnt (caddr rec)
+                sum (/ (* len cnt) 1000.0)
+                totalSum (+ totalSum sum))
+          (setq itemNum (1+ itemNum))
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape groupName) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos len 2 0) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-2]*RC[-1]/1000\"><Data ss:Type=\"Number\">" (rtos sum 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+          (setq rowNum (1+ rowNum))
+        )
+        (setq endRow (1- rowNum))
+        (write-line "   <Row>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (eu-xml-escape groupName) "</Data></Cell>") f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C5:R" (itoa endRow) "C5)\"><Data ss:Type=\"Number\">" (rtos totalSum 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+      )
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+(defun eu-export-subsystem-summary (data xlsfile / f rowNum i name cnt sum totalCount totalSum)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.00") f)
+      (write-line " <Worksheet ss:Name=\"SubsystemSummary\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"250\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Column ss:Width=\"75\"/>" f)
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Подсистема</Data></Cell>" f)
+      (write-line "   </Row>" f)
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Наименование</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Сумма, м.п.</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3
+            i 0)
+      (foreach rec data
+        (setq i (1+ i)
+              name (car rec)
+              cnt  (cadr rec)
+              sum  (caddr rec))
+        (write-line "   <Row>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape name) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+        (if sum
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (rtos sum 2 2) "</Data></Cell>") f)
+          (write-line "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        )
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+      )
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; CSV для Подсистемы с десятичной запятой
+(defun eu-export-subsystem-csv-detail (data csvfile / f rowNum i name len cnt sum totalSum groupName groupRows startRow endRow itemNum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Подсистема" f)
+      (write-line "№;Наименование;Длина, мм;Кол-во, шт.;Сумма, м.п." f)
+      (setq rowNum 3
+            itemNum 0)
+      ;; Штучные
+      (foreach rec data
+        (if (null (cadr rec))
+          (progn
+            (setq itemNum (1+ itemNum))
+            (write-line (strcat (itoa itemNum) ";" (car rec) ";;" (itoa (caddr rec)) ";") f)
+          )
+        )
+      )
+      ;; Мерные с подитогами
+      (setq groups '())
+      (foreach rec data
+        (if (cadr rec)
+          (if (not (assoc (car rec) groups))
+            (setq groups (cons (list (car rec)) groups))
+          )
+        )
+      )
+      (setq groups (vl-sort groups '(lambda (a b) (< (car a) (car b)))))
+      (foreach grp groups
+        (setq groupName (car grp)
+              totalSum 0.0)
+        (foreach rec data
+          (if (and (= (car rec) groupName) (cadr rec))
+            (progn
+              (setq len (cadr rec)
+                    cnt (caddr rec)
+                    sum (/ (* len cnt) 1000.0)
+                    totalSum (+ totalSum sum))
+              (setq itemNum (1+ itemNum))
+              (write-line (strcat (itoa itemNum) ";" groupName ";" (rtos len 2 0) ";" (itoa cnt) ";" (vl-string-translate "." "," (rtos sum 2 2))) f)
+            )
+          )
+        )
+        ;; Подитог
+        (write-line (strcat ";" groupName ";;;" (vl-string-translate "." "," (rtos totalSum 2 2))) f)
+      )
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+(defun eu-export-subsystem-csv-summary (data csvfile / f i name cnt sum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Подсистема" f)
+      (write-line "№;Наименование;Кол-во, шт.;Сумма, м.п." f)
+      (setq i 0)
+      (foreach rec data
+        (setq i (1+ i)
+              name (car rec)
+              cnt  (cadr rec)
+              sum  (caddr rec))
+        (write-line
+          (strcat (itoa i) ";" name ";" (itoa cnt) ";"
+                  (if sum (vl-string-translate "." "," (rtos sum 2 2)) "")) f)
+      )
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ============================================================
+;; ФУНКЦИИ ДЛЯ ЗАПОЛНЕНИЯ
+;; ============================================================
+
+;; ------------------------------------------------------------
+;; Округление до двух знаков после запятой (для Заполнения)
+;; Применяется ДО суммирования, чтобы подитоги и итоги
+;; точно соответствовали сумме отображаемых значений
+;; (не терялась 0,01 при накоплении погрешностей).
+;; ------------------------------------------------------------
+(defun eu-round2 (x)
+  (/ (fix (+ (* x 100.0) 0.5)) 100.0)
+)
+
+;; ------------------------------------------------------------
+;; Форматирование площади для CSV с подавлением лишних нулей
+;; 3,00 -> 3 ; 3,10 -> 3,1 ; 3,01 -> 3,01 ; 3,15 -> 3,15
+;; ------------------------------------------------------------
+(defun eu-format-area-csv (area / int-part frac-hundredths)
+  (setq int-part (fix area))
+  (setq frac-hundredths (fix (+ (* (- area int-part) 100.0) 0.5)))
+  (cond
+    ;; Нет дробной части: 3,00 -> 3
+    ((= frac-hundredths 0)
+     (itoa int-part))
+    ;; Сотые нулевые, десятые ненулевые: 3,10 -> 3,1
+    ((= (rem frac-hundredths 10) 0)
+     (strcat (itoa int-part) "," (itoa (/ frac-hundredths 10))))
+    ;; Обе цифры значимые: 3,01 -> 3,01 ; 3,15 -> 3,15
+    (T
+     (if (< frac-hundredths 10)
+       (strcat (itoa int-part) ",0" (itoa frac-hundredths))
+       (strcat (itoa int-part) "," (itoa frac-hundredths))
+     )
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение DETAIL в XLS (XML Spreadsheet)
+;; data: список (тип высота-мм ширина-мм количество)
+;; Формулы: Площадь = Высота ? Ширина ? Кол-во / 1000000
+;; Группировка по типам с подитогами
+;; Общий итог суммирует только строки подитогов групп
+;; Формат площади: 0.## (подавление лишних нулей)
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-detail (data xlsfile / f rowNum i rec tip h w cnt area
+                                     total-cnt total-area
+                                     groups grp grpName grpRows grpCnt grpArea
+                                     startRow endRow itemNum
+                                     subtotal-rows formula-cnt formula-area r)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.##") f)
+
+      (write-line " <Worksheet ss:Name=\"ZapolnenieDetail\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"125\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"5\"><Data ss:Type=\"String\">Заполнение</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      ;; Группировка по типам (данные уже отсортированы по типу)
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))
+        )
+      )
+
+      (setq rowNum 3 itemNum 0 total-cnt 0 total-area 0.0
+            subtotal-rows '())
+
+      ;; Вывод по группам с подитогами
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0
+              startRow rowNum)
+
+        ;; Строки группы
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                ;; Округление ДО суммирования — чтобы подитоги были точными
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea area)
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area area))
+
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa h) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+          ;; Площадь с формулой округления
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(RC[-3]*RC[-2]*RC[-1]/1000000,2)\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+
+          (setq rowNum (1+ rowNum))
+        )
+
+        (setq endRow (1- rowNum))
+
+        ;; Подитог группы с формулами
+        (write-line "   <Row>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C5:R" (itoa endRow) "C5)\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C6:R" (itoa endRow) "C6)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+
+        ;; Запоминаем номер строки подитога для формулы общего итога
+        (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
+      )
+
+      ;; Построение формул общего итога: суммируем только строки подитогов групп
+      (setq formula-cnt "" formula-area "")
+      (foreach r subtotal-rows
+        (if (= formula-cnt "")
+          (setq formula-cnt (strcat "=R" (itoa r) "C5"))
+          (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C5"))
+        )
+        (if (= formula-area "")
+          (setq formula-area (strcat "=R" (itoa r) "C6"))
+          (setq formula-area (strcat formula-area "+R" (itoa r) "C6"))
+        )
+      )
+
+      ;; Общий итог с формулами, суммирующими только подитоги групп
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Итого</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"" formula-cnt "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"" formula-area "\"><Data ss:Type=\"Number\">" (rtos total-area 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение SUMMARY в XLS (XML Spreadsheet)
+;; data: список (тип количество площадь-м2)
+;; Формат площади: 0.## (подавление лишних нулей)
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-summary (data xlsfile / f rowNum i rec tip cnt area total-cnt total-area startRow endRow)
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.##") f)
+
+      (write-line " <Worksheet ss:Name=\"ZapolnenieSummary\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"125\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+      (write-line "   <Column ss:Width=\"80\"/>" f)
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\"3\"><Data ss:Type=\"String\">Заполнение</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq rowNum 3 i 0 total-cnt 0 total-area 0.0 startRow 3)
+      (foreach rec data
+        (setq i (1+ i)
+              tip (car rec)
+              cnt (cadr rec)
+              area (caddr rec))
+        (setq total-cnt (+ total-cnt cnt)
+              total-area (+ total-area area))
+
+        (write-line "   <Row>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa i) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape tip) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+
+        (setq rowNum (1+ rowNum))
+      )
+
+      (setq endRow (1- rowNum))
+
+      ;; Итоговая строка с формулами (корректно, т.к. нет промежуточных подитогов)
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"1\"><Data ss:Type=\"String\">Итого</Data></Cell>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C3:R" (itoa endRow) "C3)\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C4:R" (itoa endRow) "C4)\"><Data ss:Type=\"Number\">" (rtos total-area 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T
+    )
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение DETAIL в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; Площадь в кавычках, с подавлением лишних нулей
+;; data: список (тип высота-мм ширина-мм количество)
+;; Группировка по типам с подитогами
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-csv-detail (data csvfile / f i rec tip h w cnt area
+                                         total-cnt total-area
+                                         groups grp grpName grpRows grpCnt grpArea itemNum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Заполнение" f)
+      (write-line "№;Тип;Высота, мм;Ширина, мм;Кол-во, шт.;Площадь, м2" f)
+      (setq i 0 total-cnt 0 total-area 0.0 itemNum 0)
+
+      ;; Группировка по типам (данные уже отсортированы по типу)
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))
+        )
+      )
+
+      ;; Вывод по группам с подитогами
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0)
+
+        ;; Строки группы
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                ;; Округление ДО суммирования — чтобы подитоги были точными
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea area)
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area area))
+          (write-line
+            (strcat (itoa itemNum) ";"
+                    (eu-csv-quote grpName) ";"
+                    (itoa h) ";"
+                    (itoa w) ";"
+                    (itoa cnt) ";"
+                    "\"" (eu-format-area-csv area) "\"")
+            f)
+        )
+
+        ;; Подитог группы
+        (write-line
+          (strcat ";" (eu-csv-quote grpName) ";;;"
+                  (itoa grpCnt) ";"
+                  "\"" (eu-format-area-csv grpArea) "\"")
+          f)
+      )
+
+      ;; Общий итог (3 точки с запятой: данные в колонках 5 и 6)
+      (write-line
+        (strcat "Итого;;;"
+                (itoa total-cnt) ";"
+                "\"" (eu-format-area-csv total-area) "\"")
+        f)
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ------------------------------------------------------------
+;; Экспорт Заполнение SUMMARY в CSV
+;; Разделитель: точка с запятой (единообразно с Подсистемой)
+;; Десятичный разделитель: запятая
+;; Площадь в кавычках, с подавлением лишних нулей
+;; data: список (тип количество площадь-м2)
+;; ------------------------------------------------------------
+(defun eu-export-zapolnenie-csv-summary (data csvfile / f i rec tip cnt area total-cnt total-area)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (write-line "Заполнение" f)
+      (write-line "№;Тип;Кол-во, шт.;Площадь, м2" f)
+      (setq i 0 total-cnt 0 total-area 0.0)
+      (foreach rec data
+        (setq i (1+ i)
+              tip (car rec)
+              cnt (cadr rec)
+              area (caddr rec))
+        (setq total-cnt (+ total-cnt cnt)
+              total-area (+ total-area area))
+        (write-line
+          (strcat (itoa i) ";"
+                  (eu-csv-quote tip) ";"
+                  (itoa cnt) ";"
+                  "\"" (eu-format-area-csv area) "\"")
+          f)
+      )
+      ;; Итоговая строка (2 точки с запятой: данные в колонках 3 и 4)
+      (write-line
+        (strcat "Итого по всем позициям:;;"
+                (itoa total-cnt) ";"
+                "\"" (eu-format-area-csv total-area) "\"")
+        f)
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+
+
+;; ============================================================
+;; Этап 4 (U1): примитивы XLS.
+;; eu-doc-begin/end, eu-worksheet/end - оболочки документа.
+;; eu-column - колонка: ss:Index ставится САМ по курсору (1..N);
+;;   задать его руками нельзя - класс дефектов bde9b71 невозможен.
+;; eu-row-begin/eu-row-end, eu-cell, eu-cell-skip - писатель строк:
+;;   *eu-col* - курсор колонки, тикает сам после каждой ячейки.
+;; Значения - всегда строки (числа формировать rtos/itoa до вызова);
+;;   текст экранируется eu-xml-escape-ом внутри eu-cell.
+;; attrs - доп. атрибуты ячейки строкой (ss:Formula, ss:MergeAcross);
+;;   ss:Index через attrs не задавать (контракт шага).
+;; ============================================================
+(if (null (boundp '*eu-col*)) (setq *eu-col* 1))
+
+(defun eu-doc-begin (f flavor)
+  ;; flavor "FULL"  - шапка с xmlns:html (формат CUTLINE/фасонки);
+  ;; flavor "BASIC" - компактная шапка, ">" на строке ss (формат CUTSHEET)
+  (cond
+    ((= flavor "BASIC")
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">" f))
+    (t
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)))
+  T)
+
+(defun eu-doc-end (f)
+  (write-line "</Workbook>" f)
+  T)
+
+(defun eu-worksheet (f name)
+  (write-line (strcat " <Worksheet ss:Name=\"" (eu-xml-escape name) "\">") f)
+  (write-line "  <Table>" f)
+  (setq *eu-col* 1)
+  T)
+
+(defun eu-worksheet-end (f)
+  (write-line "  </Table>" f)
+  (write-line " </Worksheet>" f)
+  T)
+
+(defun eu-column (f width autofit)
+  ;; width: строка (как есть) или число (rtos 2 1); autofit "0"/"1"
+  (write-line (strcat "   <Column ss:Index=\"" (itoa *eu-col*)
+                      "\" ss:AutoFitWidth=\"" autofit
+                      "\" ss:Width=\"" (if (numberp width) (rtos (float width) 2 1) width)
+                      "\"/>") f)
+  (setq *eu-col* (1+ *eu-col*))
+  T)
+
+(defun eu-row-begin (f attrs / )
+  ;; attrs: доп. атрибуты строки строкой ("" = обычная <Row>)
+  (setq *eu-col* 1)
+  (if (and attrs (/= attrs ""))
+    (write-line (strcat "   <Row " attrs ">") f)
+    (write-line "   <Row>" f))
+  T)
+
+(defun eu-cell (f style type value attrs / )
+  (write-line (strcat "    <Cell"
+                      (if (/= style "") (strcat " ss:StyleID=\"" style "\"") "")
+                      (if (and attrs (/= attrs "")) (strcat " " attrs) "")
+                      "><Data ss:Type=\"" type "\">"
+                      (eu-xml-escape value)
+                      "</Data></Cell>") f)
+  (setq *eu-col* (1+ *eu-col*))
+  T)
+
+(defun eu-cell-skip (f n / )
+  (repeat n
+    (write-line "    <Cell/>" f)
+    (setq *eu-col* (1+ *eu-col*)))
+  T)
+
+(defun eu-row-end (f)
+  (write-line "   </Row>" f)
+  T)
+
+(princ "\nEXCEL-UTILS.LSP загружен.")
+(princ)
+
+
+
+
+--------------------------------------------------------------------------------
+FILE: common/select-utils.lsp
+НАЗНАЧЕНИЕ: su-select-inserts (выбор блоков по слоям), su-get-effective-name, su-get-visibility, su-value-to-number
+ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
+--------------------------------------------------------------------------------
+
+;;; ============================================================
+;;; common/select-utils.lsp
+;;; Выбор вхождений блоков и извлечение динамических свойств
+;;
+;;; РЕДАКЦИЯ 4: каноническое имя su-layer-selected-p во всех
+;;; внутренних вызовах + алиас su_layer_selected-p для
+;;; совместимости со старыми вызовами других модулей.
+;;
+;;; Состав:
+;;;   su-layer-selected-p     — принадлежность слоя списку
+;;;   su-value-to-number      — значение в число
+;;;   кэш свойств блоков      — su-get-block-props (Р3.3)
+;;;   su-select-inserts       — выбор INSERT (Р2.2)
+;;;   su-get-effective-name / su-get-visibility
+;;;   su-has-length/width/height-property, su-is-valid-stock-block
+;;;   su-get-dynblock-type-name / su-collect-dynblock-types (3.1)
+;;;   su-get-length           — двухступенчатый поиск (Р3.2)
+;;;   MLINE: su-mline-length, su-mline-vertices,
+;;;          su-mline-vertex-count, su-mline-style-name,
+;;;          su-mline-type-name, su-collect-mline-types,
+;;;          su-count-mline-by-type, su-mline-cut-geom (M2.1, DXF)
+;;;   su-layer-match-any, *su-cutline-types*
+;;;   su-filter-ss-cutline, su-filter-dynblocks,
+;;;   su-build-cutline-ssfilter, su-select-cutline-objects
+;;;   su-select-lwpolylines   — выбор LWPOLYLINE (Облицовка К1)
+;;; ============================================================
+(vl-load-com)
+
+;; ============================================================
+;; Проверка, принадлежит ли слой выбранному списку
+;; ============================================================
+(defun su-layer-selected-p (layer layers / x)
+  (if (null layers)
+    T
+    (progn
+      (setq x nil)
+      (foreach name layers
+        (if (= (strcase name) (strcase layer))
+          (setq x T)
+        )
+      )
+      x
+    )
+  )
+)
+
+;; ============================================================
+;; Преобразование значения в число
+;; ============================================================
+(defun su-value-to-number (value / x s)
+  (cond
+    ((numberp value)
+     (float value)
+    )
+    ((= (type value) 'VARIANT)
+     (setq x (vl-catch-all-apply 'vlax-variant-value (list value)))
+     (if (vl-catch-all-error-p x)
+       nil
+       (su-value-to-number x)
+     )
+    )
+    ((= (type value) 'STR)
+     (setq s (vl-string-trim " \t\r\n" value))
+     (if (> (strlen s) 0)
+       (progn
+         (setq s (vl-string-translate "," "." s))
+         (while (vl-string-search " " s)
+           (setq s (vl-string-subst "" " " s))
+         )
+         (setq x (vl-catch-all-apply 'atof (list s)))
+         (if (vl-catch-all-error-p x)
+           nil
+           x
+         )
+       )
+       nil
+     )
+    )
+    (t nil)
+  )
+)
+
+;; ============================================================
+;; КЭШ СВОЙСТВ ДИНАМИЧЕСКИХ БЛОКОВ (Р3.3)
+;; Формат: (ename . (has-len has-wid has-hei len-exact len-soft))
+;; ============================================================
+
+(if (not (boundp '*su-block-props-cache*))
+  (setq *su-block-props-cache* '())
+)
+
+(defun su-block-props-cache-clear ()
+  (setq *su-block-props-cache* '())
+)
+
+(defun su-get-block-props (obj / ent cached dynprops prop pname pval
+                               has-len has-wid has-hei len-exact len-soft entry)
+  (setq ent (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+
+  (if (vl-catch-all-error-p ent)
+    '(nil nil nil nil nil)
+    (progn
+      (setq cached (assoc ent *su-block-props-cache*))
+      (if cached
+        (cdr cached)
+        (progn
+          (setq has-len nil has-wid nil has-hei nil
+                len-exact nil len-soft nil)
+
+          (setq dynprops
+            (vl-catch-all-apply 'vlax-invoke
+              (list obj 'GetDynamicBlockProperties)))
+
+          (if (not (vl-catch-all-error-p dynprops))
+            (foreach prop dynprops
+              (setq pname
+                (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+              (if (and (not (vl-catch-all-error-p pname))
+                       pname
+                       (= (type pname) 'STR))
+                (progn
+                  (setq pname (strcase (vl-string-trim " \t\r\n" pname)))
+                  (cond
+                    ((= pname "ДЛИНА")
+                     (setq has-len T)
+                     (setq pval (vl-catch-all-apply 'vla-get-Value (list prop)))
+                     (if (not (vl-catch-all-error-p pval))
+                       (setq len-exact (su-value-to-number pval)))
+                    )
+                    ((and (vl-string-search "ДЛИНА" pname)
+                          (not (vl-string-search "ШИРИНА" pname))
+                          (not (vl-string-search "ВЫСОТА" pname)))
+                     (if (null len-soft)
+                       (progn
+                         (setq pval (vl-catch-all-apply 'vla-get-Value (list prop)))
+                         (if (not (vl-catch-all-error-p pval))
+                           (setq len-soft (su-value-to-number pval)))
+                       )
+                     )
+                    )
+                  )
+                  (if (vl-string-search "ШИРИНА" pname) (setq has-wid T))
+                  (if (vl-string-search "ВЫСОТА" pname) (setq has-hei T))
+                )
+              )
+            )
+          )
+
+          (setq entry (list has-len has-wid has-hei len-exact len-soft))
+          (setq *su-block-props-cache*
+            (cons (cons ent entry) *su-block-props-cache*))
+          entry
+        )
+      )
+    )
+  )
+)
+;; ============================================================
+;; Шаг 9. Признак «нашей» сущности карты раскроя:
+;;   - любой объект на служебном слое рамки «Невидимые»;
+;;   - INSERT блоков «Раскрой листа …» / «Раскрой …» (карты прошлых запусков).
+;; ============================================================
+(defun su-map-entity-p (ent / ed typ lay bnm)
+  (setq ed (entget ent)
+        typ (cdr (assoc 0 ed))
+        lay (cdr (assoc 8 ed)))
+  (or
+    (and lay (= (strcase lay) (strcase "Невидимые")))
+    (and (= typ "INSERT")
+         (setq bnm (cdr (assoc 2 ed)))
+         bnm
+         (wcmatch (strcase bnm) "РАСКРОЙ ЛИСТА*,РАСКРОЙ *"))))
+
+;; Удалить карты-артефакты из набора (Шаг 9)
+(defun su-ssdel-map-entities (ss / i e)
+  (if ss
+    (progn
+      (setq i -1)
+      (repeat (sslength ss)
+        (setq i (1+ i) e (ssname ss i))
+        (if (and e (su-map-entity-p e)) (ssdel e ss)))
+      ss)
+    nil))
+
+
+;; ============================================================
+;; Доступ к предвыделению диспетчера. select-utils состояние НЕ меняет
+;; (дополнение к Шагу 7): запись выполняет только владелец — extraction.lsp.
+;; ============================================================
+(defun su-preselection-value (/)
+  ;; ТОЛЬКО чтение.
+  (if (boundp '*extraction-preselected-set*) *extraction-preselected-set*))
+
+(defun su-take-preselection (/)
+  ;; «Взял — погасил»: само погашение делает владелец (ex-take-preselected).
+  ;; Если диспетчер не загружен (автономный запуск), просто читаем.
+  ;; NB: в AutoLISP нет проверки связанности ФУНКЦИИ — смотрим
+  ;; (type sym) = 'SUBR; несвязанный символ вычисляется в nil.
+  (if (= (type ex-take-preselected) 'SUBR)
+    (ex-take-preselected)
+    (su-preselection-value)))
+
+;; ============================================================
+;; Выбор вхождений блоков (INSERT) с учетом предвыбора (Р2.2)
+;; ============================================================
+(defun su-select-inserts (layers / ss i ent data layer out layer-name)
+  (su-block-props-cache-clear)
+  (setq out '())
+
+  (setq ss (su-take-preselection))
+  (if (null ss)
+    (setq ss (ssget "_I")))
+
+  (if (null ss)
+    (if (null layers)
+      (setq ss (ssget "_X" '((0 . "INSERT"))))
+      (progn
+        (setq layer-name
+          (apply 'strcat (mapcar '(lambda (x) (strcat x ",")) layers)))
+        (setq layer-name (substr layer-name 1 (1- (strlen layer-name))))
+        (setq ss (ssget "_X" (list '(0 . "INSERT") (cons 8 layer-name))))
+      )
+    )
+  )
+
+  (if ss
+    (progn
+      (setq i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq data (entget ent))
+        (setq layer (cdr (assoc 8 data)))
+        (if (and (su-layer-selected-p layer layers) (not (su-map-entity-p ent)))
+          (setq out (cons ent out))
+        )
+        (setq i (1+ i))
+      )
+    )
+  )
+
+
+  (reverse out)
+)
+
+;; ============================================================
+;; Защищенное получение EffectiveName
+;; ============================================================
+(defun su-get-effective-name (obj / r)
+  (setq r (vl-catch-all-apply 'vla-get-EffectiveName (list obj)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (setq r (vl-catch-all-apply 'vla-get-Name (list obj)))
+      (if (vl-catch-all-error-p r) nil r)
+    )
+    r
+  )
+)
+
+;; ============================================================
+;; Получение строкового значения видимости
+;; ============================================================
+(defun su-get-visibility (obj / dynprops prop pname val result)
+  (setq dynprops
+    (vl-catch-all-apply 'vlax-invoke (list obj 'GetDynamicBlockProperties)))
+  (if (vl-catch-all-error-p dynprops)
+    nil
+    (progn
+      (setq result nil)
+      (foreach prop dynprops
+        (if (null result)
+          (progn
+            (setq pname (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+            (if (and (not (vl-catch-all-error-p pname))
+                     pname (= (type pname) 'STR)
+                     (or (vl-string-search "VISIBILITY" (strcase pname))
+                         (vl-string-search "ВИДИМОСТЬ" (strcase pname))))
+              (progn
+                (setq val (vl-catch-all-apply 'vla-get-Value (list prop)))
+                (if (not (vl-catch-all-error-p val))
+                  (progn
+                    (if (= (type val) 'VARIANT)
+                      (setq val (vlax-variant-value val))
+                    )
+                    (if val (setq result (vl-princ-to-string val)))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+      result
+    )
+  )
+)
+
+;; ============================================================
+;; Проверки свойств блоков через кэш (Р3.3)
+;; ============================================================
+
+(defun su-is-valid-stock-block (obj / p)
+  (setq p (su-get-block-props obj))
+  (and (car p) (not (cadr p)) (not (caddr p)))
+)
+
+;; ============================================================
+;; Имя типа динамического блока (Этап 3.1)
+;; ============================================================
+(defun su-get-dynblock-type-name (ent / obj vis name)
+  (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+  (if (vl-catch-all-error-p obj)
+    "Без имени"
+    (progn
+      (setq vis (vl-catch-all-apply 'su-get-visibility (list obj)))
+      (if (or (vl-catch-all-error-p vis) (null vis) (not (= (type vis) 'STR)))
+        (setq vis nil)
+      )
+      (if (and vis (> (strlen (vl-string-trim " \t\r\n" vis)) 0))
+        (vl-string-trim " \t\r\n" vis)
+        (progn
+          (setq name (vl-catch-all-apply 'su-get-effective-name (list obj)))
+          (if (or (vl-catch-all-error-p name) (null name)
+                  (not (= (type name) 'STR)))
+            "Без имени"
+            (if (> (strlen (vl-string-trim " \t\r\n" name)) 0)
+              (vl-string-trim " \t\r\n" name)
+              "Без имени"
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; ============================================================
+;; Сбор уникальных типов динамических блоков (Этап 3.1)
+;; ============================================================
+(defun su-collect-dynblock-types (ss filter-fn / i ent typ obj types type-name)
+  (setq types '() i 0)
+  (if (null ss)
+    '()
+    (progn
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq typ (cdr (assoc 0 (entget ent))))
+        (if (= typ "INSERT")
+          (progn
+            (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+            (if (not (vl-catch-all-error-p obj))
+              (if (or (null filter-fn) (apply filter-fn (list obj)))
+                (progn
+                  (setq type-name (su-get-dynblock-type-name ent))
+                  (if (not (member type-name types))
+                    (setq types (cons type-name types))
+                  )
+                )
+              )
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+      (vl-sort types '(lambda (a b) (< (strcase a) (strcase b))))
+    )
+  )
+)
+
+;; ============================================================
+;; Получение длины блока (Р3.2): двухступенчатый поиск из кэша
+;; ============================================================
+(defun su-get-length (obj / p len)
+  (setq p (su-get-block-props obj))
+  (setq len (if (car p) (nth 3 p) (nth 4 p)))
+  (if (numberp len)
+    (atoi (rtos len 2 0))
+    nil
+  )
+)
+
+;; ============================================================
+;; MLINE: длина по вершинам DXF 11 (обратная совместимость)
+;; ============================================================
+(defun su-mline-length (ent / data verts i total p1 p2)
+  (setq data (entget ent))
+  (setq verts '())
+  (foreach pair data
+    (if (= (car pair) 11)
+      (setq verts (cons (cdr pair) verts))
+    )
+  )
+  (setq verts (reverse verts))
+  (setq total 0.0 i 0)
+  (while (< i (1- (length verts)))
+    (setq p1 (nth i verts) p2 (nth (1+ i) verts))
+    (setq total (+ total (distance p1 p2)))
+    (setq i (1+ i))
+  )
+  total
+)
+
+;; ============================================================
+;; MLINE: вершины из DXF 11 (M2.1 — без ActiveX)
+;; ============================================================
+(defun su-mline-vertices (ent / out)
+  (setq out '())
+  (foreach g (entget ent)
+    (if (= (car g) 11)
+      (setq out (cons (cdr g) out))
+    )
+  )
+  (reverse out)
+)
+
+(defun su-mline-vertex-count (ent / n)
+  (setq n 0)
+  (foreach g (entget ent)
+    (if (= (car g) 11) (setq n (1+ n)))
+  )
+  n
+)
+
+;; ============================================================
+;; MLINE: тип = имя MLINESTYLE (DXF 2)
+;; ============================================================
+(defun su-mline-style-name (ent / d v)
+  (setq d (entget ent))
+  (if (null d)
+    nil
+    (progn
+      (setq v (cdr (assoc 2 d)))
+      (if (and v (= (type v) 'STR) (> (strlen (vl-string-trim " \t\r\n" v)) 0))
+        (vl-string-trim " \t\r\n" v)
+        nil
+      )
+    )
+  )
+)
+
+(defun su-mline-type-name (ent / n)
+  (setq n (su-mline-style-name ent))
+  (if n n "Без имени")
+)
+
+(defun su-collect-mline-types (ss / i ent typ types)
+  (setq types '() i 0)
+  (if (null ss)
+    '()
+    (progn
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (if (= (cdr (assoc 0 (entget ent))) "MLINE")
+          (progn
+            (setq typ (su-mline-type-name ent))
+            (if (not (member typ types))
+              (setq types (cons typ types))
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+      (vl-sort types '(lambda (a b) (< (strcase a) (strcase b))))
+    )
+  )
+)
+
+(defun su-count-mline-by-type (ss type-name / i ent n count)
+  (setq count 0 i 0)
+  (if (null ss)
+    0
+    (progn
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (if (= (cdr (assoc 0 (entget ent))) "MLINE")
+          (if (or (null type-name) (= type-name ""))
+            (setq count (1+ count))
+            (progn
+              (setq n (su-mline-type-name ent))
+              (if (= n type-name) (setq count (1+ count)))
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+      count
+    )
+  )
+)
+
+;; ============================================================
+;; MLINE: допуск осевого выравнивания и геометрия для раскроя
+;; ============================================================
+(if (not (boundp '*SU-MLINE-AXIS-TOL*))
+  (setq *SU-MLINE-AXIS-TOL* 0.01)
+)
+
+(defun su-mline-cut-geom (ent / v p1 p2 dx dy tol)
+  (setq v (su-mline-vertices ent))
+  (if (/= (length v) 2)
+    nil
+    (progn
+      (setq p1 (car v) p2 (cadr v))
+      (setq dx (abs (- (car p2) (car p1)))
+            dy (abs (- (cadr p2) (cadr p1)))
+            tol *SU-MLINE-AXIS-TOL*)
+      (cond
+        ((<= dy tol) (cons (distance p1 p2) 'H))
+        ((<= dx tol) (cons (distance p1 p2) 'V))
+        (T nil)
+      )
+    )
+  )
+)
+
+;; ============================================================
+;; Проверка соответствия слоя списку (с масками)
+;; ============================================================
+(defun su-layer-match-any (layer layers / found)
+  (if (or (null layers) (not (listp layers)) (= (length layers) 0))
+    T
+    (progn
+      (setq found nil)
+      (foreach l layers
+        (if (wcmatch (strcase layer) (strcase l))
+          (setq found T)
+        )
+      )
+      found
+    )
+  )
+)
+
+;; ============================================================
+;; Типы объектов, допустимые в CUTLINE
+;; ============================================================
+(setq *su-cutline-types* '("LINE" "MLINE" "INSERT"))
+
+;; ============================================================
+;; Ручная фильтрация selection set по типу и слоям
+;; ============================================================
+(defun su-filter-ss-cutline (ss types layers / i ent data typ lay new-ss)
+  (if (null ss)
+    nil
+    (progn
+      (setq new-ss (ssadd))
+      (setq i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq data (entget ent))
+        (setq typ (cdr (assoc 0 data)))
+        (setq lay (cdr (assoc 8 data)))
+        (if (and (member typ types) (su-layer-match-any lay layers) (not (su-map-entity-p ent)))
+          (ssadd ent new-ss)
+        )
+        (setq i (1+ i))
+      )
+      (if (> (sslength new-ss) 0) new-ss nil)
+    )
+  )
+)
+
+;; ============================================================
+;; Пост-фильтрация динамических блоков для раскроя
+;; ============================================================
+(defun su-filter-dynblocks (ss / i ent typ obj new-ss)
+  (if (null ss)
+    nil
+    (progn
+      (setq new-ss (ssadd))
+      (setq i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq typ (cdr (assoc 0 (entget ent))))
+        (cond
+          ((or (= typ "LINE") (= typ "MLINE"))
+           (ssadd ent new-ss)
+          )
+          ((= typ "INSERT")
+           (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+           (if (and (not (vl-catch-all-error-p obj))
+                    (su-is-valid-stock-block obj))
+             (ssadd ent new-ss)
+           )
+          )
+        )
+        (setq i (1+ i))
+      )
+      (if (> (sslength new-ss) 0) new-ss nil)
+    )
+  )
+)
+
+;; ============================================================
+;; Построение ssget-фильтра для CUTLINE
+;; ============================================================
+(defun su-build-cutline-ssfilter (layers / base layer-mask)
+  (setq base (list '(0 . "LINE,MLINE,INSERT")))
+  (if (and layers (listp layers) (> (length layers) 0))
+    (progn
+      (setq layer-mask
+        (apply 'strcat (mapcar '(lambda (x) (strcat x ",")) layers)))
+      (setq layer-mask (substr layer-mask 1 (1- (strlen layer-mask))))
+      (append base (list (cons 8 layer-mask)))
+    )
+    base
+  )
+)
+
+;; ============================================================
+;; Извлечение исходного набора объектов для CUTLINE (Р2.2)
+;; ============================================================
+(defun su-select-cutline-objects (layers / ss ssfilter raw-count pre-ss)
+  (su-block-props-cache-clear)
+  (setq ss nil)
+  (setq ssfilter (su-build-cutline-ssfilter layers))
+
+  (setq pre-ss (su-take-preselection))
+  (if pre-ss
+    (progn
+      (setq ss (su-filter-ss-cutline pre-ss *su-cutline-types* layers))
+      (if (not (and ss (> (sslength ss) 0)))
+        (setq ss nil)
+      )
+    )
+  )
+
+  (if (null ss)
+    (setq ss (ssget "_I" ssfilter))
+  )
+
+  (if (null ss)
+    (setq ss (ssget ssfilter))
+  )
+
+  (if ss
+    (progn
+      (setq raw-count (sslength ss))
+      (setq ss (su-filter-dynblocks ss))
+      (if ss (setq ss (su-ssdel-map-entities ss)))
+      (if (and ss raw-count (< (sslength ss) raw-count))
+        (princ (strcat "\n  После пост-фильтрации отсеяно: "
+                       (itoa (- raw-count (sslength ss)))
+                       " непригодных объектов (динамические блоки без свойства 'Длина' или с 'Ширина'/'Высота')"))
+      )
+    )
+  )
+
+  ss
+)
+
+;; ============================================================
+;; ВЫБОР LWPOLYLINE С УЧЕТОМ СЛОЕВ (Облицовка, К1)
+;; ============================================================
+(defun su-select-lwpolylines (layers / ss out i ent data layer layer-mask)
+  (setq out '())
+
+  (setq ss (su-take-preselection))
+  (if (null ss)
+    (setq ss (ssget "_I")))
+
+  (if (null ss)
+    (if (null layers)
+      (setq ss (ssget "_X" '((0 . "LWPOLYLINE"))))
+      (progn
+        (setq layer-mask
+          (apply 'strcat (mapcar '(lambda (x) (strcat x ",")) layers)))
+        (setq layer-mask (substr layer-mask 1 (1- (strlen layer-mask))))
+        (setq ss (ssget "_X" (list '(0 . "LWPOLYLINE") (cons 8 layer-mask))))
+      )
+    )
+  )
+
+  (if ss
+    (progn
+      (setq i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i))
+        (setq data (entget ent))
+        (setq layer (cdr (assoc 8 data)))
+        (if (and (su-layer-selected-p layer layers) (not (su-map-entity-p ent)))
+          (setq out (cons ent out))
+        )
+        (setq i (1+ i))
+      )
+    )
+  )
+
+
+  (reverse out)
+)
+
+;; ============================================================
+;; АЛИАС для совместимости со старыми вызовами других модулей
+;; ============================================================
+(if (not (= (type su_layer_selected-p) 'SUBR))
+  (defun su_layer_selected-p (layer layers)
+    (su-layer-selected-p layer layers)
+  )
+)
+
+(princ "\nSELECT-UTILS.LSP загружен (ред. 4).")
+(princ)
+
+
+
+--------------------------------------------------------------------------------
+FILE: common/task-utils.lsp
+НАЗНАЧЕНИЕ: tu-next-table-point, tu-is-last-chunk (раскладка таблиц), tu-sysvar-save/restore
+ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
+--------------------------------------------------------------------------------
+
+;;; ============================================================
+;;; common/task-utils.lsp
+;;; Универсальные функции для задач AutoExtraction
+;;
+;;; ИСПРАВЛЕНИЯ (аудит Этап 4.3):
+;;;   D3: Удалена функция tu-parse-comma-list.
+;;;       Единственной функцией разбора строк является
+;;;       универсальная функция split-string.
+;;;       Поиск по проекту показал, что tu-parse-comma-list
+;;;       нигде не вызывается, удаление безопасно.
+;;
+;;;   D9: Унификация суффиксов имен файлов.
+;;;       Добавлены суффиксы для всех задач:
+;;;       Фасонка, Подсистема, Заполнение, Облицовка, Витраж.
+;;
+;;; ПРОШЛЫЕ ИСПРАВЛЕНИЯ:
+;;;   Этап 4.1 (D7): добавлена переменная pos в /-список
+;;;       tu-strip-extension
+;;;   Этап 4.2 (D4): оптимизация циклов — append заменен
+;;;       на cons/reverse в функциях:
+;;;       - tu-list-unique-ci
+;;;       - split-string
+;;;   Этап 4.2 (D14): исправление утечки файлового дескриптора
+;;;       в функции tu-file-writable-p
+;;; ============================================================
+
+(vl-load-com)
+
+;; ============================================================
+;; Уникализация списка строк без учета регистра
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+;; Оптимизировано: cons вместо append (O(1) вместо O(N))
+;; Порядок элементов сохраняется через reverse в конце.
+;; ============================================================
+(defun tu-list-unique-ci (lst / out x key)
+  (setq out '())
+  (if (listp lst)
+    (foreach x lst
+      (if (= (type x) 'STR)
+        (progn
+          (setq key (strcase x))
+          (if (not (vl-some '(lambda (y) (= (strcase y) key)) out))
+            (setq out (cons x out))
+          )
+        )
+      )
+    )
+  )
+  (reverse out)
+)
+
+;; Сортировка строк без учета регистра
+(defun tu-sort-strings-ci (lst)
+  (vl-sort lst '(lambda (a b) (< (strcase a) (strcase b))))
+)
+
+;; Удаление расширения из пути
+;; Исправлено на Этапе 4.1: добавлена pos в /-список
+(defun tu-strip-extension (path / pos)
+  (if (setq pos (vl-string-position 46 (vl-string-left-trim "\\/" path) 0 T nil))
+    (substr path 1 pos)
+    path
+  )
+)
+
+;; ============================================================
+;; Формирование базового имени файла по умолчанию
+;; ИСПРАВЛЕНО (аудит Этап 4.3, пункт D9):
+;; Добавлены суффиксы для всех задач:
+;; Фасонка, Подсистема, Заполнение, Облицовка, Витраж.
+;; Ранее суффикс был только для Фасонки.
+;; ============================================================
+(defun tu-default-save-base (task-id)
+  (strcat
+    (getvar "dwgprefix")
+    (vl-filename-base (getvar "dwgname"))
+    (cond
+      ((eq task-id 'FASONKA)    " Фасонка")
+      ((eq task-id 'SUBSYSTEM)  " Подсистема")
+      ((eq task-id 'ZAPOLNENIE) " Заполнение")
+      ((eq task-id 'CLADDING)   " Облицовка")
+      ((eq task-id 'VITRAZH)    " Витраж")
+      (t "")
+    )
+  )
+)
+
+;; Запрос базового имени для сохранения
+(defun tu-get-save-base (task-id / default)
+  (setq default (tu-default-save-base task-id))
+  (getfiled "Сохранить как" default "xls" 1)
+)
+
+;; ============================================================
+;; Проверка возможности записи файла
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D14):
+;; Файловый дескриптор теперь закрывается после проверки.
+;; ============================================================
+(defun tu-file-writable-p (path / f)
+  (setq f (open path "a"))
+  (if f
+    (progn
+      (close f)
+      T
+    )
+    nil
+  )
+)
+
+;; ============================================================
+;; РАЗБОР СТРОК
+;; ИСПРАВЛЕНО (аудит Этап 4.3, пункт D3):
+;; Функция tu-parse-comma-list удалена.
+;; Единственной функцией разбора строк является
+;; универсальная функция split-string.
+;; Поиск по проекту показал, что tu-parse-comma-list
+;; нигде не вызывается, удаление безопасно.
+;; ============================================================
+
+;; ============================================================
+;; Разбиение строки на список по произвольному разделителю
+;; Используется для разбора строки слоев, введенной через запятую
+;; С обрезкой пробелов по краям каждого элемента.
+;; Это гарантирует корректную работу при вводе слоев
+;; вида "Заполнение, Стекло" (с пробелом после запятой).
+;; Пример: (split-string "a, b ,c" ",") ? ("a" "b" "c")
+;; ИСПРАВЛЕНО (аудит Этап 4.2, пункт D4):
+;; Оптимизировано: cons вместо append (O(1) вместо O(N))
+;; Порядок элементов сохраняется через reverse в конце.
+;; ============================================================
+(defun split-string (str delim / pos result item)
+  (setq result '())
+  (while (setq pos (vl-string-search delim str))
+    (setq item (vl-string-trim " " (substr str 1 pos)))
+    (setq result (cons item result))
+    (setq str (substr str (+ pos 2)))
+  )
+  (setq item (vl-string-trim " " str))
+  (if (> (strlen item) 0)
+    (setq result (cons item result))
+  )
+  (reverse result)
+)
+
+(princ "\nTASK-UTILS.LSP загружен.")
+(princ)
+
+;; ============================================================
+;; Этап 2 (V11): единый диагностический протокол.
+;; Тумблер *EXTRACTION-DIAGNOSTIC*: nil (по умолчанию) - тишина;
+;; T - этапные строки [SCAN]/[FILTER]/[VALIDATION]/[PACK]/[DRAW]/[BLOCK].
+;; Включается из командной строки AutoCAD: (setq *EXTRACTION-DIAGNOSTIC* T).
+;; ============================================================
+(setq *EXTRACTION-DIAGNOSTIC* nil)
+
+(defun tu-diag (tag text)
+  (if *EXTRACTION-DIAGNOSTIC*
+    (princ (strcat "\n[" tag "] " text))))
+
+;; ============================================================
+;; Этап 3 (V8): единый guard системных переменных.
+;; Паттерн SAVE -> MODIFY -> WORK -> RESTORE только для реально
+;; изменяемых переменных. Любой обрыв (ESC/ошибка) обязан вернуть
+;; исходные значения - возврат выполняет локальный *error* модуля.
+;; ============================================================
+
+;; Сохранить значения списка системных переменных.
+;; Возвращает assoc-список (("NAME" . старое-значение) ...).
+(defun tu-sysvar-save (names)
+  (mapcar (function (lambda (n) (cons n (getvar n)))) names))
+
+;; Вернуть значения, сохранённые tu-sysvar-save.
+;; Сбой отдельного setvar не мешает восстановлению остальных.
+(defun tu-sysvar-restore (saved)
+  (foreach p saved
+    (vl-catch-all-apply 'setvar (list (car p) (cdr p))))
+  nil)
+
+;; ============================================================
+;; Этап 3 (V10): единый Undo-guard.
+;; Вложенные пары схлопываются по счётчику *tu-undo-depth*: реальные
+;; StartUndoMark/EndUndoMark ставятся только на внешнем уровне,
+;; поэтому одна задача (с любыми внутренними парами) = одна Undo-
+;; запись = один U.
+;; tu-undo-begin  — открыть уровень (возвращает doc или nil).
+;; tu-undo-end    — закрыть уровень; на нулевой глубине ставит
+;;   реальный EndUndoMark.
+;; tu-undo-cancel — закрыть ВСЕ уровни и откатить командой UNDO.
+;;   ВНИМАНИЕ: метода vla-Undo в ActiveX Document НЕТ; cancel
+;;   запускает команду UNDO, поэтому НЕ вызывать из *error* —
+;;   только из обычного кода (см. V13). В обработчиках — tu-undo-end.
+;; ============================================================
+(if (null (boundp '*tu-undo-depth*)) (setq *tu-undo-depth* 0))
+;; Счётчик модификаций БД на момент открытия внешней группы (предохранитель
+;; tu-undo-cancel: ESC на промпте = группа пуста, UNDO НЕ выполнять).
+(if (null (boundp '*tu-undo-dbmod*)) (setq *tu-undo-dbmod* 0))
+
+(defun tu-undo-begin ( / doc)
+  (setq doc (vl-catch-all-apply
+              'vla-get-ActiveDocument (list (vlax-get-acad-object))))
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (if (= *tu-undo-depth* 0)
+        (progn
+          (setq *tu-undo-dbmod* (getvar "DBMOD"))
+          (vl-catch-all-apply 'vla-StartUndoMark (list doc))))
+      (setq *tu-undo-depth* (1+ *tu-undo-depth*))
+      doc)))
+
+(defun tu-undo-end (doc)
+  (if (and doc (not (vl-catch-all-error-p doc)) (> *tu-undo-depth* 0))
+    (progn
+      (setq *tu-undo-depth* (1- *tu-undo-depth*))
+      (if (= *tu-undo-depth* 0)
+        (vl-catch-all-apply 'vla-EndUndoMark (list doc)))))
+  nil)
+
+(defun tu-undo-cancel (doc)
+  ;; Откат ТОЛЬКО если в группе реально были изменения БД (DBMOD сдвинулся),
+  ;; иначе UNDO _1 зацепил бы постороннюю правку пользователя.
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (setq *tu-undo-depth* 0)
+      (vl-catch-all-apply 'vla-EndUndoMark (list doc))
+      (if (/= (getvar "DBMOD") *tu-undo-dbmod*)
+        (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1")))))
+  nil)
+
+;; ============================================================
+;; Этап 3 (V9): единый контракт вызова ActiveX/AutoCAD API.
+;; ex-safe-call: (fn (list args...)) -> (OK значение) | (ERROR "текст").
+;; Оборачиваем ТОЛЬКО внешние вызовы AutoCAD/ActiveX (не кадую строку).
+;; Точки миграции: docs/v9-activex-migration.md
+;; ============================================================
+(defun ex-safe-call (fn args / r)
+  ;; fn - символ ActiveX/API-функции, args - список аргументов (как в
+  ;; vl-catch-all-apply). Возвращает (OK значение) | (ERROR "текст").
+  ;; Точечная нотация dot-rest НЕ используется (читатель AutoCAD на ней
+  ;; выдавал ошибку загрузки).
+  (setq r (vl-catch-all-apply fn args))
+  (if (vl-catch-all-error-p r)
+    (list 'ERROR (vl-catch-all-error-message r))
+    (list 'OK r)))
+
+(defun ex-safe-ok-p (cell)     (eq (car cell) 'OK))
+(defun ex-safe-value (cell)    (cadr cell))
+(defun ex-safe-message (cell)  (cadr cell))
+
+;; ------------------------------------------------------------
+;; U3: общий генератор уникальных имён для рапорт-блоков
+;; («Раскрой Эксперимент 0», «Раскрой Эксперимент 1», ...).
+;; Кандидат считается свободным, если его нет в таблице BLOCK.
+;; ------------------------------------------------------------
+(defun tu-unique-block-name (base / n name)
+  (setq n 0 name (strcat base " " (itoa n)))
+  (while (tblsearch "BLOCK" name)
+    (setq n (1+ n) name (strcat base " " (itoa n))))
+  name)
+
+
+
