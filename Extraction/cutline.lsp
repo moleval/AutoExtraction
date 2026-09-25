@@ -96,7 +96,9 @@
 ;; ---------- Утилиты ----------
 ;; Этап 2 (V5): лимит количества деталей - защита от зависания
 ;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
-(setq *n1-max-parts* 5000)
+;; V5 (уточнение 2026-09-23): превышение = alert (GUI) + GUARD в командную
+;; строку + запрос на продолжение; Нет/Enter останавливает (как раньше).
+(setq *n1-max-parts* 10000)
 
 ;; Этап 2 (V6): страж итераций FFD - верхняя граница числа попыток размещения.
 (setq *n1-max-placement-attempts* 1000000)
@@ -1877,7 +1879,7 @@
                        default-xls default-acad
                        default-stock default-kerf
                        dialog-result r xls-ok
-                       old-transparency-display svSaved)
+                       old-transparency-display svSaved v5ans)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
@@ -1917,13 +1919,23 @@
   (setq total-input (sslength ss))
   (princ (strcat "\nВыбрано объектов: " (itoa total-input)))
 
-  ;; Этап 2 (V5): лимит количества деталей
+  ;; Этап 2 (V5): мягкий лимит - предупреждение (GUI + командная строка)
+  ;; и запрос на продолжение; Нет/Enter = остановка (прежнее поведение).
   (if (> total-input *n1-max-parts*)
     (progn
       (princ (strcat "\n[CUTLINE][GUARD] Обнаружено " (itoa total-input)
-                      " деталей. Обработка остановлена. Лимит: " (itoa *n1-max-parts*)
+                      " деталей при лимите " (itoa *n1-max-parts*)
                       ". Проверьте выборку/слои."))
-      (princ) (exit)))
+      (alert (strcat "AutoExtraction / CUTLINE\n\nВ выборке "
+                     (itoa total-input) " объектов при лимите "
+                     (itoa *n1-max-parts*) ".\nОбработка может занять очень долгое время.\n\nРешение - в командной строке."))
+      (initget "Да Нет _Yes No")
+      (setq v5ans (getkword "\nПродолжить обработку несмотря на лимит? [Да/Нет] <Нет>: "))
+      (if (= v5ans "Yes")
+        (princ "\n[CUTLINE][GUARD] Продолжаю обработку по явному подтверждению.")
+        (progn
+          (princ "\n[CUTLINE][GUARD] Обработка остановлена пользователем.")
+          (princ) (exit)))))
   (tu-diag "SCAN" (strcat "объектов в выборке: " (itoa total-input)))
 
   (setq type-counts (n1-count-by-type ss))
@@ -2256,5 +2268,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 11: U2-примитивы, П1-профилировка, П2, П3-прогресс/ESC (grtext)). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 12: U2, П1-П3, V5 мягкий лимит 10000 (alert+запрос на продолжение)). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

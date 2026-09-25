@@ -60,7 +60,9 @@
 
 ;; Этап 2 (V5): лимит количества деталей - защита от зависания
 ;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
-(setq *cs-max-parts* 5000)
+;; V5 (уточнение 2026-09-23): превышение = alert (GUI) + GUARD в командную
+;; строку + запрос на продолжение; Нет/Enter останавливает (как раньше).
+(setq *cs-max-parts* 10000)
 
 ;; Этап 2 (V6): страж итераций MaxRects - верхняя граница числа попыток
 ;; размещения (проверок кандидат-прямоугольников). Именованный, изменяемый.
@@ -1376,7 +1378,7 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc)
+                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc v5ans)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1445,13 +1447,23 @@
   (tu-diag "FILTER" (strcat "принято деталей: " (itoa (length records))
                              ", исключено: " (itoa (apply (quote +) (mapcar (quote cdr) *cs-rejects*)))))
 
-  ;; Этап 2 (V5): лимит количества деталей
+  ;; Этап 2 (V5): мягкий лимит - предупреждение (GUI + командная строка)
+  ;; и запрос на продолжение; Нет/Enter = остановка (прежнее поведение).
   (if (> (length records) *cs-max-parts*)
     (progn
       (princ (strcat "\n[CUTSHEET][GUARD] Обнаружено " (itoa (length records))
-                      " деталей. Обработка остановлена. Лимит: " (itoa *cs-max-parts*)
+                      " деталей при лимите " (itoa *cs-max-parts*)
                       ". Проверьте выборку/слои."))
-      (princ) (exit)))
+      (alert (strcat "AutoExtraction / CUTSHEET\n\nВ раскрое принято "
+                     (itoa (length records)) " деталей при лимите "
+                     (itoa *cs-max-parts*) ".\nОбработка может занять очень долгое время.\n\nРешение - в командной строке."))
+      (initget "Да Нет _Yes No")
+      (setq v5ans (getkword "\nПродолжить обработку несмотря на лимит? [Да/Нет] <Нет>: "))
+      (if (= v5ans "Yes")
+        (princ "\n[CUTSHEET][GUARD] Продолжаю обработку по явному подтверждению.")
+        (progn
+          (princ "\n[CUTSHEET][GUARD] Обработка остановлена пользователем.")
+          (princ) (exit)))))
   (if (null records)
     (progn (princ "\nПосле фильтрации не осталось деталей с определенными габаритами.")
            (princ) (exit)))
@@ -1595,5 +1607,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 22: U2-примитивы, П1-профилировка, П2, П3-прогресс/ESC (grtext)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 23: U2, П1-П3, V5 мягкий лимит 10000 (alert+запрос на продолжение)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
