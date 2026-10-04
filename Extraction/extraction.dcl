@@ -24,6 +24,13 @@ extraction_dialog : dialog {
     }
 
     : button {
+      key = "btn_settings";
+      label = "Настройки";
+      fixed_width = true;
+      width = 12;
+    }
+
+    : button {
       key = "btn_help";
       label = "?";
       fixed_width = true;

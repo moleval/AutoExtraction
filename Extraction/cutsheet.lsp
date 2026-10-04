@@ -236,6 +236,8 @@
   (if (or (null layers) (= (length layers) 0)) T (su-layer-match-any layer layers)))
 
 (defun cs-build-filter-ss (layers / ss out i ent typ lay)
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'CUTSHEET)))
   (setq ss nil)
   (setq ss (su-take-preselection))
   (if (null ss)
@@ -250,6 +252,10 @@
       (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers) (not (su-map-entity-p ent)))
         (ssadd ent out))
       (setq i (1+ i))))
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq out
+      (su-filter-ss-by-block-name-masks
+        out (ae-settings-task-blocks 'CUTSHEET))))
   (if (> (sslength out) 0) out nil))
 
 ;; ================= ЗАПИСЬ ЧАСТЕЙ =================
@@ -1358,7 +1364,13 @@
          (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
          (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
          (if (ex-safe-ok-p ins-result)
-           (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+           (progn
+             (if (= (type ae-settings-output-layer) 'SUBR)
+               (ae-settings-apply-vla-layer
+                 (ex-safe-value ins-result)
+                 (ae-settings-output-layer 'CUTSHEET)))
+             (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+           )
            (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
          ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
          (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
@@ -1394,6 +1406,10 @@
         oldEcho (getvar "CMDECHO"))
   ;; V8: guard - любой обрыв вернёт исходные значения через *error*
   (setq svSaved (tu-sysvar-save '("CMDECHO" "OSMODE" "CMDDIA" "FILEDIA")))
+  (if (= (type ae-settings-output) 'SUBR)
+    (setq *CUTSHEET-FRAME-LAYER*
+      (ae-settings-output 'CUTSHEET "output.frame.layer"
+        *CUTSHEET-FRAME-LAYER*)))
   
   (princ "\n=== РАСКРОЙ ЛИСТА ===")
   
@@ -1579,7 +1595,11 @@
               (princ "\nCUTSHEET: упаковка карты в блок...")
           (pu-begin "CUTSHEET:wrap-block")
               (setq baseName (vl-filename-base (getvar "DWGNAME"))
-                    blockName (cs-unique-block-name (strcat "Раскрой листа " baseName)))
+                    blockName
+                      (cs-unique-block-name
+                        (if (= (type ae-settings-expand-output-template) 'SUBR)
+                          (ae-settings-expand-output-template 'CUTSHEET)
+                          (strcat "Раскрой листа " baseName))))
               ;; Базовая точка блока = точка вставки = верхний левый угол рамки Невидимые
               (setq blockBasePt (list (car (car bbox3)) (cadr (cadr bbox3))))
               (cs-wrap-to-block blockName blockBasePt ssNew)

@@ -122,6 +122,30 @@
   (setq *EXTRACTION-LAST-CUTLINE-LAYERS* nil)
 )
 
+;; ============================================================
+;; НАСТРОЙКИ ИЗ AutoExtraction\settings.ini
+;; ============================================================
+(defun extraction-apply-settings-defaults (/)
+  (if (= (type ae-settings-load) 'SUBR)
+    (ae-settings-load)
+  )
+  (if (= (type ae-settings-task-layers) 'SUBR)
+    (progn
+      (setq *EXTRACTION-LAST-FASONKA-LAYERS*
+        (ae-settings-task-layers 'FASONKA))
+      (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
+        (ae-settings-task-layers 'SUBSYSTEM))
+      (setq *EXTRACTION-LAST-CLADDING-LAYERS*
+        (ae-settings-task-layers 'CLADDING))
+      (setq *EXTRACTION-LAST-VITRAZH-LAYERS*
+        (ae-settings-task-layers 'VITRAZH))
+      (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*
+        (ae-settings-task-layers 'ZAPOLNENIE))
+    )
+  )
+  T
+)
+
 
 ;; ============================================================
 ;; РАБОЧЕЕ СОСТОЯНИЕ
@@ -317,6 +341,7 @@
 
       (foreach f
         '("task-utils.lsp"
+          "settings-utils.lsp"
           "layer-utils.lsp"
           "select-utils.lsp"
           "excel-utils.lsp"
@@ -358,6 +383,11 @@
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
 
       (setq path (strcat root "\\Extraction\\zapolnenie.lsp"))
+      (if (findfile path)
+        (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+
+      (setq path (strcat root "\\Extraction\\settings.lsp"))
       (if (findfile path)
         (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
@@ -936,6 +966,7 @@
 
   ;; V10: Undo-группа - весь прогон задачи откатывается одним U
   (setq uDoc (tu-undo-begin))
+  (setq *AE-SETTINGS-TABLE-TASK* task-id)
 
   (cond
     ((eq task-id 'FASONKA)
@@ -1031,6 +1062,15 @@
       "Переименование — по кнопке."
     )
   )
+)
+
+
+;; ============================================================
+;; НАСТРОЙКИ
+;; ============================================================
+(defun extraction-settings ()
+  (setq *EXTRACTION-ACTION* 'SETTINGS)
+  (done_dialog 1)
 )
 
 
@@ -1274,6 +1314,9 @@
     )
   )
 
+  ;; Постоянные маски читаются при каждом открытии EXTRACTION.
+  (extraction-apply-settings-defaults)
+
   (setq *extraction-preselected-set* (ssget "_I"))
 
   (setq dcl-file nil)
@@ -1382,17 +1425,21 @@
               ;; --- Заполнение списка слоев и восстановление выбора ---
               (extraction-rebuild-layer-list)
 
-              (if (eq *EXTRACTION-LAST-TASK* 'SUBSYSTEM)
-                (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-                  (extraction-select-layers-in-list
-                    *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-                (if *EXTRACTION-LAST-FASONKA-LAYERS*
-                  (extraction-select-layers-in-list
-                    *EXTRACTION-LAST-FASONKA-LAYERS*))
-              )
+              (extraction-select-layers-in-list
+                (cond
+                  ((eq *EXTRACTION-LAST-TASK* 'SUBSYSTEM)
+                   *EXTRACTION-LAST-SUBSYSTEM-LAYERS*)
+                  ((eq *EXTRACTION-LAST-TASK* 'CLADDING)
+                   *EXTRACTION-LAST-CLADDING-LAYERS*)
+                  ((eq *EXTRACTION-LAST-TASK* 'VITRAZH)
+                   *EXTRACTION-LAST-VITRAZH-LAYERS*)
+                  ((eq *EXTRACTION-LAST-TASK* 'ZAPOLNENIE)
+                   *EXTRACTION-LAST-ZAPOLNENIE-LAYERS*)
+                  (T *EXTRACTION-LAST-FASONKA-LAYERS*)))
 
               (extraction-sync-checks-from-layers)
 
+              (action_tile "btn_settings" "(extraction-settings)")
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
               (action_tile "btn_saveas" "(extraction-saveas)")
@@ -1442,6 +1489,16 @@
 
               ;; --- Обработка результата ---
               (cond
+
+                ((eq *EXTRACTION-ACTION* 'SETTINGS)
+                 ;; Главное окно закрывается перед вторым модальным DCL.
+                 ;; После настроек оно открывается заново с перечитанными масками.
+                 (if (= (type ae-settings-ui-open) 'SUBR)
+                   (ae-settings-ui-open)
+                 )
+                 (extraction-apply-settings-defaults)
+                 (c:extraction)
+                )
 
                 ((eq *EXTRACTION-ACTION* 'SAVE)
                  (run-task

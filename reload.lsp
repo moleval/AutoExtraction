@@ -31,6 +31,7 @@
 (setq *ae-reload-common-files*
   '(
     "task-utils.lsp"
+    "settings-utils.lsp"
     "perf-utils.lsp"
     "layer-utils.lsp"
     "select-utils.lsp"
@@ -47,6 +48,7 @@
     "subsystem.lsp"
     "cladding.lsp"
     "zapolnenie.lsp"
+    "settings.lsp"
     "extraction.lsp"
     "cutline.lsp"
     "cutsheet.lsp"

@@ -157,7 +157,17 @@
 (defun cl-collect (layers / inserts rec records)
   (setq *cladding-skipped-open* 0 *cladding-skipped-zero* 0
         *cladding-with-arcs* 0 *cladding-check-mismatch* 0)
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'CLADDING)))
   (setq inserts (su-select-lwpolylines layers))
+  (if (= (type ae-settings-task-polyline-layers) 'SUBR)
+    (setq inserts
+      (vl-remove-if-not
+        '(lambda (e)
+           (su-entity-layer-matches-p
+             e (ae-settings-task-polyline-layers 'CLADDING)))
+        inserts))
+  )
   (setq records '())
   (foreach ent inserts
     (setq rec (cl-poly-record ent))
@@ -284,10 +294,14 @@
       (if (or (null vis) (vl-catch-all-error-p vis)) (setq vis ""))
       (setq display (if (> (strlen vis) 0) vis name))
       (setq is-target
-        (or (vl-string-search " ¿——≈“¿" (strcase name))
-            (vl-string-search "œ¿Õ≈À‹"  (strcase name))
-            (vl-string-search " ¿——≈“¿" (strcase vis))
-            (vl-string-search "œ¿Õ≈À‹"  (strcase vis))))
+        (if (= (type ae-settings-task-blocks) 'SUBR)
+          (su-block-values-match-p
+            (list name vis)
+            (ae-settings-task-blocks 'CLADDING))
+          (or (vl-string-search " ¿——≈“¿" (strcase name))
+              (vl-string-search "œ¿Õ≈À‹"  (strcase name))
+              (vl-string-search " ¿——≈“¿" (strcase vis))
+              (vl-string-search "œ¿Õ≈À‹"  (strcase vis)))))
       (if (not is-target)
         nil
         (progn
@@ -330,6 +344,14 @@
         *cladding-block-cut* 0 *cladding-block-skipped-nodim* 0
         *cladding-block-skipped-zero* 0)
   (setq inserts (su-select-inserts layers))
+  (if (= (type ae-settings-task-block-layers) 'SUBR)
+    (setq inserts
+      (vl-remove-if-not
+        '(lambda (e)
+           (su-entity-layer-matches-p
+             e (ae-settings-task-block-layers 'CLADDING)))
+        inserts))
+  )
   (setq records '())
   (foreach ent inserts
     (setq rec (cl-block-record ent))
@@ -900,6 +922,7 @@
                       create-table save-base do-blocks
                       / *error* svSaved records data xls-base xlsfile csvfile
                         brec bgroups bxls-base bxls bcsv)
+  (setq *AE-SETTINGS-TABLE-TASK* 'CLADDING)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg)
                            "*BREAK*,*CANCEL*,*QUIT*,*EXIT*,*œ–≈–¬¿*")))

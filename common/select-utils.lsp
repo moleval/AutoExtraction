@@ -521,11 +521,89 @@
     (progn
       (setq found nil)
       (foreach l layers
-        (if (wcmatch (strcase layer) (strcase l))
+        (if (and (= (type l) 'STR)
+                 (wcmatch (strcase layer) (strcase l)))
           (setq found T)
         )
       )
       found
+    )
+  )
+)
+
+(defun su-entity-layer-matches-p (ent layers / data layer)
+  (setq data (if ent (entget ent) nil)
+        layer (if data (cdr (assoc 8 data)) nil))
+  (and layer (su-layer-match-any layer layers))
+)
+
+(defun su-block-values-match-p (values masks / found value mask)
+  (if (or (null masks) (not (listp masks)) (= (length masks) 0))
+    T
+    (progn
+      (setq found nil)
+      (foreach value values
+        (if (and (= (type value) 'STR) (> (strlen value) 0))
+          (foreach mask masks
+            (if (and (= (type mask) 'STR)
+                     (wcmatch (strcase value) (strcase mask)))
+              (setq found T)
+            )
+          )
+        )
+      )
+      found
+    )
+  )
+)
+
+(defun su-block-matches-name-masks-p (ent masks / obj name vis values)
+  (if (null ent)
+    nil
+    (progn
+      (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+      (if (vl-catch-all-error-p obj)
+        nil
+        (progn
+          (setq name (vl-catch-all-apply 'su-get-effective-name (list obj)))
+          (if (vl-catch-all-error-p name) (setq name nil))
+          (setq vis (vl-catch-all-apply 'su-get-visibility (list obj)))
+          (if (vl-catch-all-error-p vis) (setq vis nil))
+          (setq values '())
+          (if (= (type name) 'STR) (setq values (cons name values)))
+          (if (= (type vis) 'STR) (setq values (cons vis values)))
+          (su-block-values-match-p values masks)
+        )
+      )
+    )
+  )
+)
+
+(defun su-filter-inserts-by-name-masks (inserts masks / out ent)
+  (setq out '())
+  (foreach ent inserts
+    (if (su-block-matches-name-masks-p ent masks)
+      (setq out (cons ent out))
+    )
+  )
+  (reverse out)
+)
+
+(defun su-filter-ss-by-block-name-masks (ss masks / i ent typ out)
+  ;; Filter only INSERT entities; geometry entities remain untouched.
+  (if (null ss)
+    nil
+    (progn
+      (setq out (ssadd) i 0)
+      (repeat (sslength ss)
+        (setq ent (ssname ss i)
+              typ (cdr (assoc 0 (entget ent))))
+        (if (or (not (= typ "INSERT"))
+                (su-block-matches-name-masks-p ent masks))
+          (ssadd ent out))
+        (setq i (1+ i))
+      )
+      (if (> (sslength out) 0) out nil)
     )
   )
 )
@@ -610,6 +688,8 @@
 ;; Извлечение исходного набора объектов для CUTLINE (Р2.2)
 ;; ============================================================
 (defun su-select-cutline-objects (layers / ss ssfilter raw-count pre-ss)
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'CUTLINE)))
   (su-block-props-cache-clear)
   (setq ss nil)
   (setq ssfilter (su-build-cutline-ssfilter layers))
@@ -636,6 +716,10 @@
     (progn
       (setq raw-count (sslength ss))
       (setq ss (su-filter-dynblocks ss))
+      (if (and ss (= (type ae-settings-task-blocks) 'SUBR))
+        (setq ss
+          (su-filter-ss-by-block-name-masks
+            ss (ae-settings-task-blocks 'CUTLINE))))
       (if ss (setq ss (su-ssdel-map-entities ss)))
       (if (and ss raw-count (< (sslength ss) raw-count))
         (princ (strcat "\n  После пост-фильтрации отсеяно: "

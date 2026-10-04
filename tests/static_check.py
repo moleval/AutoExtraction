@@ -50,6 +50,8 @@ REQUIRED_MAINS = [
 REQUIRED_FILES = [
     "Extraction/extraction.lsp",
     "Extraction/extraction.dcl",
+    "Extraction/settings.lsp",
+    "Extraction/settings.dcl",
     "Extraction/fasonka.lsp",
     "Extraction/subsystem.lsp",
     "Extraction/zapolnenie.lsp",
@@ -58,6 +60,7 @@ REQUIRED_FILES = [
     "Extraction/cutsheet.lsp",
     "Extraction/blockrename.lsp",
     "common/task-utils.lsp",
+    "common/settings-utils.lsp",
     "common/layer-utils.lsp",
     "common/select-utils.lsp",
     "common/excel-utils.lsp",

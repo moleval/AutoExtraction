@@ -767,6 +767,8 @@
           gal-data)
 
   (vl-load-com)
+  (setq *AE-SETTINGS-TABLE-TASK* 'SUBSYSTEM)
+
 
   (sssetfirst nil nil)
 
@@ -789,8 +791,15 @@
 
   ;; V8: guard - обрыв вернёт CMDECHO
   (setq svSaved (tu-sysvar-save '("CMDECHO")))
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'SUBSYSTEM)))
 
   (setq inserts (su-select-inserts layers))
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq inserts
+      (su-filter-inserts-by-name-masks
+        inserts (ae-settings-task-blocks 'SUBSYSTEM)))
+  )
 
   (if inserts
 

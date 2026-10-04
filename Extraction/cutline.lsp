@@ -170,11 +170,41 @@
   ;; U3: единый генератор - см. common/task-utils.lsp
   (tu-unique-block-name base))
 
-(defun n1-block-insert (name insPt)
+(defun n1-block-insert (name insPt / ent)
   (entmake (list (cons 0 "INSERT") (cons 100 "AcDbEntity")
                  (cons 100 "AcDbBlockReference") (cons 2 name)
                  (cons 10 (list (car insPt) (cadr insPt) 0.0))
                  (cons 41 1.0) (cons 42 1.0) (cons 43 1.0) (cons 50 0.0)))
+  (setq ent (entlast))
+  (if (= (type ae-settings-output-layer) 'SUBR)
+    (ae-settings-apply-entity-layer ent
+      (ae-settings-output-layer 'CUTLINE)))
+  ent
+)
+
+(defun n1-ss-contains-p (ss ent / i found)
+  (setq i 0 found nil)
+  (if ss
+    (repeat (sslength ss)
+      (if (equal (ssname ss i) ent) (setq found T))
+      (setq i (1+ i))
+    )
+  )
+  found
+)
+
+(defun n1-apply-new-block-ref-layers (before after layer / i ent)
+  (if (and after layer)
+    (progn
+      (setq i 0)
+      (repeat (sslength after)
+        (setq ent (ssname after i))
+        (if (not (n1-ss-contains-p before ent))
+          (ae-settings-apply-entity-layer ent layer))
+        (setq i (1+ i))
+      )
+    )
+  )
 )
 
 (defun n1-build-color-map (pieces / palette i map rec)
@@ -1889,7 +1919,7 @@
                        barHeight sumInsPt num-bars stock-total-mm
                        total-cnt total-product-mm kpd rec blockName baseName
                        lastEnt ssNew ent oldEcho doc uMark
-                       blkRefsSet blkRefsBefore blkIdx blkRefsAfter blkCmdResult
+                       blkRefsSet blkRefsBeforeSet blkRefsBefore blkIdx blkRefsAfter blkCmdResult
                        layers layers-str total-input type-counts
                        user-filter line-cnt mline-cnt dynblock-cnt
                        dynblock-type mline-type
@@ -1908,6 +1938,10 @@
 
   ;; V8: guard - любой обрыв вернёт исходные значения через *error*
   (setq svSaved (tu-sysvar-save (list "CMDECHO")))
+  (if (= (type ae-settings-output) 'SUBR)
+    (setq *CUTLINE-FRAME-LAYER*
+      (ae-settings-output 'CUTLINE "output.frame.layer"
+        *CUTLINE-FRAME-LAYER*)))
 
   (princ "\n=== Линейный раскрой мерного материала ===")
 
@@ -2132,7 +2166,11 @@
           (n1-ensure-italic-style)
           (setq color-map (n1-build-color-map pieces-ok))
           (setq baseName (vl-filename-base (getvar "DWGNAME")))
-          (setq blockName (n1-unique-block-name (strcat "Раскрой " baseName)))
+          (setq blockName
+            (n1-unique-block-name
+              (if (= (type ae-settings-expand-output-template) 'SUBR)
+                (ae-settings-expand-output-template 'CUTLINE)
+                (strcat "Раскрой " baseName))))
 
           (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument
                                         (list (vlax-get-acad-object))))
@@ -2192,6 +2230,7 @@
               ;; ENTER выбирает «Преобразовать» и INSERT создается самим -BLOCK.
               (pu-begin "CUTLINE:wrap:ssget")
               (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (setq blkRefsBeforeSet blkRefsSet)
               (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
               (pu-begin "CUTLINE:wrap:block")
@@ -2210,6 +2249,10 @@
                  (progn
                   (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
                   (setq blkRefsAfter (if blkRefsSet (sslength blkRefsSet) 0))
+                  (if (= (type ae-settings-output-layer) 'SUBR)
+                    (n1-apply-new-block-ref-layers
+                      blkRefsBeforeSet blkRefsSet
+                      (ae-settings-output-layer 'CUTLINE)))
                   (cond
                     ((= blkRefsAfter (1+ blkRefsBefore))
                      ;; Ровно один новый INSERT — его создал сам -BLOCK (Шаг 4), второй не нужен.

@@ -96,7 +96,25 @@
   (vla-SetCellAlignment tbl row 0 5)
 )
 
+(defun ts-ac-apply-settings-layer (tbl / task layer)
+  (if (and tbl (boundp '*AE-SETTINGS-TABLE-TASK*)
+           (= (type ae-settings-output) 'SUBR)
+           (= (type ae-settings-output-layer) 'SUBR))
+    (progn
+      (setq task *AE-SETTINGS-TABLE-TASK*)
+      (setq layer
+        (ae-settings-output task "output.table.layer" "CURRENT"))
+      (if (and layer
+               (/= (strcase (vl-string-trim " \t" layer)) "")
+               (/= (strcase (vl-string-trim " \t" layer)) "CURRENT"))
+        (ae-settings-apply-vla-layer tbl (vl-string-trim " \t" layer)))
+    )
+  )
+  tbl
+)
+
 (defun ts-ac-header (tbl row headers / i h)
+  (ts-ac-apply-settings-layer tbl)
   (setq i 0)
   (foreach h headers
     (vla-SetText tbl row i h)

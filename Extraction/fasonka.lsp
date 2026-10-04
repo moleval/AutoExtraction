@@ -225,6 +225,8 @@
                      base-name xlsfile)
 
   (vl-load-com)
+  (setq *AE-SETTINGS-TABLE-TASK* 'FASONKA)
+
 
   ;; Обработчик ошибок
   (defun *error* (msg)
@@ -282,7 +284,14 @@
   )
 
   ;; ==================== Выборка блоков ====================
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'FASONKA)))
   (setq inserts (su-select-inserts layers))
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq inserts
+      (su-filter-inserts-by-name-masks
+        inserts (ae-settings-task-blocks 'FASONKA)))
+  )
 
   (if inserts
     (progn

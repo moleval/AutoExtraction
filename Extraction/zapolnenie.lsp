@@ -898,6 +898,8 @@
                           total-count total-area skipped-total rec)
 
   (vl-load-com)
+  (setq *AE-SETTINGS-TABLE-TASK* 'ZAPOLNENIE)
+
   (sssetfirst nil nil)
 
   (defun *error* (msg)
@@ -910,8 +912,15 @@
 
   ;; V8: guard - обрыв вернет CMDECHO
   (setq svSaved (tu-sysvar-save '("CMDECHO")))
+  (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
+    (setq layers (ae-settings-task-layers 'ZAPOLNENIE)))
 
   (setq inserts (su-select-inserts layers))
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq inserts
+      (su-filter-inserts-by-name-masks
+        inserts (ae-settings-task-blocks 'ZAPOLNENIE)))
+  )
 
   (if inserts
     (progn
