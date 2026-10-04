@@ -7,11 +7,10 @@ extraction_help_dialog : dialog {
 
   : list_box {
     key = "help_lines";
-    width = 100;
-    height = 28;
+    width = 108;
+    height = 34;
     fixed_width = true;
     fixed_height = true;
-    fixed_width_font = true;
   }
 
   : row {
