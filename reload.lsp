@@ -47,7 +47,6 @@
     "subsystem.lsp"
     "cladding.lsp"
     "zapolnenie.lsp"
-    "zapolnenie2.lsp"
     "extraction.lsp"
     "cutline.lsp"
     "cutsheet.lsp"
