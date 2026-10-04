@@ -3,8 +3,9 @@
 Как надёжно читать значения атрибутов вставок (INSERT) из AutoLISP:
 два пути чтения, правила защиты от ошибок COM, семантика применения
 на примере задачи «Марка» (Заполнение). Реализация —
-`Extraction/zapolnenie2.lsp` (`z2-get-attr`, `z2-mark-line`), после
-интеграции — `Extraction/zapolnenie.lsp`.
+`Extraction/zapolnenie.lsp` ред. 29 (`zapolnenie-get-attr`,
+`zapolnenie-mark-line`); отработана на тестовом стенде
+`zapolnenie2.lsp` (удалён после интеграции).
 
 ## 1. Два пути чтения атрибутов
 
@@ -33,7 +34,7 @@
 `(vl-string-trim " \t" value)` пустая строка трактуется как отсутствие
 атрибута (пустой атрибут в блоке — обычное дело).
 
-Референс: `z2-get-attr` в `Extraction/zapolnenie2.lsp` — один проход по
+Референс: `zapolnenie-get-attr` в `Extraction/zapolnenie.lsp` — один проход по
 коллекции, все обращения к COM через `vl-catch-all-apply`, проверки типов
 результатов, значение читается только после совпадения тега.
 
@@ -97,7 +98,7 @@
   ключ группировки и в порядок сортировки (Тип → Марка → Высота →
   Ширина).
 
-Референс: `z2-mark-line` в `Extraction/zapolnenie2.lsp`.
+Референс: `zapolnenie-mark-line` в `Extraction/zapolnenie.lsp`.
 
 ## 4. Что читать ещё (контекст проекта)
 
@@ -113,8 +114,8 @@
 
 ## 5. Источники
 
-- `Extraction/zapolnenie2.lsp` — рабочая реализация (стенд колонки
-  «Марка», ред. 1–7, принят приёмкой).
+- `Extraction/zapolnenie.lsp` ред. 29 — рабочая реализация (колонка
+  «Марка», отработана на стенде ред. 1–7 и принята приёмкой).
 - Проект MarkZ (moleval/MarkZ), `MARKZ.lsp` — DXF-путь и ActiveX-фоллбек
   (`mark:find-attr-in-ename`, `mark:find-attr-obj`).
 - Autodesk AutoCAD ActiveX Reference: Block object → `GetAttributes`,
