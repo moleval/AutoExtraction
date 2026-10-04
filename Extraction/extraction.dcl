@@ -14,6 +14,7 @@ extraction_dialog : dialog {
   // ==========================================================
 
   : row {
+    alignment = right;
     : text {
       label = "Ќастройка задачи";
       alignment = left;
@@ -145,10 +146,13 @@ extraction_dialog : dialog {
 
       width = 40;
       fixed_width = true;
+      children_alignment = left;
+      children_fixed_width = true;
 
       // ѕоле поиска на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_search";
+        alignment = left;
         width = 36;
         fixed_width = true;
         edit_width = 36;
@@ -156,6 +160,7 @@ extraction_dialog : dialog {
 
       : list_box {
         key = "lst_blocks";
+        alignment = left;
         width = 36;
         fixed_width = true;
         height = 13;
@@ -165,6 +170,7 @@ extraction_dialog : dialog {
       // ѕоле нового имени на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_rename";
+        alignment = left;
         width = 36;
         fixed_width = true;
         edit_width = 36;
