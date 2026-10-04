@@ -20,6 +20,10 @@
 ;;; ROUND, стиль Num отображает 2 знака) - подытоги/итого считаются
 ;;; =ROUND(SUM(...),2) по обычной видимой колонке; вспомогательная
 ;;; скрытая колонка (ред. 4) удалена - Excel ее не скрывал.
+;;; ред. 7: сплошной диапазон итого (ред. 6) захватывал строки
+;;; подытогов (та же колонка) - данные учитывались дважды (итого
+;;; ~вдвое больше). Итого строится как ROUND(SUM(диапазон данных
+;;; группы 1, диапазон группы 2, ...),2) - только строки данных.
 ;;; ред. 5: таблица AutoCAD строится по схеме FAST_TABLES - сразу после
 ;;; AddTable подавляется регенерация (RegenerateTableSuppressed),
 ;;; заполнение идет без пересборок, снятие подавления = единственная
@@ -589,7 +593,7 @@
                                      groups grp grpName grpRows grpCnt grpArea
                                      startRow endRow itemNum
                                      subtotal-rows formula-cnt formula-area r
-                                     cCnt cArea cMarkMerge lastDataRow)
+                                     cCnt cArea cMarkMerge groupRanges gr grS grE)
   (setq cCnt  (if *z2-has-marks* 6 5)
         cArea (if *z2-has-marks* 7 6)
         cMarkMerge (if *z2-has-marks* 4 3))
@@ -649,7 +653,7 @@
           (setq groups (append groups (list (list tip (list rec)))))))
 
       (setq rowNum 3 itemNum 0 total-cnt 0 total-area 0.0
-            subtotal-rows '())
+            subtotal-rows '() groupRanges '())
 
       (foreach grp groups
         (setq grpName (car grp)
@@ -687,6 +691,8 @@
           (setq rowNum (1+ rowNum)))
 
         (setq endRow (1- rowNum))
+        ;; ред. 7: диапазон ТОЛЬКО строк данных группы - для итого
+        (setq groupRanges (append groupRanges (list (list startRow endRow))))
 
         (write-line "   <Row>" f)
         (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
@@ -702,14 +708,22 @@
         (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
       )
 
-      (setq formula-cnt "" lastDataRow (1- rowNum))
+      (setq formula-cnt "")
       (foreach r subtotal-rows
         (if (= formula-cnt "")
           (setq formula-cnt (strcat "=R" (itoa r) "C" (itoa cCnt)))
           (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C" (itoa cCnt)))))
-      ;; ред. 6: итого - округление ТОЧНОЙ суммы всех строк данных
-      (setq formula-area
-        (strcat "=ROUND(SUM(R3C" (itoa cArea) ":R" (itoa lastDataRow) "C" (itoa cArea) "),2)"))
+      ;; ред. 7: итого - округление ТОЧНОЙ суммы строк данных по всем
+      ;; группам (диапазоны данных, БЕЗ строк подытогов - иначе задвоение)
+      (setq formula-area "")
+      (foreach gr groupRanges
+        (setq grS (car gr) grE (cadr gr))
+        (if (= formula-area "")
+          (setq formula-area
+            (strcat "R" (itoa grS) "C" (itoa cArea) ":R" (itoa grE) "C" (itoa cArea)))
+          (setq formula-area
+            (strcat formula-area ",R" (itoa grS) "C" (itoa cArea) ":R" (itoa grE) "C" (itoa cArea)))))
+      (setq formula-area (strcat "=ROUND(SUM(" formula-area "),2)"))
 
       (write-line "   <Row>" f)
       (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"" (itoa cMarkMerge) "\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
@@ -913,5 +927,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 6: точные суммы, XLS без вспомогательной колонки). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 7: итого XLS - сумма строк данных без подытогов). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
