@@ -93,6 +93,7 @@
             (setq items (cdr chunk))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+            (ts-ac-fast-begin tbl)
 
             (if (vl-catch-all-error-p tbl)
               (princ (strcat "\nОшибка создания таблицы Фасонки: "
@@ -155,7 +156,7 @@
 
                       (setq row (1+ row)))))
 
-                (vla-update tbl)
+                (ts-ac-fast-end tbl)
                 (princ (strcat "\nТаблица Фасонки "
                                (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
@@ -441,5 +442,5 @@
   (princ)
 )
 
-(princ "\nКоманды: FASONKA, ФАСОНКА")
+(princ "\nFASONKA.LSP загружен (ред. 1: FAST_TABLES). Команды: FASONKA, ФАСОНКА")
 (princ)

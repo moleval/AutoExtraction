@@ -1432,6 +1432,7 @@
               (action_tile "edt_block_search"     "(blockrename-search-changed)")
               (action_tile "lst_blocks"           "(blockrename-selected)")
               (action_tile "btn_block_copy"       "(blockrename-copy-handler)")
+              (action_tile "btn_block_insert"     "(blockrename-insert-handler)")
               (action_tile "btn_block_rename"     "(blockrename-rename)")
 
               ;; --- Запуск модального диалога ---
@@ -1458,6 +1459,14 @@
                           *BLOCKRENAME-SELECTED*)
                    (blockrename-copy-block *BLOCKRENAME-SELECTED*)
                    (princ "\nБлок для копирования не выбран.")
+                 )
+                )
+
+                ((eq *EXTRACTION-ACTION* 'INSERTBLOCK)
+                 (if (and (boundp '*BLOCKRENAME-SELECTED*)
+                          *BLOCKRENAME-SELECTED*)
+                   (blockrename-insert-block *BLOCKRENAME-SELECTED*)
+                   (princ "\nБлок для вставки не выбран.")
                  )
                 )
 
@@ -1563,7 +1572,7 @@
 )
 
 
-(princ "\nEXTRACTION.LSP загружен.")
+(princ "\nEXTRACTION.LSP загружен (ред. 1: панель Блоки - кнопка Вставить, поиск-подсказка).")
 
 ;; ============================================================
 ;; ЗАГЛУШКИ

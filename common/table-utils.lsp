@@ -125,6 +125,28 @@
 )
 
 ;; ============================================================
+;; FAST_TABLES (см. docs/fast-tables.md): подавление регенерации
+;; таблицы на время заполнения. begin - сразу после vla-AddTable
+;; (безопасен даже для error-объекта: внутренний vl-catch-all-apply
+;; все поймает). end - после заполнения, ВМЕСТО vla-Update: снятие
+;; подавления = единственная полная сборка таблицы; vla-Update после
+;; end НЕ вызывать (вторая сборка). На версиях AutoCAD без свойства -
+;; тихая деградация в обычный (медленный) путь.
+;; ============================================================
+
+(defun ts-ac-fast-begin (tbl)
+  (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+    (list tbl :vlax-true))
+  tbl
+)
+
+(defun ts-ac-fast-end (tbl)
+  (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+    (list tbl :vlax-false))
+  tbl
+)
+
+;; ============================================================
 ;; SUMMARY Фасонки
 ;; ============================================================
 
@@ -186,12 +208,13 @@
       (setq neededRows (+ 3 (length report-data)))
       (setq tableObj (vl-catch-all-apply 'vla-addtable
         (list space (vlax-3d-point pt_wcs) neededRows 4 10.0 50.0)))
+      (ts-ac-fast-begin tableObj)
       (if (vl-catch-all-error-p tableObj)
         (princ (strcat "\nОшибка при создании таблицы: "
                        (vl-catch-all-error-message tableObj)))
         (progn
           (tbl-fill-summary tableObj report-data)
-          (vla-update tableObj)
+          (ts-ac-fast-end tableObj)
           (setq createdTables (cons tableObj createdTables)
                 tableIndex (1+ tableIndex))
           (princ "\nТаблица SUMMARY создана.")
@@ -208,5 +231,5 @@
   )
 )
 
-(princ "\nTABLE-UTILS.LSP загружен.")
+(princ "\nTABLE-UTILS.LSP загружен (ред. 1: FAST_TABLES ts-ac-fast-begin/end).")
 (princ)

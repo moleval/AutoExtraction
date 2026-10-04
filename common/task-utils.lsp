@@ -215,15 +215,28 @@
         (vl-catch-all-apply 'vla-EndUndoMark (list doc)))))
   nil)
 
-(defun tu-undo-cancel (doc)
+(defun tu-undo-cancel (doc / dbmod-now old-echo)
   ;; Откат ТОЛЬКО если в группе реально были изменения БД (DBMOD сдвинулся),
   ;; иначе UNDO _1 зацепил бы постороннюю правку пользователя.
+  ;; Диагностика (ESC-тест П3): страж обещал "откачено автоматически", а по
+  ;; факту откат не подтверждался - теперь решение печатается честно.
   (if (and doc (not (vl-catch-all-error-p doc)))
     (progn
       (setq *tu-undo-depth* 0)
       (vl-catch-all-apply 'vla-EndUndoMark (list doc))
-      (if (/= (getvar "DBMOD") *tu-undo-dbmod*)
-        (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1")))))
+      (setq dbmod-now (getvar "DBMOD"))
+      (if (/= dbmod-now *tu-undo-dbmod*)
+        (progn
+          (setq old-echo (getvar "CMDECHO"))
+          (setvar "CMDECHO" 1)
+          (princ (strcat "\n[UNDO-CANCEL] изменения БД есть (DBMOD "
+                         (itoa *tu-undo-dbmod*) " -> " (itoa dbmod-now)
+                         "), выполняю UNDO 1..."))
+          (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "_1"))
+          (setvar "CMDECHO" old-echo)
+          (princ (strcat "\n[UNDO-CANCEL] UNDO 1 завершён (DBMOD теперь "
+                         (itoa (getvar "DBMOD")) ").")))
+        (princ "\n[UNDO-CANCEL] изменений БД в группе нет - откат не требуется."))))
   nil)
 
 ;; ============================================================

@@ -96,7 +96,9 @@
 ;; ---------- Утилиты ----------
 ;; Этап 2 (V5): лимит количества деталей - защита от зависания
 ;; при ошибочной выборке (x100 объектов). Именованный, изменяемый.
-(setq *n1-max-parts* 5000)
+;; V5 (уточнение 2026-09-23): превышение = alert (GUI) + GUARD в командную
+;; строку + запрос на продолжение; Нет/Enter останавливает (как раньше).
+(setq *n1-max-parts* 10000)
 
 ;; Этап 2 (V6): страж итераций FFD - верхняя граница числа попыток размещения.
 (setq *n1-max-placement-attempts* 1000000)
@@ -1083,16 +1085,37 @@
 ;; ============================================================
 ;; Извлечение длин
 ;; ============================================================
+;; V4: контракт отбраковки - модель CUTSHEET (cs-reject-note/cs-print-rejects):
+;; *n1-rejects*       - assoc-счетчик причин отсева за сбор: (причина . количество);
+;; *n1-reject-reason* - причина, выставленная последней попыткой измерения.
+;; Каждый отброшенный объект учитывается в регистре РОВНО ОДИН раз с причиной
+;; (в старой схеме сломанные/диагональные MLINE учитывались дважды - в своей
+;; категории и в общей "нулевые/ошибки").
+(defun n1-reject-note (reason / cell)
+  (if (or (null reason) (= reason "")) (setq reason "причина не зафиксирована"))
+  (setq cell (assoc reason *n1-rejects*))
+  (if cell
+    (setq *n1-rejects* (subst (cons reason (1+ (cdr cell))) cell *n1-rejects*))
+    (setq *n1-rejects* (cons (cons reason 1) *n1-rejects*))))
+
+(defun n1-print-rejects ( / cell total)
+  (setq total 0)
+  (foreach cell *n1-rejects* (setq total (+ total (cdr cell))))
+  (if (> total 0)
+    (progn
+      (princ (strcat "\n[CUTLINE][VALIDATION] Исключено объектов: " (itoa total)))
+      (foreach cell (reverse *n1-rejects*)
+        (princ (strcat "\n  " (car cell) ": " (itoa (cdr cell))))))))
+
 (defun n1-extract-pieces (ss tol min-len max-len /
                             i ent typ len key pieces total geom
-                            measured skipped skipped-short skipped-long
-                            skipped-broken skipped-diag obj)
-  (setq pieces '() i 0 total (sslength ss)
-        measured 0 skipped 0 skipped-short 0 skipped-long 0
-        skipped-broken 0 skipped-diag 0)
+                            measured obj)
+  (setq pieces '() i 0 total (sslength ss) measured 0
+        *n1-rejects* '() *n1-reject-reason* nil)
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
+    (setq *n1-reject-reason* nil)
 
     (cond
       ((= typ "MLINE")
@@ -1102,8 +1125,8 @@
          (progn
            (setq len nil)
            (if (> (su-mline-vertex-count ent) 2)
-             (setq skipped-broken (1+ skipped-broken))
-             (setq skipped-diag (1+ skipped-diag))
+             (setq *n1-reject-reason* "MLINE: ломаная (больше 2 вершин)")
+             (setq *n1-reject-reason* "MLINE: диагональная")
            )
          )
        )
@@ -1111,23 +1134,35 @@
       ((= typ "LINE")
        (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
                    (list ent (vlax-curve-getEndParam ent))))
-       (if (vl-catch-all-error-p len) (setq len nil))
+       (if (vl-catch-all-error-p len)
+         (setq len nil *n1-reject-reason* "LINE: длина недоступна (ActiveX)"))
       )
       ((= typ "INSERT")
        (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
-       (if (not (vl-catch-all-error-p obj))
-         (setq len (su-get-length obj))
-         (setq len nil)
+       (if (vl-catch-all-error-p obj)
+         (setq len nil *n1-reject-reason* "ActiveX объекта недоступен")
+         (progn
+           (setq len (su-get-length obj))
+           (if (null len)
+             (setq *n1-reject-reason*
+               "длина не определена (нет числового свойства \"Длина\")")))
        )
       )
-      (T (setq len nil))
+      (T
+       (setq len nil)
+       (setq *n1-reject-reason* "неподдерживаемый тип объекта"))
     )
 
     (cond
-      ((or (null len) (not (numberp len)) (<= len 0.0))
-       (setq skipped (1+ skipped)))
-      ((< len min-len) (setq skipped-short (1+ skipped-short)))
-      ((> len max-len) (setq skipped-long (1+ skipped-long)))
+      ((or (null len) (not (numberp len)))
+       (n1-reject-note
+         (if *n1-reject-reason* *n1-reject-reason* "длина не определена")))
+      ((<= len 0.0)
+       (n1-reject-note "длина <= 0"))
+      ((< len min-len)
+       (n1-reject-note (strcat "короче минимума (" (rtos min-len 2 0) " мм)")))
+      ((> len max-len)
+       (n1-reject-note (strcat "длиннее максимума (" (rtos max-len 2 0) " мм)")))
       (T (setq measured (1+ measured))
          (setq key (fix (+ (/ len tol) 0.5)))
          (setq pieces (n1-add-group pieces key)))
@@ -1135,22 +1170,7 @@
     (setq i (1+ i))
   )
   (princ (strcat "\nИзмерено: " (itoa measured) " из " (itoa total)))
-  (if (> skipped 0)
-    (princ (strcat "\n  Пропущено (нулевые/ошибки): " (itoa skipped))))
-  (if (> skipped-short 0)
-    (princ (strcat "\n  Пропущено (короче " (rtos min-len 2 0) " мм): "
-                   (itoa skipped-short))))
-  (if (> skipped-long 0)
-    (princ (strcat "\n  Пропущено (длиннее " (rtos max-len 2 0) " мм): "
-                   (itoa skipped-long))))
-  (if (> skipped-broken 0)
-    (princ (strcat "\n  Пропущено (ломаные MLINE, >2 вершин): "
-                   (itoa skipped-broken)))
-  )
-  (if (> skipped-diag 0)
-    (princ (strcat "\n  Пропущено (диагональные MLINE): "
-                   (itoa skipped-diag)))
-  )
+  (n1-print-rejects)
   (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x)))
           (reverse pieces))
 )
@@ -1206,7 +1226,7 @@
 ;; Раскладка хлыстов
 ;; ============================================================
 (defun n1-draw-layout (bars stock kerf insPt color-map /
-    barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util
+    barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util pgi pgn
     curx p str col labelX labelY1 labelY2 centerY
     waste-txt-h waste-center-y waste-x)
 
@@ -1224,7 +1244,11 @@
   ;; ============================================================
 
   (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
+  ;; П3 (п.20): прогресс в статусной строке
+  (setq pgi 0 pgn (length bars))
   (foreach bar bars
+    (setq pgi (1+ pgi))
+    (grtext -1 (strcat "CUTLINE: отрисовка хлыста " (itoa pgi) " из " (itoa pgn)))
     (setq i (1+ i))
     (setq pieces (cdr bar) waste (car bar) used (- stock waste)
           util (* 100.0 (/ used stock)) miny y0)
@@ -1873,7 +1897,7 @@
                        default-xls default-acad
                        default-stock default-kerf
                        dialog-result r xls-ok
-                       old-transparency-display svSaved)
+                       old-transparency-display svSaved v5ans)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
@@ -1913,13 +1937,23 @@
   (setq total-input (sslength ss))
   (princ (strcat "\nВыбрано объектов: " (itoa total-input)))
 
-  ;; Этап 2 (V5): лимит количества деталей
+  ;; Этап 2 (V5): мягкий лимит - предупреждение (GUI + командная строка)
+  ;; и запрос на продолжение; Нет/Enter = остановка (прежнее поведение).
   (if (> total-input *n1-max-parts*)
     (progn
       (princ (strcat "\n[CUTLINE][GUARD] Обнаружено " (itoa total-input)
-                      " деталей. Обработка остановлена. Лимит: " (itoa *n1-max-parts*)
+                      " деталей при лимите " (itoa *n1-max-parts*)
                       ". Проверьте выборку/слои."))
-      (princ) (exit)))
+      (alert (strcat "AutoExtraction / CUTLINE\n\nВ выборке "
+                     (itoa total-input) " объектов при лимите "
+                     (itoa *n1-max-parts*) ".\nОбработка может занять очень долгое время.\n\nРешение - в командной строке."))
+      (initget "Да Нет _Yes No")
+      (setq v5ans (getkword "\nПродолжить обработку несмотря на лимит? [Да/Нет] <Нет>: "))
+      (if (= v5ans "Yes")
+        (princ "\n[CUTLINE][GUARD] Продолжаю обработку по явному подтверждению.")
+        (progn
+          (princ "\n[CUTLINE][GUARD] Обработка остановлена пользователем.")
+          (princ) (exit)))))
   (tu-diag "SCAN" (strcat "объектов в выборке: " (itoa total-input)))
 
   (setq type-counts (n1-count-by-type ss))
@@ -2147,6 +2181,8 @@
             (ssadd ent ssNew)
             (setq ent (entnext ent)))
 
+          (princ "\nCUTLINE: упаковка раскладки в блок...")
+          (pu-begin "CUTLINE:wrap-block")
           (if (> (sslength ssNew) 0)
             (progn
               (setq oldEcho (getvar "CMDECHO"))
@@ -2154,11 +2190,15 @@
               ;; Число INSERT с этим именем ДО -BLOCK (защита от двойного INSERT, Шаг 4):
               ;; в версиях AutoCAD, где -BLOCK спрашивает [Преобразовать/Удалить],
               ;; ENTER выбирает «Преобразовать» и INSERT создается самим -BLOCK.
+              (pu-begin "CUTLINE:wrap:ssget")
               (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
+              (pu-begin "CUTLINE:wrap:block")
               (setq blkCmdResult
                     (vl-catch-all-apply 'vl-cmdf
                       (list "_.-BLOCK" blockName insPt ssNew "")))
+              (pu-end "CUTLINE:wrap:block")
               (setvar "CMDECHO" oldEcho)
               (cond
                 ((vl-catch-all-error-p blkCmdResult)
@@ -2202,6 +2242,7 @@
             )
             (princ "\nНет объектов для создания блока.")
           )
+          (pu-end "CUTLINE:wrap-block")
 
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
           (setq bbox (n1-combine-bbox bbox-frame
@@ -2235,6 +2276,7 @@
   ;; V13: «всё или ничего» - падение/отмена в середине откатывает всю раскладку
   (setq uDoc (tu-undo-begin))
   (setq r (vl-catch-all-apply 'cutline-main (list 'ASK)))
+  (grtext -1 "") ;; П3: очистить прогресс (и при откате по ESC тоже)
   (if (vl-catch-all-error-p r)
     (progn
       (tu-undo-cancel uDoc)
@@ -2244,5 +2286,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 6: U2-примитивы, П1-профилировка). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 13: U2, П1-П3, V5 мягкий лимит 10000, V4 rejects-контракт отбраковки). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

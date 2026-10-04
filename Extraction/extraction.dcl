@@ -137,10 +137,10 @@ extraction_dialog : dialog {
       width = 40;
       fixed_width = true;
 
+      // Поле поиска на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_search";
-        label = "Поиск:";
-        edit_width = 24;
+        edit_width = 36;
       }
 
       : list_box {
@@ -150,29 +150,36 @@ extraction_dialog : dialog {
         multiple_select = false;
       }
 
+      // Поле нового имени на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_rename";
-        label = "Новое имя:";
-        edit_width = 24;
+        edit_width = 36;
       }
 
       // ------------------------------------------------------
-      // КНОПКИ КОПИЯ + ПЕРЕИМЕНОВАТЬ
-      // Суммарная ширина 18+18 = 36 = ширина list_box
+      // КНОПКИ КОПИЯ + ВСТАВИТЬ + ИМЯ
+      // Суммарная ширина 12+12+12 = 36 = ширина list_box
       // ------------------------------------------------------
 
       : row {
         : button {
           key = "btn_block_copy";
           label = "Копия";
-          width = 18;
+          width = 12;
+          fixed_width = true;
+        }
+
+        : button {
+          key = "btn_block_insert";
+          label = "Вставить";
+          width = 12;
           fixed_width = true;
         }
 
         : button {
           key = "btn_block_rename";
-          label = "Переименовать";
-          width = 18;
+          label = "Имя";
+          width = 12;
           fixed_width = true;
         }
       }

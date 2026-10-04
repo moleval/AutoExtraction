@@ -72,9 +72,11 @@
 ;; Программная установка поля «Новое имя».
 ;; ------------------------------------------------------------
 
-(defun blockrename-set-rename-field (value)
-  (set_tile "edt_block_rename"
-            (if (blockrename-string-p value) value ""))
+(defun blockrename-set-rename-field (value / v)
+  (setq v (if (blockrename-string-p value) value ""))
+  ;; пустое поле показывает подсказку
+  (if (= v "") (setq v *BLOCKRENAME-NAME-HINT*))
+  (set_tile "edt_block_rename" v)
   T
 )
 
@@ -416,7 +418,7 @@
     (blockrename-all-names))
 
   (set_tile "chk_filter_anonymous" "0")
-  (set_tile "edt_block_search" "")
+  (set_tile "edt_block_search" *BLOCKRENAME-SEARCH-HINT*)
   (blockrename-set-rename-field "")
 
   (blockrename-rebuild)
@@ -445,12 +447,70 @@
 
 
 ;; ============================================================
+;; ПОЛЕ ПОИСКА: ПОДСКАЗКА-ПЛЕЙСХОЛДЕР
+;; Пока пользователь не ввел значение, поле показывает подсказку.
+;; Подсказка не считается поисковым запросом; при вводе текста после
+;; подсказки она срезается и поле показывает только запрос.
+;; ============================================================
+
+(if (not (boundp '*BLOCKRENAME-SEARCH-HINT*))
+  (setq *BLOCKRENAME-SEARCH-HINT* "Поиск (по Enter):")
+)
+
+;; Подсказка поля нового имени: обработчика Enter у поля нет,
+;; переименование - только по кнопке
+(if (not (boundp '*BLOCKRENAME-NAME-HINT*))
+  (setq *BLOCKRENAME-NAME-HINT* "Введите новое имя:")
+)
+
+;; Значение поля поиска без подсказки. Подсказка вырезается из любой
+;; позиции: набранный ДО нее текст сохраняется
+(defun blockrename-search-value (/ v p)
+  (setq v (get_tile "edt_block_search"))
+  (if (= (type v) 'STR)
+    (progn
+      (cond
+        ((= v *BLOCKRENAME-SEARCH-HINT*)
+         (setq v ""))
+        ((setq p (vl-string-search *BLOCKRENAME-SEARCH-HINT* v))
+         (setq v (strcat
+                   (substr v 1 p)
+                   (substr v (+ p (strlen *BLOCKRENAME-SEARCH-HINT*) 1)))))
+      )
+      v)
+    "")
+)
+
+;; Значение поля нового имени без подсказки (вырезается из любой позиции)
+(defun blockrename-name-value (/ v p)
+  (setq v (get_tile "edt_block_rename"))
+  (if (= (type v) 'STR)
+    (progn
+      (cond
+        ((= v *BLOCKRENAME-NAME-HINT*)
+         (setq v ""))
+        ((setq p (vl-string-search *BLOCKRENAME-NAME-HINT* v))
+         (setq v (strcat
+                   (substr v 1 p)
+                   (substr v (+ p (strlen *BLOCKRENAME-NAME-HINT*) 1)))))
+      )
+      v)
+    "")
+)
+
+;; ============================================================
 ;; ОБРАБОТЧИК: ПОИСК
 ;; ============================================================
 
-(defun blockrename-search-changed ()
-  (setq *BLOCKRENAME-SEARCH-PATTERN*
-    (get_tile "edt_block_search"))
+(defun blockrename-search-changed (/ v tile)
+  (setq v (blockrename-search-value)
+        tile (get_tile "edt_block_search"))
+  ;; нормализуем текст поля: подсказка срезана; пусто = снова подсказка
+  (if (/= v tile)
+    (set_tile "edt_block_search"
+      (if (= v "") *BLOCKRENAME-SEARCH-HINT* v)))
+
+  (setq *BLOCKRENAME-SEARCH-PATTERN* v)
 
   (blockrename-sticky-clear)
 
@@ -753,6 +813,59 @@
 (defun c:КОПИЯБЛОКА () (c:blockcopy))
 
 ;; ============================================================
+;; ВСТАВКА ВЫБРАННОГО БЛОКА (кнопка "Вставить" панели БЛОКИ)
+;; Вставляет ссылку выделенного блока в указанную точку
+;; (масштаб 1, поворот 0). Определение блока не меняется.
+;; ============================================================
+
+(defun blockrename-insert-block (name / *error* svSaved uDoc acad doc ms pt obj)
+  ;; guard сиспеременных; обрыв - закрытие группы UNDO
+  (defun *error* (msg)
+    (tu-sysvar-restore svSaved)
+    (tu-undo-end uDoc)
+    (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
+      (princ (strcat "\n[BLOCKRENAME][ERROR] " msg)))
+    (princ))
+  (cond
+    ((blockrename-string-empty-p name)
+     (alert "Блок не выбран в списке.")
+     nil)
+
+    ((not (tblsearch "BLOCK" name))
+     (alert (strcat "Блок \"" name "\" не найден."))
+     nil)
+
+    (T
+     (setq pt (getpoint (strcat "\nУкажите точку вставки блока \"" name "\": ")))
+     (if (null pt)
+       (progn (princ "\nВставка отменена.") nil)
+       (progn
+         (setq svSaved (tu-sysvar-save '("CMDECHO")))
+         (setq uDoc (tu-undo-begin))
+         (setq acad (vlax-get-acad-object))
+         (setq doc (vla-get-ActiveDocument acad))
+         (setq ms (vla-get-ModelSpace doc))
+         (setq obj (ex-safe-call 'vla-InsertBlock
+                     (list ms (vlax-3d-point pt) name 1.0 1.0 1.0 0.0)))
+         (if (ex-safe-ok-p obj)
+           (progn
+             (setq obj (ex-safe-value obj))
+             (princ (strcat "\nВставлен блок: \"" name "\"")))
+           (progn
+             (princ "\nНе удалось вставить блок.")
+             (setq obj nil)))
+         (tu-undo-end uDoc)
+         (tu-sysvar-restore svSaved)
+         (if obj T nil))))
+  )
+)
+
+(defun blockrename-insert-handler ()
+  (setq *EXTRACTION-ACTION* 'INSERTBLOCK)
+  (done_dialog 1)
+)
+
+;; ============================================================
 ;; ПЕРЕИМЕНОВАНИЕ В ДИАЛОГЕ
 ;; ============================================================
 ;; Только ActiveX. Никаких вызовов command / command-s.
@@ -762,7 +875,7 @@
        ( / old-name new-name success active-result)
 
   (setq old-name *BLOCKRENAME-SELECTED*)
-  (setq new-name (get_tile "edt_block_rename"))
+  (setq new-name (blockrename-name-value))
 
   (cond
 
@@ -948,5 +1061,5 @@
 ;; ЗАВЕРШЕНИЕ
 ;; ============================================================
 
-(princ "\nBLOCKRENAME.LSP загружен. Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ")
+(princ "\nBLOCKRENAME.LSP загружен (ред. 2: поля Поиск и Новое имя с подсказками). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ")
 (princ)
