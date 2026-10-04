@@ -150,10 +150,10 @@ extraction_dialog : dialog {
         multiple_select = false;
       }
 
+      // ѕоле нового имени на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_rename";
-        label = "Ќовое им€:";
-        edit_width = 24;
+        edit_width = 36;
       }
 
       // ------------------------------------------------------

@@ -72,9 +72,11 @@
 ;; Программная установка поля «Новое имя».
 ;; ------------------------------------------------------------
 
-(defun blockrename-set-rename-field (value)
-  (set_tile "edt_block_rename"
-            (if (blockrename-string-p value) value ""))
+(defun blockrename-set-rename-field (value / v)
+  (setq v (if (blockrename-string-p value) value ""))
+  ;; пустое поле показывает подсказку
+  (if (= v "") (setq v *BLOCKRENAME-NAME-HINT*))
+  (set_tile "edt_block_rename" v)
   T
 )
 
@@ -455,16 +457,42 @@
   (setq *BLOCKRENAME-SEARCH-HINT* "Поиск (по Enter):")
 )
 
-;; Значение поля поиска без подсказки
-(defun blockrename-search-value (/ v)
+;; Подсказка поля нового имени: обработчика Enter у поля нет,
+;; переименование - только по кнопке
+(if (not (boundp '*BLOCKRENAME-NAME-HINT*))
+  (setq *BLOCKRENAME-NAME-HINT* "Введите новое имя:")
+)
+
+;; Значение поля поиска без подсказки. Подсказка вырезается из любой
+;; позиции: набранный ДО нее текст сохраняется
+(defun blockrename-search-value (/ v p)
   (setq v (get_tile "edt_block_search"))
   (if (= (type v) 'STR)
     (progn
       (cond
         ((= v *BLOCKRENAME-SEARCH-HINT*)
          (setq v ""))
-        ((vl-string-search *BLOCKRENAME-SEARCH-HINT* v)
-         (setq v (substr v (1+ (strlen *BLOCKRENAME-SEARCH-HINT*)))))
+        ((setq p (vl-string-search *BLOCKRENAME-SEARCH-HINT* v))
+         (setq v (strcat
+                   (substr v 1 p)
+                   (substr v (+ p (strlen *BLOCKRENAME-SEARCH-HINT*) 1)))))
+      )
+      v)
+    "")
+)
+
+;; Значение поля нового имени без подсказки (вырезается из любой позиции)
+(defun blockrename-name-value (/ v p)
+  (setq v (get_tile "edt_block_rename"))
+  (if (= (type v) 'STR)
+    (progn
+      (cond
+        ((= v *BLOCKRENAME-NAME-HINT*)
+         (setq v ""))
+        ((setq p (vl-string-search *BLOCKRENAME-NAME-HINT* v))
+         (setq v (strcat
+                   (substr v 1 p)
+                   (substr v (+ p (strlen *BLOCKRENAME-NAME-HINT*) 1)))))
       )
       v)
     "")
@@ -847,7 +875,7 @@
        ( / old-name new-name success active-result)
 
   (setq old-name *BLOCKRENAME-SELECTED*)
-  (setq new-name (get_tile "edt_block_rename"))
+  (setq new-name (blockrename-name-value))
 
   (cond
 
@@ -1033,5 +1061,5 @@
 ;; ЗАВЕРШЕНИЕ
 ;; ============================================================
 
-(princ "\nBLOCKRENAME.LSP загружен (ред. 1: кнопка Вставить, поиск с подсказкой на всю ширину). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ")
+(princ "\nBLOCKRENAME.LSP загружен (ред. 2: поля Поиск и Новое имя с подсказками). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ")
 (princ)
