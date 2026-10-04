@@ -9,6 +9,15 @@
 ;;; ред. 3: исправлена сортировка (работает с внутренней записью
 ;;; (key name h w count mark), была - со сдвигом индексов, источник
 ;;; ошибки "stringp 25"); порядок: Тип -> Марка -> Высота -> Ширина.
+;;; ред. 4 (решение 2026-10-04): подытоги групп и Итого считаются из
+;;; ТОЧНЫХ (неокругленных) сумм площадей и округляются один раз.
+;;; Строки остаются округленными до сотых, поэтому сумма видимых строк
+;;; может отличаться от подытога/итого на сотые - это ожидаемо.
+;;; Чем больше строк (например, Марка режет группы: 54 -> ~100
+;;; позиций), тем сильнее старая схема "сумма округленных" уходила
+;;; от точного расчета (до ~0.005 на строку, т.е. десятые на итог).
+;;; В XLS добавлена скрытая колонка с точной площадью строки:
+;;; формулы подытогов/итого = ROUND(SUM(точные),2).
 ;;;
 ;;; КОМАНДА: ZAPOLNENIE2 (алиас ЗАПОЛНЕНИЕ2)
 ;;; Требует общие модули (загружаются штатным RELOAD):
@@ -311,7 +320,7 @@
 
 ;; ---------- КУСКОВАНИЕ: ПЛОСКИЙ СПИСОК (копия, rec из 5 полей) ----------
 (defun z2-build-flat-items (data / items groups grp grpName grpRows
-                                   rec h w cnt area totalCnt totalArea groupIndex)
+                                   rec h w cnt totalCnt totalArea groupIndex)
   (setq items '() groupIndex 0)
   (setq groups '())
   (foreach rec data
@@ -329,9 +338,8 @@
       (setq rec (car rec))
       (setq items (append items (list (cons 'data (cons groupIndex rec)))))
       (setq h (cadr rec) w (caddr rec) cnt (cadddr rec))
-      (setq area (z2-round2 (/ (* h w cnt) 1000000.0)))
       (setq totalCnt  (+ totalCnt cnt))
-      (setq totalArea (+ totalArea area)))
+      (setq totalArea (+ totalArea (/ (* h w cnt 1.0) 1000000.0))))
     (setq items
       (append items
         (list (list 'subtotal groupIndex grpName totalCnt totalArea)))))
@@ -405,9 +413,7 @@
           (setq total-cnt 0 total-area 0.0)
           (foreach item data
             (setq total-cnt (+ total-cnt (cadddr item)))
-            (setq total-area (+ total-area
-              (z2-round2
-                (/ (* (cadr item) (caddr item) (cadddr item)) 1000000.0)))))
+            (setq total-area (+ total-area (/ (* (cadr item) (caddr item) (cadddr item) 1.0) 1000000.0))))
 
           (setq units (z2-build-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
@@ -566,10 +572,11 @@
                                      groups grp grpName grpRows grpCnt grpArea
                                      startRow endRow itemNum
                                      subtotal-rows formula-cnt formula-area r
-                                     cCnt cArea cMarkMerge)
+                                     cCnt cArea cMarkMerge cHid lastDataRow)
   (setq cCnt  (if *z2-has-marks* 6 5)
         cArea (if *z2-has-marks* 7 6)
-        cMarkMerge (if *z2-has-marks* 4 3))
+        cMarkMerge (if *z2-has-marks* 4 3)
+        cHid (1+ cArea))
   (setq f (open xlsfile "w"))
   (if (null f)
     nil
@@ -598,7 +605,9 @@
           (write-line "   <Column ss:Width=\"80\"/>" f)
           (write-line "   <Column ss:Width=\"80\"/>" f)
           (write-line "   <Column ss:Width=\"80\"/>" f)
-          (write-line "   <Column ss:Width=\"80\"/>" f)))
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+      ;; ред. 4: скрытая колонка точных площадей (для формул итогов)
+      (write-line "   <Column ss:Hidden=\"1\"/>" f)))
 
       (write-line "   <Row ss:Height=\"20\">" f)
       (write-line (strcat "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\""
@@ -644,9 +653,9 @@
                 mark (nth 4 rec)
                 area (eu-round2 (/ (* h w cnt) 1000000.0)))
           (setq grpCnt (+ grpCnt cnt)
-                grpArea (+ grpArea area)
+                grpArea (+ grpArea (/ (* h w cnt 1.0) 1000000.0))
                 total-cnt (+ total-cnt cnt)
-                total-area (+ total-area area))
+                total-area (+ total-area (/ (* h w cnt 1.0) 1000000.0)))
 
           (write-line "   <Row>" f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
@@ -657,6 +666,8 @@
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(RC[-3]*RC[-2]*RC[-1]/1000000,2)\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
+          ;; ред. 4: точная (неокругленная) площадь строки - скрытая колонка
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (/ (* h w cnt 1.0) 1000000.0) 2 6) "</Data></Cell>") f)
           (write-line "   </Row>" f)
 
           (setq rowNum (1+ rowNum)))
@@ -671,20 +682,20 @@
         (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
         (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
         (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C" (itoa cCnt) ":R" (itoa endRow) "C" (itoa cCnt) ")\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=SUM(R" (itoa startRow) "C" (itoa cArea) ":R" (itoa endRow) "C" (itoa cArea) ")\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=ROUND(SUM(R" (itoa startRow) "C" (itoa cHid) ":R" (itoa endRow) "C" (itoa cHid) "),2)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
         (write-line "   </Row>" f)
         (setq rowNum (1+ rowNum))
         (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
       )
 
-      (setq formula-cnt "" formula-area "")
+      (setq formula-cnt "" lastDataRow (1- rowNum))
       (foreach r subtotal-rows
         (if (= formula-cnt "")
           (setq formula-cnt (strcat "=R" (itoa r) "C" (itoa cCnt)))
-          (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C" (itoa cCnt))))
-        (if (= formula-area "")
-          (setq formula-area (strcat "=R" (itoa r) "C" (itoa cArea)))
-          (setq formula-area (strcat formula-area "+R" (itoa r) "C" (itoa cArea)))))
+          (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C" (itoa cCnt)))))
+      ;; ред. 4: итого - округление ТОЧНОЙ суммы всех строк данных
+      (setq formula-area
+        (strcat "=ROUND(SUM(R3C" (itoa cHid) ":R" (itoa lastDataRow) "C" (itoa cHid) "),2)"))
 
       (write-line "   <Row>" f)
       (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"" (itoa cMarkMerge) "\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
@@ -734,9 +745,9 @@
                 mark (nth 4 rec)
                 area (eu-round2 (/ (* h w cnt) 1000000.0)))
           (setq grpCnt (+ grpCnt cnt)
-                grpArea (+ grpArea area)
+                grpArea (+ grpArea (/ (* h w cnt 1.0) 1000000.0))
                 total-cnt (+ total-cnt cnt)
-                total-area (+ total-area area))
+                total-area (+ total-area (/ (* h w cnt 1.0) 1000000.0)))
           (if *z2-has-marks*
             (write-line
               (strcat (itoa itemNum) ";"
@@ -888,5 +899,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 3: Марка; сортировка Тип-Марка-Высота-Ширина). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 4: подытоги/итого из точных сумм). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
