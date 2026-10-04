@@ -98,7 +98,7 @@ extraction_dialog : dialog {
 
       label = "Слои";
 
-      width = 40;
+      width = 44;
       fixed_width = true;
 
       : row {
@@ -118,7 +118,7 @@ extraction_dialog : dialog {
 
         key = "lst_layers";
 
-        width = 40;
+        width = 44;
         fixed_width = true;
         height = 14;
 
@@ -148,7 +148,7 @@ extraction_dialog : dialog {
 
       label = "Блоки";
 
-      width = 40;
+      width = 44;
       fixed_width = true;
       children_alignment = left;
       children_fixed_width = true;
@@ -157,15 +157,15 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_search";
         alignment = left;
-        width = 40;
+        width = 44;
         fixed_width = true;
-        edit_width = 40;
+        edit_width = 44;
       }
 
       : list_box {
         key = "lst_blocks";
         alignment = left;
-        width = 40;
+        width = 44;
         fixed_width = true;
         height = 13;
         multiple_select = false;
@@ -175,35 +175,38 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_rename";
         alignment = left;
-        width = 40;
+        width = 44;
         fixed_width = true;
-        edit_width = 40;
+        edit_width = 44;
       }
 
       // ------------------------------------------------------
       // КНОПКИ КОПИЯ + ВСТАВИТЬ + ИМЯ
-      // Суммарная ширина 12+12+12 = 36 = ширина list_box
+      // Суммарная ширина 14+15+15 = 44 = ширина list_box
       // ------------------------------------------------------
 
       : row {
+        fixed_width = true;
+        children_fixed_width = true;
+        alignment = left;
         : button {
           key = "btn_block_copy";
           label = "Копия";
-          width = 12;
+          width = 14;
           fixed_width = true;
         }
 
         : button {
           key = "btn_block_insert";
           label = "Вставить";
-          width = 12;
+          width = 15;
           fixed_width = true;
         }
 
         : button {
           key = "btn_block_rename";
           label = "Имя";
-          width = 12;
+          width = 15;
           fixed_width = true;
         }
       }
