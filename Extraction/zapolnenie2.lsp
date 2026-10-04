@@ -16,8 +16,10 @@
 ;;; Чем больше строк (например, Марка режет группы: 54 -> ~100
 ;;; позиций), тем сильнее старая схема "сумма округленных" уходила
 ;;; от точного расчета (до ~0.005 на строку, т.е. десятые на итог).
-;;; В XLS добавлена скрытая колонка с точной площадью строки:
-;;; формулы подытогов/итого = ROUND(SUM(точные),2).
+;;; ред. 6: в XLS ячейка строки несет ТОЧНУЮ площадь (формула без
+;;; ROUND, стиль Num отображает 2 знака) - подытоги/итого считаются
+;;; =ROUND(SUM(...),2) по обычной видимой колонке; вспомогательная
+;;; скрытая колонка (ред. 4) удалена - Excel ее не скрывал.
 ;;; ред. 5: таблица AutoCAD строится по схеме FAST_TABLES - сразу после
 ;;; AddTable подавляется регенерация (RegenerateTableSuppressed),
 ;;; заполнение идет без пересборок, снятие подавления = единственная
@@ -587,11 +589,10 @@
                                      groups grp grpName grpRows grpCnt grpArea
                                      startRow endRow itemNum
                                      subtotal-rows formula-cnt formula-area r
-                                     cCnt cArea cMarkMerge cHid lastDataRow)
+                                     cCnt cArea cMarkMerge lastDataRow)
   (setq cCnt  (if *z2-has-marks* 6 5)
         cArea (if *z2-has-marks* 7 6)
-        cMarkMerge (if *z2-has-marks* 4 3)
-        cHid (1+ cArea))
+        cMarkMerge (if *z2-has-marks* 4 3))
   (setq f (open xlsfile "w"))
   (if (null f)
     nil
@@ -620,9 +621,7 @@
           (write-line "   <Column ss:Width=\"80\"/>" f)
           (write-line "   <Column ss:Width=\"80\"/>" f)
           (write-line "   <Column ss:Width=\"80\"/>" f)
-          (write-line "   <Column ss:Width=\"80\"/>" f)
-      ;; ред. 4: скрытая колонка точных площадей (для формул итогов)
-      (write-line "   <Column ss:Hidden=\"1\"/>" f)))
+          (write-line "   <Column ss:Width=\"80\"/>" f)))
 
       (write-line "   <Row ss:Height=\"20\">" f)
       (write-line (strcat "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\""
@@ -680,9 +679,9 @@
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa h) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
           (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
-          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=ROUND(RC[-3]*RC[-2]*RC[-1]/1000000,2)\"><Data ss:Type=\"Number\">" (rtos area 2 2) "</Data></Cell>") f)
-          ;; ред. 4: точная (неокругленная) площадь строки - скрытая колонка
-          (write-line (strcat "    <Cell ss:StyleID=\"Num\"><Data ss:Type=\"Number\">" (rtos (/ (* h w cnt 1.0) 1000000.0) 2 6) "</Data></Cell>") f)
+          ;; ред. 6: в ячейке строки ТОЧНАЯ площадь (формула без ROUND),
+          ;; стиль Num отображает 2 знака; итоги - по этой же колонке
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-3]*RC[-2]*RC[-1]/1000000\"><Data ss:Type=\"Number\">" (rtos (/ (* h w cnt 1.0) 1000000.0) 2 6) "</Data></Cell>") f)
           (write-line "   </Row>" f)
 
           (setq rowNum (1+ rowNum)))
@@ -697,7 +696,7 @@
         (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
         (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
         (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C" (itoa cCnt) ":R" (itoa endRow) "C" (itoa cCnt) ")\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
-        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=ROUND(SUM(R" (itoa startRow) "C" (itoa cHid) ":R" (itoa endRow) "C" (itoa cHid) "),2)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=ROUND(SUM(R" (itoa startRow) "C" (itoa cArea) ":R" (itoa endRow) "C" (itoa cArea) "),2)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
         (write-line "   </Row>" f)
         (setq rowNum (1+ rowNum))
         (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
@@ -708,9 +707,9 @@
         (if (= formula-cnt "")
           (setq formula-cnt (strcat "=R" (itoa r) "C" (itoa cCnt)))
           (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C" (itoa cCnt)))))
-      ;; ред. 4: итого - округление ТОЧНОЙ суммы всех строк данных
+      ;; ред. 6: итого - округление ТОЧНОЙ суммы всех строк данных
       (setq formula-area
-        (strcat "=ROUND(SUM(R3C" (itoa cHid) ":R" (itoa lastDataRow) "C" (itoa cHid) "),2)"))
+        (strcat "=ROUND(SUM(R3C" (itoa cArea) ":R" (itoa lastDataRow) "C" (itoa cArea) "),2)"))
 
       (write-line "   <Row>" f)
       (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"" (itoa cMarkMerge) "\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
@@ -914,5 +913,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 5: точные суммы + быстрое построение таблиц). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 6: точные суммы, XLS без вспомогательной колонки). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
