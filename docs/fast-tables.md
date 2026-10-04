@@ -99,6 +99,14 @@ memory because the Table object is reconstructed from scratch».
 
 ## 4. Реализация в AutoExtraction
 
+- **Весь проект на схеме (2026-10-04):** общие хелперы
+  `ts-ac-fast-begin` / `ts-ac-fast-end` в `common/table-utils.lsp`
+  (ред. 1; `end` вызывается ВМЕСТО `vla-Update`); на них переведены
+  `cladding.lsp` (ред. 31, 4 таблицы), `subsystem.lsp` (ред. 1, 2),
+  `fasonka.lsp` (ред. 1, 1) и легаси `tbl-create-summary`;
+  `zapolnenie.lsp` (ред. 29, 2 таблицы) — та же схема прямыми вызовами
+  подавления (исторически до появления хелперов), с замером времени
+  в логе. Реальных вызовов `vla-Update` в проекте нет.
 - `Extraction/zapolnenie.lsp` (ред. 29): `zapolnenie-create-table-detail`
   и `zapolnenie-create-table-summary`. Схема: число строк считается до
   вставки (`nRows = 2 + строки чанка (+ 1 итог)`), один `vla-AddTable`
@@ -115,9 +123,9 @@ memory because the Table object is reconstructed from scratch».
   (`tc-partition-flat`, идеал `*TU-IDEAL-ROWS*`), каждая вставляется
   столбиком ниже предыдущей (`tu-next-table-point`). Окно подавления и
   замер — у каждого чанка свои.
-- Легаси-генератор `tbl-create-summary` в `common/table-utils.lsp`
-  (4 колонки, `vla-Update`, без подавления) остаётся на старой схеме —
-  унификация всех вставок таблиц проекта на эту методику отдельная задача.
+- Легаси-генератор `tbl-create-summary` (`common/table-utils.lsp`,
+  используется fasonka) переведён на хелперы — вставок на старой
+  схеме в проекте не осталось.
 
 ## 5. Числа из практики (MarkZ, ведомость заполнений)
 
