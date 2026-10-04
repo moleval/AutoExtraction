@@ -98,7 +98,7 @@ extraction_dialog : dialog {
 
       label = "Слои";
 
-      width = 42;
+      width = 40;
       fixed_width = true;
 
       : row {
@@ -118,7 +118,7 @@ extraction_dialog : dialog {
 
         key = "lst_layers";
 
-        width = 42;
+        width = 40;
         fixed_width = true;
         height = 14;
 
@@ -157,9 +157,9 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_search";
         alignment = left;
-        width = 40;
+        width = 38;
         fixed_width = true;
-        edit_width = 40;
+        edit_width = 38;
       }
 
       : list_box {
@@ -175,14 +175,14 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_rename";
         alignment = left;
-        width = 40;
+        width = 38;
         fixed_width = true;
-        edit_width = 40;
+        edit_width = 38;
       }
 
       // ------------------------------------------------------
       // КНОПКИ КОПИЯ + ВСТАВИТЬ + ИМЯ
-      // Суммарная ширина 13+13+14 = 40 = ширина list_box
+      // Суммарная ширина 12+13+13 = 38 = ширина list_box
       // ------------------------------------------------------
 
       : row {
@@ -192,7 +192,7 @@ extraction_dialog : dialog {
         : button {
           key = "btn_block_copy";
           label = "Копия";
-          width = 13;
+          width = 12;
           fixed_width = true;
         }
 
@@ -206,7 +206,7 @@ extraction_dialog : dialog {
         : button {
           key = "btn_block_rename";
           label = "Имя";
-          width = 14;
+          width = 13;
           fixed_width = true;
         }
       }
