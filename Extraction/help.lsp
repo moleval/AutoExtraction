@@ -53,18 +53,24 @@
   )
 )
 
-(defun ae-help-ui-open (/ root dcl-file dcl-id)
+(defun ae-help-ui-open (/ root dcl-file dcl-path dcl-id)
   (setq root
     (if (= (type ae-settings-root) 'SUBR)
       (ae-settings-root)
       nil))
-  (setq dcl-file
-    (if root
-      (findfile (strcat root "\Extraction\help.dcl"))
-      (findfile "help.dcl")))
+  ;; Try the support path first, then the project root and a relative path.
+  (setq dcl-file (findfile "help.dcl"))
+  (if (null dcl-file)
+    (setq dcl-file (findfile "Extraction\\help.dcl")))
+  (if (and (null dcl-file) root)
+    (progn
+      (setq dcl-path (strcat root "\\Extraction\\help.dcl"))
+      (if (findfile dcl-path) (setq dcl-file dcl-path))
+    )
+  )
   (if (null dcl-file)
     (progn
-      (alert "Не найден файл Extraction\help.dcl.")
+      (alert "Не найден Extraction\\help.dcl.")
       nil)
     (progn
       (setq dcl-id (load_dialog dcl-file))
