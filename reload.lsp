@@ -49,6 +49,7 @@
     "cladding.lsp"
     "zapolnenie.lsp"
     "settings.lsp"
+    "help.lsp"
     "extraction.lsp"
     "cutline.lsp"
     "cutsheet.lsp"

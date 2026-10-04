@@ -392,6 +392,11 @@
         (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
 
+      (setq path (strcat root "\\Extraction\\help.lsp"))
+      (if (findfile path)
+        (load path)
+        (princ (strcat "\n[EXTRACTION] help.lsp not found: " path)))
+
       (setq path (strcat root "\\Extraction\\blockrename.lsp"))
       (if (findfile path)
         (load path)
@@ -1040,34 +1045,11 @@
 ;; ============================================================
 
 (defun extraction-help ()
-  (alert
-    (strcat
-      "Окно запуска задач.\n\n"
-      "Выбор одной задачи, слоев, режима отчета "
-      "и форматов вывода.\n"
-      "Кнопки Раскрой хлыста / Раскрой листа "
-      "запускают модули раскроя.\n\n"
-      "Сохранить — имя файла по умолчанию.\n"
-      "Сохранить как... — выбор пути и имени.\n"
-      "Для Подсистемы доступны все слои; "
-      "три чекбокса — быстрый выбор типовых слоев.\n"
-      "Кнопка \"Выбрать все\" выделяет все слои, "
-      "отображаемые с учетом фильтров.\n"
-      "Слои по умолчанию выделяются автоматически "
-      "при выборе задачи.\n"
-      "Измененный выбор сохраняется для каждого "
-      "задачи отдельно.\n\n"
-      "Блоки: фильтр \"Анонимные блоки\" показывает "
-      "только PASTEBLOCK-блоки (A$C...). "
-      "Переименование — по кнопке."
-    )
-  )
+  (setq *EXTRACTION-ACTION* 'HELP)
+  (done_dialog 1)
 )
 
 
-;; ============================================================
-;; НАСТРОЙКИ
-;; ============================================================
 (defun extraction-settings ()
   (setq *EXTRACTION-ACTION* 'SETTINGS)
   (done_dialog 1)
@@ -1497,6 +1479,13 @@
                    (ae-settings-ui-open)
                  )
                  (extraction-apply-settings-defaults)
+                 (c:extraction)
+                )
+
+                ((eq *EXTRACTION-ACTION* 'HELP)
+                 (if (= (type ae-help-ui-open) 'SUBR)
+                   (ae-help-ui-open)
+                   (alert "Окно справки недоступно."))
                  (c:extraction)
                 )
 

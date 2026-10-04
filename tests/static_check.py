@@ -52,6 +52,8 @@ REQUIRED_FILES = [
     "Extraction/extraction.dcl",
     "Extraction/settings.lsp",
     "Extraction/settings.dcl",
+    "Extraction/help.lsp",
+    "Extraction/help.dcl",
     "Extraction/fasonka.lsp",
     "Extraction/subsystem.lsp",
     "Extraction/zapolnenie.lsp",
