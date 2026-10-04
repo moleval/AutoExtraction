@@ -20,7 +20,9 @@ extraction_dialog : dialog {
     }
 
     : spacer {
+      // Flexible spacer keeps settings and help at the right edge.
       width = 1;
+      fixed_width = false;
     }
 
     : button {
