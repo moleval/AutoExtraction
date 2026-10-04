@@ -515,6 +515,7 @@
             (setq items (cdr chunk))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+            (ts-ac-fast-begin tbl)
             (if (vl-catch-all-error-p tbl)
               (princ (strcat "\nОшибка создания таблицы блоков: "
                              (vl-catch-all-error-message tbl)))
@@ -578,7 +579,7 @@
                     (vla-SetText tbl row 6
                       (cl-format-area (cl-round2 total-area)))
                     (vla-SetCellAlignment tbl row 6 5)))
-                (vla-update tbl)
+                (ts-ac-fast-end tbl)
                 (princ (strcat "\nТаблица блоков "
                                (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
@@ -617,6 +618,7 @@
           (setq nRows (+ 3 (length layerGroups)))
           (setq tbl (vl-catch-all-apply 'vla-addtable
                     (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+          (ts-ac-fast-begin tbl)
           (if (vl-catch-all-error-p tbl)
             (princ (strcat "\nОшибка создания таблицы блоков: "
                            (vl-catch-all-error-message tbl)))
@@ -650,7 +652,7 @@
               (vla-SetCellAlignment tbl row 2 5)
               (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
               (vla-SetCellAlignment tbl row 3 5)
-              (vla-update tbl)
+              (ts-ac-fast-end tbl)
               (princ "\nТаблица блоков (кратко) создана.")))
           (tu-undo-end doc)
           (vl-catch-all-apply 'setvar (list "CMDECHO" oldEcho))
@@ -1073,6 +1075,7 @@
       (setq space (vla-get-modelspace
                     (vla-get-activedocument (vlax-get-acad-object))))
       (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
+      (ts-ac-fast-begin tbl)
       
       (setq maxLayerLen 10)
       (foreach rec data
@@ -1104,7 +1107,7 @@
       (vla-SetCellAlignment tbl row 2 5)
       (vla-SetText tbl row 3 (cl-format-area (cl-round2 total-area)))
       (vla-SetCellAlignment tbl row 3 5)
-      (vla-update tbl)
+      (ts-ac-fast-end tbl)
       (setvar "CMDECHO" 1)
       tbl
     )
@@ -1166,6 +1169,7 @@
             (setq items (cdr chunk))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
+            (ts-ac-fast-begin tbl)
             (if (vl-catch-all-error-p tbl)
               (princ (strcat "\nОшибка создания таблицы: "
                              (vl-catch-all-error-message tbl)))
@@ -1226,7 +1230,7 @@
                     (vla-SetText tbl row 5
                       (cl-format-area (cl-round2 total-area)))
                     (vla-SetCellAlignment tbl row 5 5)))
-                (vla-update tbl)
+                (ts-ac-fast-end tbl)
                 (princ (strcat "\nТаблица " (itoa (1+ chunk-idx)) " создана."))
                 (setq pt_wcs (tu-next-table-point pt_wcs nRows 10.0 20.0))))
             (setq chunk-idx (1+ chunk-idx)))
@@ -1460,5 +1464,5 @@
   )
 )
 
-(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 30: U2-примитивы). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
+(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 31: FAST_TABLES). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
 (princ)
