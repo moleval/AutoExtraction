@@ -6,6 +6,9 @@
 ;;; логика переносится в рабочий модуль, стенд удаляется.
 ;;; ред. 2: ошибка на отдельном блоке не прерывает команду - блок
 ;;; пропускается с сообщением [Z2] (номер, имя, текст ошибки).
+;;; ред. 3: исправлена сортировка (работает с внутренней записью
+;;; (key name h w count mark), была - со сдвигом индексов, источник
+;;; ошибки "stringp 25"); порядок: Тип -> Марка -> Высота -> Ширина.
 ;;;
 ;;; КОМАНДА: ZAPOLNENIE2 (алиас ЗАПОЛНЕНИЕ2)
 ;;; Требует общие модули (загружаются штатным RELOAD):
@@ -72,6 +75,8 @@
       (if (= n "") nil (atoi n)))))
 
 (defun z2-str-smart-less (a b / na nb)
+  (if (not (= (type a) 'STR)) (setq a ""))
+  (if (not (= (type b) 'STR)) (setq b ""))
   (setq na (z2-leading-number a) nb (z2-leading-number b))
   (if (and na nb)
     (if (= na nb) (< (strcase a) (strcase b)) (< na nb))
@@ -189,22 +194,31 @@
      (setq w (fix (+ raw-w *Z2-FRAME-ALLOWANCE*)))
      (list h w))))
 
-;; ---------- СОРТИРОВКА DETAIL (копия + 4-й критерий: Марка) ----------
-(defun z2-sort-less (a b / ta tb ha hb wa wb ma mb)
-  (setq ta (strcase (car a)) tb (strcase (car b))
-        ha (cadr a) hb (cadr b)
-        wa (caddr a) wb (caddr b)
-        ma (if (null (nth 4 a)) "" (strcase (nth 4 a)))
-        mb (if (null (nth 4 b)) "" (strcase (nth 4 b))))
+;; ---------- СОРТИРОВКА DETAIL (ред. 3) ----------
+;; Порядок (утверждено 2026-10-04): Тип -> Марка -> Высота -> Ширина.
+;; Работает с ВНУТРЕННЕЙ записью агрегата: (key name h w count mark).
+;; В ред. 2 индексы были сдвинуты (функция писалась под возвращаемую
+;; запись) - strcase получал Кол-во (integer) -> "stringp 25".
+;; Все поля перед сравнением проверяются по типу: сортировка не может
+;; упасть "неверный тип аргумента" ни на каких данных.
+(defun z2-sort-less (a b / ta tb ma mb ha hb wa wb)
+  (setq ta (if (= (type (cadr a)) 'STR) (strcase (cadr a)) "")
+        tb (if (= (type (cadr b)) 'STR) (strcase (cadr b)) "")
+        ma (if (= (type (nth 5 a)) 'STR) (strcase (nth 5 a)) "")
+        mb (if (= (type (nth 5 b)) 'STR) (strcase (nth 5 b)) "")
+        ha (if (numberp (caddr a)) (caddr a) 0)
+        hb (if (numberp (caddr b)) (caddr b) 0)
+        wa (if (numberp (cadddr a)) (cadddr a) 0)
+        wb (if (numberp (cadddr b)) (cadddr b) 0))
   (cond
     ((z2-str-smart-less ta tb) T)
     ((z2-str-smart-less tb ta) nil)
+    ((z2-str-smart-less ma mb) T)
+    ((z2-str-smart-less mb ma) nil)
     ((< ha hb) T)
     ((> ha hb) nil)
     ((< wa wb) T)
     ((> wa wb) nil)
-    ((z2-str-smart-less ma mb) T)
-    ((z2-str-smart-less mb ma) nil)
     (T nil)))
 
 ;; ---------- ДИАГНОСТИКА БЛОКА (ред. 2) ----------
@@ -874,5 +888,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 2: тест колонки Марка + диагностика ошибок агрегации). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 3: Марка; сортировка Тип-Марка-Высота-Ширина). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
