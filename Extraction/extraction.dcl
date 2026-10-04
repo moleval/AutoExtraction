@@ -149,12 +149,15 @@ extraction_dialog : dialog {
       // Поле поиска на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_search";
+        width = 36;
+        fixed_width = true;
         edit_width = 36;
       }
 
       : list_box {
         key = "lst_blocks";
         width = 36;
+        fixed_width = true;
         height = 13;
         multiple_select = false;
       }
@@ -162,6 +165,8 @@ extraction_dialog : dialog {
       // Поле нового имени на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_rename";
+        width = 36;
+        fixed_width = true;
         edit_width = 36;
       }
 
