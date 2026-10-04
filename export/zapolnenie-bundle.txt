@@ -1,7 +1,7 @@
 ================================================================================
 ZAPOLNENIE (Заполнение проёмов) — бандл для передачи в другую программу
-Ветка: arena/01a0cef7-autoextraction, HEAD: cbb956a
-Сгенерировано: 2026-09-23
+Ветка: arena/01a0cef7-autoextraction, HEAD: 0725157
+Сгенерировано: 2026-10-04
 ================================================================================
 
 ЧТО ЭТО
@@ -9,7 +9,10 @@ ZAPOLNENIE (Заполнение проёмов) — бандл для пере�
 панели, витражное стекло) из динамических блоков чертежа AutoCAD.
 Формирует:
   1. Таблицы AutoCAD (ActiveX vla-AddTable, модель): DETAIL-таблицы по группам
-     + сводная SUMMARY-таблица.
++ сводная SUMMARY-таблица; быстрое построение (RegenerateTableSuppressed).
+      DETAIL может содержать колонку "Марка" - атрибуты блоков
+      ВИТРАЖ (флаг) / МАРКА (значение); подытоги/итого считаются из
+      точных (неокругленных) сумм площадей и округляются один раз.
   2. XLS (XML Spreadsheet 2003) — файлы детальной и сводной ведомостей.
   3. CSV — fallback, если XLS-файл не открылся на запись.
   4. TXT-отчёт (по флагу export-txt).
@@ -30,10 +33,7 @@ ZAPOLNENIE (Заполнение проёмов) — бандл для пере�
 
 --------------------------------------------------------------------------------
 FILE: Extraction/zapolnenie.lsp
-НАЗНАЧЕНИЕ: ядро: сбор данных, агрегация, команды ZAPOLNENIE/ЗАПОЛНЕНИЕ
-ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
 --------------------------------------------------------------------------------
-
 ;;; ============================================================
 ;;; ZAPOLNENIE.LSP — Заполнение проемов
 ;;; (стеклопакеты, сэндвич-панели, глухие панели, витражное стекло)
@@ -68,6 +68,12 @@ FILE: Extraction/zapolnenie.lsp
 
 (setq *ZAPOLNENIE-HEIGHT-KEYWORDS* '("ВЫСОТА В СВЕТУ" "ВЫСОТА"))
 (setq *ZAPOLNENIE-WIDTH-KEYWORDS*  '("ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА"))
+;; Марка (ред. 29): T, если хотя бы у одного принятого блока выборки
+;; заполнен атрибут ВИТРАЖ или МАРКА
+(setq *zapolnenie-has-marks* nil)
+;; Диагностика (ред. 29): индекс текущего блока (-1 = вне цикла), счетчик ошибок
+(setq *zapolnenie-progress* -1)
+(setq *zapolnenie-errors* 0)
 
 (setq *zapolnenie-skipped-no-height* 0)
 (setq *zapolnenie-skipped-no-width* 0)
@@ -182,14 +188,59 @@ FILE: Extraction/zapolnenie.lsp
      (setq w (fix (+ raw-w *ZAPOLNENIE-FRAME-ALLOWANCE*)))
      (list h w))))
 
+(defun zapolnenie-get-attr (obj tag / attrs a tagname value result)
+  (setq attrs (vl-catch-all-apply 'vlax-invoke (list obj 'GetAttributes)))
+  (if (or (vl-catch-all-error-p attrs) (not (listp attrs)))
+    nil
+    (progn
+      (foreach a attrs
+        (if (null result)
+          (progn
+            (setq tagname (vl-catch-all-apply 'vla-get-TagString (list a)))
+            (if (and (not (vl-catch-all-error-p tagname))
+                     (= (type tagname) 'STR)
+                     (= (strcase (vl-string-trim " " tagname)) (strcase tag)))
+              (progn
+                (setq value (vl-catch-all-apply 'vla-get-TextString (list a)))
+                (if (and (not (vl-catch-all-error-p value))
+                         (= (type value) 'STR))
+                  (setq value (vl-string-trim " \t" value))
+                  (setq value nil))
+                (if (and value (/= value "")) (setq result value)))))))
+      result)))
+
+(defun zapolnenie-mark-line (obj / vit mar)
+  (setq vit (zapolnenie-get-attr obj "ВИТРАЖ")
+        mar (zapolnenie-get-attr obj "МАРКА"))
+  (cond
+    ((and vit mar) (strcat "Витраж " mar))
+    (vit "Витраж")
+    (mar mar)
+    (T nil)))
+
+(defun zapolnenie-block-diag (i obj err / nm)
+  (setq nm (if obj (vl-catch-all-apply 'vla-get-EffectiveName (list obj)) "?"))
+  (if (vl-catch-all-error-p nm) (setq nm "?"))
+  (if (/= (type nm) 'STR) (setq nm (vl-princ-to-string nm)))
+  (princ (strcat "\n[ZAPOLNENIE] Блок #" (itoa (1+ i)) " (" nm "): "
+                 (vl-catch-all-error-message err)
+                 " - БЛОК ПРОПУЩЕН.")))
+
 ;; ---------- СОРТИРОВКА DETAIL ----------
-(defun zapolnenie-sort-less (a b / ta tb ha hb wa wb)
-  (setq ta (strcase (car a)) tb (strcase (car b))
-        ha (cadr a) hb (cadr b)
-        wa (caddr a) wb (caddr b))
+(defun zapolnenie-sort-less (a b / ta tb ma mb ha hb wa wb)
+  (setq ta (if (= (type (cadr a)) 'STR) (strcase (cadr a)) "")
+        tb (if (= (type (cadr b)) 'STR) (strcase (cadr b)) "")
+        ma (if (= (type (nth 5 a)) 'STR) (strcase (nth 5 a)) "")
+        mb (if (= (type (nth 5 b)) 'STR) (strcase (nth 5 b)) "")
+        ha (if (numberp (caddr a)) (caddr a) 0)
+        hb (if (numberp (caddr b)) (caddr b) 0)
+        wa (if (numberp (cadddr a)) (cadddr a) 0)
+        wb (if (numberp (cadddr b)) (cadddr b) 0))
   (cond
     ((zp-str-smart-less ta tb) T)
     ((zp-str-smart-less tb ta) nil)
+    ((zp-str-smart-less ma mb) T)
+    ((zp-str-smart-less mb ma) nil)
     ((< ha hb) T)
     ((> ha hb) nil)
     ((< wa wb) T)
@@ -200,47 +251,80 @@ FILE: Extraction/zapolnenie.lsp
 ;; Внутренняя структура: (key name h w count)
 ;; Возвращаемая:         (name h w count)
 (defun zapolnenie-aggregate (inserts /
-    i ent obj name dims h w key rec found acc display-names)
+    i ent obj name dims h w mark key found acc display-names r sorted)
   (setq acc '() display-names '() i 0)
-  (setq *zapolnenie-skipped-no-height* 0
-        *zapolnenie-skipped-no-width* 0)
+  (setq *zapolnenie-skipped-no-height* 0 *zapolnenie-skipped-no-width* 0)
+  (setq *zapolnenie-has-marks* nil)
+  (setq *zapolnenie-errors* 0)
 
   (repeat (length inserts)
-    (setq ent (nth i inserts))
-    (setq obj (vlax-ename->vla-object ent))
-    (setq name (zapolnenie-element-name obj))
-    (setq dims (zapolnenie-compute-dims obj))
-
-    (if dims
+    (setq ent (nth i inserts) obj nil)
+    (setq *zapolnenie-progress* i)
+    (setq r
+      (vl-catch-all-apply
+        '(lambda ()
+           (setq obj (vlax-ename->vla-object ent))
+           (setq name (zapolnenie-element-name obj))
+           (if (/= (type name) 'STR)
+             (progn
+               (princ (strcat "\n[ZAPOLNENIE] Блок #" (itoa (1+ i))
+                              ": ИМЯ не строка (тип " (vl-princ-to-string (type name))
+                              ", значение " (vl-princ-to-string name)
+                              ") - беру \"Без имени\"."))
+               (setq name "Без имени")))
+           (setq dims (zapolnenie-compute-dims obj))
+           (if dims
+             (progn
+               (setq h (car dims) w (cadr dims))
+               (setq mark (zapolnenie-mark-line obj))
+               (if (and mark (/= (type mark) 'STR))
+                 (progn
+                   (princ (strcat "\n[ZAPOLNENIE] Блок #" (itoa (1+ i))
+                                  ": МАРКА не строка (тип " (vl-princ-to-string (type mark))
+                                  ", значение " (vl-princ-to-string mark)
+                                  ") - перевожу в строку."))
+                   (setq mark (vl-princ-to-string mark))))
+               (if mark (setq *zapolnenie-has-marks* T))
+               (setq key (strcat (strcase name) "|" (itoa h) "|" (itoa w)
+                                 "|" (if mark (strcase mark) "-")))
+               (setq found (assoc key acc))
+               (if found
+                 (setq acc
+                   (subst
+                     (list key
+                           (cadr found)
+                           (caddr found)
+                           (cadddr found)
+                           (1+ (car (cddddr found)))
+                           (nth 5 found))
+                     found acc))
+                 (progn
+                   (if (not (assoc (strcase name) display-names))
+                     (setq display-names
+                       (cons (cons (strcase name) name) display-names)))
+                   (setq acc (cons (list key name h w 1 mark) acc)))))))
+        (list)))
+    (if (vl-catch-all-error-p r)
       (progn
-        (setq h (car dims) w (cadr dims))
-        (setq key (strcat (strcase name) "|" (itoa h) "|" (itoa w)))
-        (setq found (assoc key acc))
-
-        (if found
-          (setq acc
-            (subst
-              (list key
-                    (cadr found)
-                    (caddr found)
-                    (cadddr found)
-                    (1+ (car (cddddr found))))
-              found acc))
-          (progn
-            (if (not (assoc (strcase name) display-names))
-              (setq display-names
-                (cons (cons (strcase name) name) display-names)))
-            (setq acc
-              (cons (list key name h w 1) acc))))))
-
+        (setq *zapolnenie-errors* (1+ *zapolnenie-errors*))
+        (if (<= *zapolnenie-errors* 20)
+          (zapolnenie-block-diag i obj r)
+          (if (= *zapolnenie-errors* 21)
+            (princ "\n[ZAPOLNENIE] Дальнейшие сообщения об ошибках подавлены.")))))
     (setq i (1+ i)))
 
-  (setq acc (vl-sort acc 'zapolnenie-sort-less))
+  (setq sorted (vl-catch-all-apply 'vl-sort (list acc 'zapolnenie-sort-less)))
+  (if (vl-catch-all-error-p sorted)
+    (progn
+      (princ (strcat "\n[ZAPOLNENIE] Ошибка СОРТИРОВКИ: " (vl-catch-all-error-message sorted)
+                     " - использую данные без сортировки."))
+      (setq *zapolnenie-errors* (1+ *zapolnenie-errors*) sorted acc)))
 
   (mapcar
-    '(lambda (r)
-       (list (cadr r) (caddr r) (cadddr r) (cadddr (cdr r))))
-    acc))
+    '(lambda (rec)
+       (list (cadr rec) (caddr rec) (cadddr rec)
+             (car (cddddr rec)) (nth 5 rec)))
+    sorted))
 
 ;; ---------- SUMMARY ИЗ DETAIL ----------
 (defun zapolnenie-build-summary (data /
@@ -252,7 +336,7 @@ FILE: Extraction/zapolnenie.lsp
           h    (cadr rec)
           w    (caddr rec)
           cnt  (cadddr rec)
-          area (zapolnenie-round2 (/ (* h w cnt) 1000000.0))
+          area (/ (* h w cnt 1.0) 1000000.0)
           key  (strcase name))
     (setq found (assoc key summary))
 
@@ -270,14 +354,15 @@ FILE: Extraction/zapolnenie.lsp
     (vl-sort summary
       '(lambda (a b) (zp-str-smart-less (car a) (car b)))))
 
+  ;; ред. 29: площади накоплены точно - округляем один раз при выдаче
   (mapcar
-    '(lambda (r) (list (cadr r) (caddr r) (cadddr r)))
+    '(lambda (r) (list (cadr r) (caddr r) (zapolnenie-round2 (cadddr r))))
     summary))
 
 ;; ---------- КУСКОВАНИЕ: ПЛОСКИЙ СПИСОК ----------
 ;; Группы по типу, каждая с подитогом.
 (defun zp-build-flat-items (data / items groups grp grpName grpRows
-                                   rec h w cnt area totalCnt totalArea groupIndex)
+                                   rec h w cnt totalCnt totalArea groupIndex)
   (setq items '() groupIndex 0)
   (setq groups '())
 
@@ -298,9 +383,8 @@ FILE: Extraction/zapolnenie.lsp
       (setq rec (car rec))
       (setq items (append items (list (cons 'data (cons groupIndex rec)))))
       (setq h (cadr rec) w (caddr rec) cnt (cadddr rec))
-      (setq area (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
       (setq totalCnt  (+ totalCnt cnt))
-      (setq totalArea (+ totalArea area)))
+      (setq totalArea (+ totalArea (/ (* h w cnt 1.0) 1000000.0))))
 
     (setq items
       (append items
@@ -320,10 +404,11 @@ FILE: Extraction/zapolnenie.lsp
 (defun zapolnenie-create-table-detail (data /
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     nCols nRows space tbl row oldEcho doc
-    lastGroupIdx rowInGroup maxNameLen nameStr
-    tip h w cnt area total-cnt total-area
+    lastGroupIdx rowInGroup maxNameLen nameStr maxMarkLen markStr
+    tip h w cnt mark area total-cnt total-area
     grpName grpCnt grpArea
-    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width)
+    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width
+    tms0 tms1)
 
   (if (null data)
     (progn (princ "\nНет данных для таблицы Заполнения.") nil)
@@ -345,6 +430,11 @@ FILE: Extraction/zapolnenie.lsp
             (setq nameStr (car item))
             (if (> (strlen nameStr) maxNameLen)
               (setq maxNameLen (strlen nameStr))))
+          (setq maxMarkLen 10)
+          (foreach item data
+            (setq markStr (if (nth 4 item) (nth 4 item) ""))
+            (if (> (strlen markStr) maxMarkLen)
+              (setq maxMarkLen (strlen markStr))))
 
           (setq maxNumLen 3)
           (setq zpGroups '())
@@ -371,13 +461,13 @@ FILE: Extraction/zapolnenie.lsp
           (setq total-cnt 0 total-area 0.0)
           (foreach item data
             (setq total-cnt (+ total-cnt (cadddr item)))
-            (setq total-area (+ total-area
-              (zapolnenie-round2
-                (/ (* (cadr item) (caddr item) (cadddr item)) 1000000.0)))))
+            (setq total-area (+ total-area (/ (* (cadr item) (caddr item) (cadddr item) 1.0) 1000000.0))))
 
           (setq units (zp-build-units data *TU-IDEAL-ROWS*))
           (setq total-chunks (length units))
-          (setq chunk-idx 0 nCols 6)
+          ;; Колонка Марка - только если в выборке реально есть Витраж/Марка
+          (setq nCols (if *zapolnenie-has-marks* 7 6))
+          (setq chunk-idx 0)
 
           (setq lastGroupIdx -1 rowInGroup 0)
 
@@ -386,6 +476,7 @@ FILE: Extraction/zapolnenie.lsp
             (setq nRows (+ 2 (car chunk)))
             (if is-last (setq nRows (1+ nRows)))
             (setq items (cdr chunk))
+            (setq tms0 (getvar "MILLISECS"))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
 
@@ -393,17 +484,31 @@ FILE: Extraction/zapolnenie.lsp
               (princ (strcat "\nОшибка создания таблицы Заполнения: "
                              (vl-catch-all-error-message tbl)))
               (progn
+                ;; ред. 5: подавление пересборки на все заполнение
+                (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                  (list tbl :vlax-true))
                 (vla-SetColumnWidth tbl 0 col0Width)
                 (vla-SetColumnWidth tbl 1 col1Width)
-                (vla-SetColumnWidth tbl 2 30.0)
-                (vla-SetColumnWidth tbl 3 30.0)
-                (vla-SetColumnWidth tbl 4 30.0)
-                (vla-SetColumnWidth tbl 5 35.0)
+                (if *zapolnenie-has-marks*
+                  (progn
+                    (vla-SetColumnWidth tbl 2 (max 40.0 (* maxMarkLen 3.0)))
+                    (vla-SetColumnWidth tbl 3 30.0)
+                    (vla-SetColumnWidth tbl 4 30.0)
+                    (vla-SetColumnWidth tbl 5 30.0)
+                    (vla-SetColumnWidth tbl 6 35.0))
+                  (progn
+                    (vla-SetColumnWidth tbl 2 30.0)
+                    (vla-SetColumnWidth tbl 3 30.0)
+                    (vla-SetColumnWidth tbl 4 30.0)
+                    (vla-SetColumnWidth tbl 5 35.0)))
 
-                (ts-ac-title tbl 0 "Заполнение" 6)
+                (ts-ac-title tbl 0 "Заполнение" nCols)
 
-                (ts-ac-header tbl 1
-                  '("№" "Тип" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
+                (if *zapolnenie-has-marks*
+                  (ts-ac-header tbl 1
+                    '("№" "Тип" "Марка" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2"))
+                  (ts-ac-header tbl 1
+                    '("№" "Тип" "Высота, мм" "Ширина, мм" "Кол-во, шт." "Площадь, м2")))
 
                 (setq row 2)
 
@@ -415,6 +520,7 @@ FILE: Extraction/zapolnenie.lsp
                       (setq h   (cadddr item))
                       (setq w   (caddr (cddr item)))
                       (setq cnt (cadddr (cddr item)))
+                      (setq mark (nth 6 item))
                       (setq area
                         (zapolnenie-round2 (/ (* h w cnt) 1000000.0)))
 
@@ -427,17 +533,33 @@ FILE: Extraction/zapolnenie.lsp
                       (vla-SetText tbl row 0
                         (strcat (itoa groupIdx) "." (itoa rowInGroup)))
                       (vla-SetText tbl row 1 tip)
-                      (vla-SetText tbl row 2 (itoa h))
-                      (vla-SetText tbl row 3 (itoa w))
-                      (vla-SetText tbl row 4 (itoa cnt))
-                      (vla-SetText tbl row 5 (zapolnenie-format-area area))
+                      (if *zapolnenie-has-marks*
+                        (progn
+                          (vla-SetText tbl row 2 (if mark mark ""))
+                          (vla-SetText tbl row 3 (itoa h))
+                          (vla-SetText tbl row 4 (itoa w))
+                          (vla-SetText tbl row 5 (itoa cnt))
+                          (vla-SetText tbl row 6 (zapolnenie-format-area area)))
+                        (progn
+                          (vla-SetText tbl row 2 (itoa h))
+                          (vla-SetText tbl row 3 (itoa w))
+                          (vla-SetText tbl row 4 (itoa cnt))
+                          (vla-SetText tbl row 5 (zapolnenie-format-area area))))
 
                       (vla-SetCellAlignment tbl row 0 5)
                       (vla-SetCellAlignment tbl row 1 4)
-                      (vla-SetCellAlignment tbl row 2 5)
-                      (vla-SetCellAlignment tbl row 3 5)
-                      (vla-SetCellAlignment tbl row 4 5)
-                      (vla-SetCellAlignment tbl row 5 5)
+                      (if *zapolnenie-has-marks*
+                        (progn
+                          (vla-SetCellAlignment tbl row 2 4)
+                          (vla-SetCellAlignment tbl row 3 5)
+                          (vla-SetCellAlignment tbl row 4 5)
+                          (vla-SetCellAlignment tbl row 5 5)
+                          (vla-SetCellAlignment tbl row 6 5))
+                        (progn
+                          (vla-SetCellAlignment tbl row 2 5)
+                          (vla-SetCellAlignment tbl row 3 5)
+                          (vla-SetCellAlignment tbl row 4 5)
+                          (vla-SetCellAlignment tbl row 5 5)))
 
                       (setq row (1+ row)))
 
@@ -447,31 +569,49 @@ FILE: Extraction/zapolnenie.lsp
                       (setq grpArea (nth 4 item))
 
                       (ts-ac-subtotal tbl row groupIdx
-                        (strcat "   {\\L" grpName "}") 1 3)
-                      (vla-SetText tbl row 4 (itoa grpCnt))
-                      (vla-SetText tbl row 5
-                        (zapolnenie-format-area grpArea))
-
-                      (vla-SetCellAlignment tbl row 0 5)
-                      (vla-SetCellAlignment tbl row 1 4)
-                      (vla-SetCellAlignment tbl row 4 5)
-                      (vla-SetCellAlignment tbl row 5 5)
+                        (strcat "   {\\L" grpName "}") 1 (if *zapolnenie-has-marks* 3 3))
+                      (if *zapolnenie-has-marks*
+                        (progn
+                          (vla-SetText tbl row 5 (itoa grpCnt))
+                          (vla-SetText tbl row 6
+                            (zapolnenie-format-area grpArea))
+                          (vla-SetCellAlignment tbl row 5 5)
+                          (vla-SetCellAlignment tbl row 6 5))
+                        (progn
+                          (vla-SetText tbl row 4 (itoa grpCnt))
+                          (vla-SetText tbl row 5
+                            (zapolnenie-format-area grpArea))
+                          (vla-SetCellAlignment tbl row 4 5)
+                          (vla-SetCellAlignment tbl row 5 5)))
 
                       (setq row (1+ row)))))
 
                 (if is-last
                   (progn
                     (ts-ac-total tbl row
-                      "           {\\LИтого по всем позициям:}" 0 3 4)
-                    (vla-SetText tbl row 4 (itoa total-cnt))
-                    (vla-SetCellAlignment tbl row 4 5)
-                    (vla-SetText tbl row 5
-                      (zapolnenie-format-area total-area))
-                    (vla-SetCellAlignment tbl row 5 5)))
+                      "           {\\LИтого по всем позициям:}" 0 3 (if *zapolnenie-has-marks* 5 4))
+                    (if *zapolnenie-has-marks*
+                      (progn
+                        (vla-SetText tbl row 5 (itoa total-cnt))
+                        (vla-SetText tbl row 6
+                          (zapolnenie-format-area total-area))
+                        (vla-SetCellAlignment tbl row 5 5)
+                        (vla-SetCellAlignment tbl row 6 5))
+                      (progn
+                        (vla-SetText tbl row 4 (itoa total-cnt))
+                        (vla-SetText tbl row 5
+                          (zapolnenie-format-area total-area))
+                        (vla-SetCellAlignment tbl row 4 5)
+                        (vla-SetCellAlignment tbl row 5 5)))))
 
-                (vla-update tbl)
+                ;; ред. 5: снятие подавления = единственная полная сборка
+                ;; (vla-Update после этого дал бы вторую сборку - убран)
+                (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                  (list tbl :vlax-false))
+                (setq tms1 (getvar "MILLISECS"))
                 (princ (strcat "\nТаблица Заполнения "
-                               (itoa (1+ chunk-idx)) " создана."))
+                               (itoa (1+ chunk-idx)) " создана за "
+                               (rtos (/ (- tms1 tms0) 1000.0) 2 2) " с."))
                 (setq pt_wcs
                   (tu-next-table-point pt_wcs nRows 10.0 20.0))))
 
@@ -485,7 +625,8 @@ FILE: Extraction/zapolnenie.lsp
 
 ;; ---------- ТАБЛИЦА SUMMARY ----------
 (defun zapolnenie-create-table-summary (data /
-    pt tbl row nRows nCols space rec tip cnt area total-cnt total-area)
+    pt tbl row nRows nCols space rec tip cnt area total-cnt total-area
+    tms0 tms1)
 
   (setq pt (getpoint "\nУкажите точку вставки таблицы: "))
 
@@ -497,7 +638,11 @@ FILE: Extraction/zapolnenie.lsp
       (setq space
         (vla-get-modelspace
           (vla-get-activedocument (vlax-get-acad-object))))
-      (setq tbl (vla-addtable space (vlax-3d-point pt) nRows nCols 10.0 50.0))
+      (setq tms0 (getvar "MILLISECS"))
+      (setq tbl (vl-catch-all-apply 'vla-addtable
+        (list space (vlax-3d-point pt) nRows nCols 10.0 50.0)))
+      (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+        (list tbl :vlax-true))
 
       (vla-SetColumnWidth tbl 0 15.0)
       (vla-SetColumnWidth tbl 1 75.0)
@@ -541,9 +686,245 @@ FILE: Extraction/zapolnenie.lsp
       (vla-SetCellAlignment tbl row 2 5)
       (vla-SetCellAlignment tbl row 3 5)
 
-      (vla-update tbl)
+      (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+        (list tbl :vlax-false))
+      (setq tms1 (getvar "MILLISECS"))
+      (princ (strcat "\nТаблица Заполнения (краткая) создана за "
+                     (rtos (/ (- tms1 tms0) 1000.0) 2 2) " с."))
       (setvar "CMDECHO" 1)
       tbl)))
+
+(defun zapolnenie-export-xls-detail (data xlsfile / f rec tip h w cnt mark area
+                                     total-cnt total-area
+                                     groups grp grpName grpRows grpCnt grpArea
+                                     startRow endRow itemNum
+                                     subtotal-rows formula-cnt formula-area r
+                                     cCnt cArea cMarkMerge groupRanges gr grS grE)
+  (setq cCnt  (if *zapolnenie-has-marks* 6 5)
+        cArea (if *zapolnenie-has-marks* 7 6)
+        cMarkMerge (if *zapolnenie-has-marks* 4 3))
+  (setq f (open xlsfile "w"))
+  (if (null f)
+    nil
+    (progn
+      (write-line "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" f)
+      (write-line "<?mso-application progid=\"Excel.Sheet\"?>" f)
+      (write-line "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:o=\"urn:schemas-microsoft-com:office:office\"" f)
+      (write-line " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"" f)
+      (write-line " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"" f)
+      (write-line " xmlns:html=\"http://www.w3.org/TR/REC-html40\">" f)
+      (write-line (eu-xml-styles "0.##") f)
+
+      (write-line " <Worksheet ss:Name=\"ZapolnenieDetail\">" f)
+      (write-line "  <Table>" f)
+      (write-line "   <Column ss:Width=\"30\"/>" f)
+      (write-line "   <Column ss:Width=\"125\"/>" f)
+      (if *zapolnenie-has-marks*
+        (progn
+          (write-line "   <Column ss:Width=\"90\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f))
+        (progn
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)
+          (write-line "   <Column ss:Width=\"80\"/>" f)))
+
+      (write-line "   <Row ss:Height=\"20\">" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"Header\" ss:MergeAcross=\""
+                          (itoa (1- (if *zapolnenie-has-marks* 7 6)))
+                          "\"><Data ss:Type=\"String\">Заполнение</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "   <Row>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">№</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Тип</Data></Cell>" f)
+      (if *zapolnenie-has-marks*
+        (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Марка</Data></Cell>" f))
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Высота, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Ширина, мм</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Кол-во, шт.</Data></Cell>" f)
+      (write-line "    <Cell ss:StyleID=\"Header\"><Data ss:Type=\"String\">Площадь, м2</Data></Cell>" f)
+      (write-line "   </Row>" f)
+
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))))
+
+      (setq rowNum 3 itemNum 0 total-cnt 0 total-area 0.0
+            subtotal-rows '() groupRanges '())
+
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0
+              startRow rowNum)
+
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                mark (nth 4 rec)
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea (/ (* h w cnt 1.0) 1000000.0))
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area (/ (* h w cnt 1.0) 1000000.0)))
+
+          (write-line "   <Row>" f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa itemNum) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+          (if *zapolnenie-has-marks*
+            (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"String\">" (if mark (eu-xml-escape mark) "") "</Data></Cell>") f))
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa h) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa w) "</Data></Cell>") f)
+          (write-line (strcat "    <Cell ss:StyleID=\"Data\"><Data ss:Type=\"Number\">" (itoa cnt) "</Data></Cell>") f)
+          ;; ред. 6: в ячейке строки ТОЧНАЯ площадь (формула без ROUND),
+          ;; стиль Num отображает 2 знака; итоги - по этой же колонке
+          (write-line (strcat "    <Cell ss:StyleID=\"Num\" ss:Formula=\"=RC[-3]*RC[-2]*RC[-1]/1000000\"><Data ss:Type=\"Number\">" (rtos (/ (* h w cnt 1.0) 1000000.0) 2 6) "</Data></Cell>") f)
+          (write-line "   </Row>" f)
+
+          (setq rowNum (1+ rowNum)))
+
+        (setq endRow (1- rowNum))
+        ;; ред. 7: диапазон ТОЛЬКО строк данных группы - для итого
+        (setq groupRanges (append groupRanges (list (list startRow endRow))))
+
+        (write-line "   <Row>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\">" (eu-xml-escape grpName) "</Data></Cell>") f)
+        (if *zapolnenie-has-marks*
+          (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f))
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line "    <Cell ss:StyleID=\"BoldUnderline\"><Data ss:Type=\"String\"></Data></Cell>" f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"=SUM(R" (itoa startRow) "C" (itoa cCnt) ":R" (itoa endRow) "C" (itoa cCnt) ")\"><Data ss:Type=\"Number\">" (itoa grpCnt) "</Data></Cell>") f)
+        (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"=ROUND(SUM(R" (itoa startRow) "C" (itoa cArea) ":R" (itoa endRow) "C" (itoa cArea) "),2)\"><Data ss:Type=\"Number\">" (rtos grpArea 2 2) "</Data></Cell>") f)
+        (write-line "   </Row>" f)
+        (setq rowNum (1+ rowNum))
+        (setq subtotal-rows (append subtotal-rows (list (1- rowNum))))
+      )
+
+      (setq formula-cnt "")
+      (foreach r subtotal-rows
+        (if (= formula-cnt "")
+          (setq formula-cnt (strcat "=R" (itoa r) "C" (itoa cCnt)))
+          (setq formula-cnt (strcat formula-cnt "+R" (itoa r) "C" (itoa cCnt)))))
+      ;; ред. 7: итого - округление ТОЧНОЙ суммы строк данных по всем
+      ;; группам (диапазоны данных, БЕЗ строк подытогов - иначе задвоение)
+      (setq formula-area "")
+      (foreach gr groupRanges
+        (setq grS (car gr) grE (cadr gr))
+        (if (= formula-area "")
+          (setq formula-area
+            (strcat "R" (itoa grS) "C" (itoa cArea) ":R" (itoa grE) "C" (itoa cArea)))
+          (setq formula-area
+            (strcat formula-area ",R" (itoa grS) "C" (itoa cArea) ":R" (itoa grE) "C" (itoa cArea)))))
+      (setq formula-area (strcat "=ROUND(SUM(" formula-area "),2)"))
+
+      (write-line "   <Row>" f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:MergeAcross=\"" (itoa cMarkMerge) "\"><Data ss:Type=\"String\">Итого</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderline\" ss:Formula=\"" formula-cnt "\"><Data ss:Type=\"Number\">" (itoa total-cnt) "</Data></Cell>") f)
+      (write-line (strcat "    <Cell ss:StyleID=\"BoldUnderlineNum\" ss:Formula=\"" formula-area "\"><Data ss:Type=\"Number\">" (rtos total-area 2 2) "</Data></Cell>") f)
+      (write-line "   </Row>" f)
+
+      (write-line "  </Table>" f)
+      (write-line " </Worksheet>" f)
+      (write-line "</Workbook>" f)
+      (close f)
+      T)))
+
+(defun zapolnenie-export-csv-detail (data csvfile / f rec tip h w cnt mark area
+                                    total-cnt total-area
+                                    groups grp grpName grpRows grpCnt grpArea itemNum)
+  (setq f (open csvfile "w"))
+  (if f
+    (progn
+      (if *zapolnenie-has-marks*
+        (write-line "№;Тип;Марка;Высота, мм;Ширина, мм;Кол-во, шт.;Площадь, м2" f)
+        (write-line "№;Тип;Высота, мм;Ширина, мм;Кол-во, шт.;Площадь, м2" f))
+      (setq total-cnt 0 total-area 0.0 itemNum 0)
+
+      (setq groups '())
+      (foreach rec data
+        (setq tip (car rec))
+        (setq grp (assoc tip groups))
+        (if grp
+          (setq groups (subst (append grp (list (list rec))) grp groups))
+          (setq groups (append groups (list (list tip (list rec)))))))
+
+      (foreach grp groups
+        (setq grpName (car grp)
+              grpRows (cdr grp)
+              grpCnt  0
+              grpArea 0.0)
+
+        (foreach rec grpRows
+          (setq rec (car rec))
+          (setq itemNum (1+ itemNum)
+                h   (cadr rec)
+                w   (caddr rec)
+                cnt (cadddr rec)
+                mark (nth 4 rec)
+                area (eu-round2 (/ (* h w cnt) 1000000.0)))
+          (setq grpCnt (+ grpCnt cnt)
+                grpArea (+ grpArea (/ (* h w cnt 1.0) 1000000.0))
+                total-cnt (+ total-cnt cnt)
+                total-area (+ total-area (/ (* h w cnt 1.0) 1000000.0)))
+          (if *zapolnenie-has-marks*
+            (write-line
+              (strcat (itoa itemNum) ";"
+                      (eu-csv-quote grpName) ";"
+                      (eu-csv-quote (if mark mark "")) ";"
+                      (itoa h) ";"
+                      (itoa w) ";"
+                      (itoa cnt) ";"
+                      "\"" (eu-format-area-csv area) "\"")
+              f)
+            (write-line
+              (strcat (itoa itemNum) ";"
+                      (eu-csv-quote grpName) ";"
+                      (itoa h) ";"
+                      (itoa w) ";"
+                      (itoa cnt) ";"
+                      "\"" (eu-format-area-csv area) "\"")
+              f)))
+
+        (if *zapolnenie-has-marks*
+          (write-line
+            (strcat ";" (eu-csv-quote grpName) ";;;;"
+                    (itoa grpCnt) ";"
+                    "\"" (eu-format-area-csv grpArea) "\"")
+            f)
+          (write-line
+            (strcat ";" (eu-csv-quote grpName) ";;;"
+                    (itoa grpCnt) ";"
+                    "\"" (eu-format-area-csv grpArea) "\"")
+            f)))
+
+      (if *zapolnenie-has-marks*
+        (write-line
+          (strcat "Итого;;;;"
+                  (itoa total-cnt) ";"
+                  "\"" (eu-format-area-csv total-area) "\"")
+          f)
+        (write-line
+          (strcat "Итого;;;"
+                  (itoa total-cnt) ";"
+                  "\"" (eu-format-area-csv total-area) "\"")
+          f))
+      (close f)
+      T)
+    nil))
 
 ;; ---------- ОСНОВНАЯ ФУНКЦИЯ ----------
 (defun zapolnenie-main (layers report-mode export-excel export-txt
@@ -563,7 +944,7 @@ FILE: Extraction/zapolnenie.lsp
     (tu-sysvar-restore svSaved)
     (princ))
 
-  ;; V8: guard - обрыв вернёт CMDECHO
+  ;; V8: guard - обрыв вернет CMDECHO
   (setq svSaved (tu-sysvar-save '("CMDECHO")))
 
   (setq inserts (su-select-inserts layers))
@@ -571,6 +952,13 @@ FILE: Extraction/zapolnenie.lsp
   (if inserts
     (progn
       (setq data (zapolnenie-aggregate inserts))
+      (setq *zapolnenie-progress* -1)
+      (if (> *zapolnenie-errors* 0)
+        (princ (strcat "\n[ZAPOLNENIE] Итого блоков пропущено из-за ошибок: "
+                       (itoa *zapolnenie-errors*) " - подробности выше.")))
+      (princ (if *zapolnenie-has-marks*
+        "\nКолонка МАРКА: ДА (найдены атрибуты Витраж/Марка)"
+        "\nКолонка МАРКА: НЕТ (атрибуты не найдены - формат как раньше)"))
 
       (if data
         (progn
@@ -593,12 +981,12 @@ FILE: Extraction/zapolnenie.lsp
             (progn
               (setq xlsfile (strcat base-name ".xls"))
               (if (= (strcase report-mode) "DETAIL")
-                (if (eu-export-zapolnenie-detail data xlsfile)
+                (if (zapolnenie-export-xls-detail data xlsfile)
                   (princ (strcat "\nXLS сохранен: " xlsfile))
                   (progn
                     (princ "\nНе удалось сохранить XLS. Сохраняю CSV...")
                     (setq csvfile (strcat base-name ".csv"))
-                    (if (eu-export-zapolnenie-csv-detail data csvfile)
+                    (if (zapolnenie-export-csv-detail data csvfile)
                       (princ (strcat "\nCSV сохранен: " csvfile))
                       (princ "\nНе удалось создать CSV."))))
                 (if (eu-export-zapolnenie-summary summary-data xlsfile)
@@ -628,8 +1016,7 @@ FILE: Extraction/zapolnenie.lsp
             (setq total-count (+ total-count (cadddr rec)))
             (setq total-area
               (+ total-area
-                 (zapolnenie-round2
-                   (/ (* (cadr rec) (caddr rec) (cadddr rec)) 1000000.0)))))
+                 (/ (* (cadr rec) (caddr rec) (cadddr rec) 1.0) 1000000.0))))
 
           (setq skipped-total
             (+ *zapolnenie-skipped-no-height*
@@ -664,7 +1051,9 @@ FILE: Extraction/zapolnenie.lsp
                         use-default save-base)
 
   (if (not (and (type 'su-select-inserts)
-                (type 'eu-export-zapolnenie-detail)
+                (type 'tc-partition-flat)
+                (type 'ts-ac-header)
+                (type 'eu-xml-styles)
                 (type 'tx-export-gal-zapolnenie)))
     (progn
       (princ "\nНе загружены зависимости. Запустите EXTRACTION или RELOAD.")
@@ -722,14 +1111,12 @@ FILE: Extraction/zapolnenie.lsp
 
 (defun c:ЗАПОЛНЕНИЕ () (c:zapolnenie))
 
-(princ "\nZAPOLNENIE.LSP загружен (ред. 28). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ")
+(princ "\nZAPOLNENIE.LSP загружен (ред. 29: колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ")
 (princ)
-
-
 
 --------------------------------------------------------------------------------
 FILE: common/excel-utils.lsp
-НАЗНАЧЕНИЕ: писатели XLS (XML 2003) и CSV: eu-export-zapolnenie-detail/summary, csv-detail/summary
+--------------------------------------------------------------------------------
 ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
 --------------------------------------------------------------------------------
 
@@ -1814,7 +2201,7 @@ FILE: common/excel-utils.lsp
 
 --------------------------------------------------------------------------------
 FILE: common/select-utils.lsp
-НАЗНАЧЕНИЕ: su-select-inserts (выбор блоков по слоям), su-get-effective-name, su-get-visibility, su-value-to-number
+--------------------------------------------------------------------------------
 ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
 --------------------------------------------------------------------------------
 
@@ -2525,7 +2912,7 @@ FILE: common/select-utils.lsp
 
 --------------------------------------------------------------------------------
 FILE: common/task-utils.lsp
-НАЗНАЧЕНИЕ: tu-next-table-point, tu-is-last-chunk (раскладка таблиц), tu-sysvar-save/restore
+--------------------------------------------------------------------------------
 ИСХОДНАЯ КОДИРОВКА: windows-1251 (для AutoCAD вернуть в cp1251!)
 --------------------------------------------------------------------------------
 
@@ -2787,6 +3174,3 @@ FILE: common/task-utils.lsp
   (while (tblsearch "BLOCK" name)
     (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
-
-
-
