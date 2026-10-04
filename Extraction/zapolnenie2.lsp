@@ -4,6 +4,8 @@
 ;;; Рабочий ZAPOLNENIE.LSP не использует и не переопределяет -
 ;;; вся логика под префиксом z2-. После подтверждения правильности
 ;;; логика переносится в рабочий модуль, стенд удаляется.
+;;; ред. 2: ошибка на отдельном блоке не прерывает команду - блок
+;;; пропускается с сообщением [Z2] (номер, имя, текст ошибки).
 ;;;
 ;;; КОМАНДА: ZAPOLNENIE2 (алиас ЗАПОЛНЕНИЕ2)
 ;;; Требует общие модули (загружаются штатным RELOAD):
@@ -38,6 +40,9 @@
 (setq *z2-skipped-no-width* 0)
 ;; T, если хотя бы у одного принятого блока есть Витраж/Марка
 (setq *z2-has-marks* nil)
+;; диагностика ред. 2: индекс текущего блока (-1 = вне цикла), счетчик ошибок
+(setq *z2-progress* -1)
+(setq *z2-errors* 0)
 
 ;; ---------- ОКРУГЛЕНИЕ/ФОРМАТ (копии логики рабочего модуля) ----------
 (defun z2-round2 (x)
@@ -73,12 +78,22 @@
     (< (strcase a) (strcase b))))
 
 ;; ---------- ИМЯ ЭЛЕМЕНТА (ТИП) - как в рабочем модуле ----------
-(defun z2-element-name (obj / effname vis)
+(defun z2-element-name (obj / effname vis name)
   (setq effname (su-get-effective-name obj))
   (setq vis (su-get-visibility obj))
-  (if (and vis (/= vis ""))
-    vis
-    (if effname effname "Без имени")))
+  (setq name
+    (if (and vis (= (type vis) 'STR) (/= vis ""))
+      vis
+      (if (= (type effname) 'STR) effname "Без имени")))
+  ;; ред. 2: имя обязано быть строкой - иначе сообщаем и подменяем
+  (if (/= (type name) 'STR)
+    (progn
+      (princ (strcat "\n[Z2] ИМЯ ЭЛЕМЕНТА не строка (тип "
+                     (vl-princ-to-string (type name))
+                     ", значение " (vl-princ-to-string name)
+                     ") - беру \"Без имени\"."))
+      (setq name "Без имени")))
+  name)
 
 ;; ---------- АТРИБУТЫ (НОВОЕ) ----------
 ;; Значение атрибута по тегу (регистр не учитывается); пустое -> nil.
@@ -192,53 +207,93 @@
     ((z2-str-smart-less mb ma) nil)
     (T nil)))
 
-;; ---------- АГРЕГАЦИЯ (Марка в ключе и в записи) ----------
+;; ---------- ДИАГНОСТИКА БЛОКА (ред. 2) ----------
+(defun z2-block-diag (i obj err / nm)
+  (setq nm (if obj (vl-catch-all-apply 'vla-get-EffectiveName (list obj)) "?"))
+  (if (vl-catch-all-error-p nm) (setq nm "?"))
+  (if (/= (type nm) 'STR) (setq nm (vl-princ-to-string nm)))
+  (princ (strcat "\n[Z2] Блок #" (itoa (1+ i)) " (" nm "): "
+                 (vl-catch-all-error-message err)
+                 " - БЛОК ПРОПУЩЕН.")))
+
+;; ---------- АГРЕГАЦИЯ (Марка в ключе и в записи; ред. 2 - с диагностикой) ----------
 ;; Внутренняя структура: (key name h w count mark)
 ;; Возвращаемая:         (name h w count mark)  - mark nil | "строка"
 (defun z2-aggregate (inserts /
-    i ent obj name dims h w mark key rec found acc display-names)
+    i ent obj name dims h w mark key found acc display-names r sorted)
   (setq acc '() display-names '() i 0)
   (setq *z2-skipped-no-height* 0 *z2-skipped-no-width* 0)
   (setq *z2-has-marks* nil)
+  (setq *z2-errors* 0)
 
   (repeat (length inserts)
-    (setq ent (nth i inserts))
-    (setq obj (vlax-ename->vla-object ent))
-    (setq name (z2-element-name obj))
-    (setq dims (z2-compute-dims obj))
-
-    (if dims
+    (setq ent (nth i inserts) obj nil)
+    (setq *z2-progress* i)
+    (setq r
+      (vl-catch-all-apply
+        '(lambda ()
+           (setq obj (vlax-ename->vla-object ent))
+           (setq name (z2-element-name obj))
+           (if (/= (type name) 'STR)
+             (progn
+               (princ (strcat "\n[Z2] Блок #" (itoa (1+ i))
+                              ": ИМЯ не строка (тип " (vl-princ-to-string (type name))
+                              ", значение " (vl-princ-to-string name)
+                              ") - беру \"Без имени\"."))
+               (setq name "Без имени")))
+           (setq dims (z2-compute-dims obj))
+           (if dims
+             (progn
+               (setq h (car dims) w (cadr dims))
+               (setq mark (z2-mark-line obj))
+               (if (and mark (/= (type mark) 'STR))
+                 (progn
+                   (princ (strcat "\n[Z2] Блок #" (itoa (1+ i))
+                                  ": МАРКА не строка (тип " (vl-princ-to-string (type mark))
+                                  ", значение " (vl-princ-to-string mark)
+                                  ") - перевожу в строку."))
+                   (setq mark (vl-princ-to-string mark))))
+               (if mark (setq *z2-has-marks* T))
+               (setq key (strcat (strcase name) "|" (itoa h) "|" (itoa w)
+                                 "|" (if mark (strcase mark) "-")))
+               (setq found (assoc key acc))
+               (if found
+                 (setq acc
+                   (subst
+                     (list key
+                           (cadr found)
+                           (caddr found)
+                           (cadddr found)
+                           (1+ (car (cddddr found)))
+                           (nth 5 found))
+                     found acc))
+                 (progn
+                   (if (not (assoc (strcase name) display-names))
+                     (setq display-names
+                       (cons (cons (strcase name) name) display-names)))
+                   (setq acc (cons (list key name h w 1 mark) acc)))))))
+        (list)))
+    (if (vl-catch-all-error-p r)
       (progn
-        (setq h (car dims) w (cadr dims))
-        (setq mark (z2-mark-line obj))
-        (if mark (setq *z2-has-marks* T))
-        (setq key (strcat (strcase name) "|" (itoa h) "|" (itoa w)
-                          "|" (if mark (strcase mark) "-")))
-        (setq found (assoc key acc))
-        (if found
-          (setq acc
-            (subst
-              (list key
-                    (cadr found)
-                    (caddr found)
-                    (cadddr found)
-                    (1+ (car (cddddr found)))
-                    (nth 5 found))
-              found acc))
-          (progn
-            (if (not (assoc (strcase name) display-names))
-              (setq display-names
-                (cons (cons (strcase name) name) display-names)))
-            (setq acc (cons (list key name h w 1 mark) acc))))))
+        (setq *z2-errors* (1+ *z2-errors*))
+        (if (<= *z2-errors* 20)
+          (z2-block-diag i obj r)
+          (if (= *z2-errors* 21)
+            (princ "\n[Z2] Дальнейшие сообщения об ошибках подавлены.")))))
     (setq i (1+ i)))
 
-  (setq acc (vl-sort acc 'z2-sort-less))
+  (setq sorted (vl-catch-all-apply 'vl-sort (list acc 'z2-sort-less)))
+  (if (vl-catch-all-error-p sorted)
+    (progn
+      (princ (strcat "\n[Z2] Ошибка СОРТИРОВКИ: " (vl-catch-all-error-message sorted)
+                     " - использую данные без сортировки."))
+      (setq *z2-errors* (1+ *z2-errors*) sorted acc)))
 
   (mapcar
-    '(lambda (r)
-       (list (cadr r) (caddr r) (cadddr r)
-             (car (cddddr r)) (nth 5 r)))
-    acc))
+    '(lambda (rec)
+       (list (cadr rec) (caddr rec) (cadddr rec)
+             (car (cddddr rec)) (nth 5 rec)))
+    sorted))
 
 ;; ---------- КУСКОВАНИЕ: ПЛОСКИЙ СПИСОК (копия, rec из 5 полей) ----------
 (defun z2-build-flat-items (data / items groups grp grpName grpRows
@@ -724,7 +779,11 @@
     (if (and msg
              (not (wcmatch (strcase msg)
                     "*BREAK*,*CANCEL*,*QUIT*,*EXIT*")))
-      (princ (strcat "\nОшибка: " msg)))
+      (progn
+        (princ (strcat "\nОшибка: " msg))
+        (if (>= *z2-progress* 0)
+          (princ (strcat "\n[Z2] Сбой возник при обработке блока #"
+                         (itoa (1+ *z2-progress*)) " (нумерация с 1).")))))
     (tu-sysvar-restore svSaved)
     (princ))
 
@@ -737,6 +796,10 @@
     (progn
       (princ (strcat "\nБлоков принято к извлечению: " (itoa (length inserts))))
       (setq data (z2-aggregate inserts))
+(setq *z2-progress* -1)
+(if (> *z2-errors* 0)
+  (princ (strcat "\n[Z2] Итого блоков пропущено из-за ошибок: " (itoa *z2-errors*)
+                 " - подробности выше; пришлите этот лог разработчику.")))
       (princ (strcat "\nБлоков пропущено (нет Высоты): " (itoa *z2-skipped-no-height*)
                      ", (нет Ширины): " (itoa *z2-skipped-no-width*)))
       (if (null data)
@@ -811,5 +874,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 1: ТЕСТОВЫЙ стенд колонки Марка). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 2: тест колонки Марка + диагностика ошибок агрегации). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
