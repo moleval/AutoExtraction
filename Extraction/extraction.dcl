@@ -137,7 +137,7 @@ extraction_dialog : dialog {
       width = 40;
       fixed_width = true;
 
-      ;; Поле поиска на всю ширину панели; пока пусто - показывает подсказку
+      // Поле поиска на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_search";
         edit_width = 36;

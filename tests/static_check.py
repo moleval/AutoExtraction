@@ -244,6 +244,24 @@ def check_dcl_keys(path: Path, dcl_keys: set[str]) -> list[str]:
 
 
 # ----------------------------------------------------------------------
+# DCL syntax guards
+# ----------------------------------------------------------------------
+
+def check_dcl_syntax(path: Path) -> list[str]:
+    """DCL не знает Lisp-комментариев ';' - только /* */ и // до конца
+    строки. Лишняя ';' ломает парсер AutoCAD ("синтаксическая ошибка")."""
+    errors: list[str] = []
+    text = read_text(path)
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith(";"):
+            errors.append(
+                f"{path.relative_to(ROOT)}:{i}: Lisp-style ';' comment in DCL "
+                f"(разрешены только // и /* */)"
+            )
+    return errors
+
+
+# ----------------------------------------------------------------------
 # Обязательные файлы
 # ----------------------------------------------------------------------
 
@@ -278,6 +296,8 @@ def main() -> int:
     dcl_count = len(list(dcl_files()))
     for path in lisp_files():
         errors += check_dcl_keys(path, dcl_keys)
+    for path in dcl_files():
+        errors += check_dcl_syntax(path)
 
     if errors:
         print("ERRORS:")
@@ -288,7 +308,7 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} "
-        f"checks: required / balance / defun-dup / dcl-keys / mains"
+        f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
     )
     print("RESULT: PASS")
     return 0
