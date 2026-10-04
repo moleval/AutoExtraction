@@ -1085,16 +1085,37 @@
 ;; ============================================================
 ;; Извлечение длин
 ;; ============================================================
+;; V4: контракт отбраковки - модель CUTSHEET (cs-reject-note/cs-print-rejects):
+;; *n1-rejects*       - assoc-счетчик причин отсева за сбор: (причина . количество);
+;; *n1-reject-reason* - причина, выставленная последней попыткой измерения.
+;; Каждый отброшенный объект учитывается в регистре РОВНО ОДИН раз с причиной
+;; (в старой схеме сломанные/диагональные MLINE учитывались дважды - в своей
+;; категории и в общей "нулевые/ошибки").
+(defun n1-reject-note (reason / cell)
+  (if (or (null reason) (= reason "")) (setq reason "причина не зафиксирована"))
+  (setq cell (assoc reason *n1-rejects*))
+  (if cell
+    (setq *n1-rejects* (subst (cons reason (1+ (cdr cell))) cell *n1-rejects*))
+    (setq *n1-rejects* (cons (cons reason 1) *n1-rejects*))))
+
+(defun n1-print-rejects ( / cell total)
+  (setq total 0)
+  (foreach cell *n1-rejects* (setq total (+ total (cdr cell))))
+  (if (> total 0)
+    (progn
+      (princ (strcat "\n[CUTLINE][VALIDATION] Исключено объектов: " (itoa total)))
+      (foreach cell (reverse *n1-rejects*)
+        (princ (strcat "\n  " (car cell) ": " (itoa (cdr cell))))))))
+
 (defun n1-extract-pieces (ss tol min-len max-len /
                             i ent typ len key pieces total geom
-                            measured skipped skipped-short skipped-long
-                            skipped-broken skipped-diag obj)
-  (setq pieces '() i 0 total (sslength ss)
-        measured 0 skipped 0 skipped-short 0 skipped-long 0
-        skipped-broken 0 skipped-diag 0)
+                            measured obj)
+  (setq pieces '() i 0 total (sslength ss) measured 0
+        *n1-rejects* '() *n1-reject-reason* nil)
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
+    (setq *n1-reject-reason* nil)
 
     (cond
       ((= typ "MLINE")
@@ -1104,8 +1125,8 @@
          (progn
            (setq len nil)
            (if (> (su-mline-vertex-count ent) 2)
-             (setq skipped-broken (1+ skipped-broken))
-             (setq skipped-diag (1+ skipped-diag))
+             (setq *n1-reject-reason* "MLINE: ломаная (больше 2 вершин)")
+             (setq *n1-reject-reason* "MLINE: диагональная")
            )
          )
        )
@@ -1113,23 +1134,35 @@
       ((= typ "LINE")
        (setq len (vl-catch-all-apply 'vlax-curve-getDistAtParam
                    (list ent (vlax-curve-getEndParam ent))))
-       (if (vl-catch-all-error-p len) (setq len nil))
+       (if (vl-catch-all-error-p len)
+         (setq len nil *n1-reject-reason* "LINE: длина недоступна (ActiveX)"))
       )
       ((= typ "INSERT")
        (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
-       (if (not (vl-catch-all-error-p obj))
-         (setq len (su-get-length obj))
-         (setq len nil)
+       (if (vl-catch-all-error-p obj)
+         (setq len nil *n1-reject-reason* "ActiveX объекта недоступен")
+         (progn
+           (setq len (su-get-length obj))
+           (if (null len)
+             (setq *n1-reject-reason*
+               "длина не определена (нет числового свойства \"Длина\")")))
        )
       )
-      (T (setq len nil))
+      (T
+       (setq len nil)
+       (setq *n1-reject-reason* "неподдерживаемый тип объекта"))
     )
 
     (cond
-      ((or (null len) (not (numberp len)) (<= len 0.0))
-       (setq skipped (1+ skipped)))
-      ((< len min-len) (setq skipped-short (1+ skipped-short)))
-      ((> len max-len) (setq skipped-long (1+ skipped-long)))
+      ((or (null len) (not (numberp len)))
+       (n1-reject-note
+         (if *n1-reject-reason* *n1-reject-reason* "длина не определена")))
+      ((<= len 0.0)
+       (n1-reject-note "длина <= 0"))
+      ((< len min-len)
+       (n1-reject-note (strcat "короче минимума (" (rtos min-len 2 0) " мм)")))
+      ((> len max-len)
+       (n1-reject-note (strcat "длиннее максимума (" (rtos max-len 2 0) " мм)")))
       (T (setq measured (1+ measured))
          (setq key (fix (+ (/ len tol) 0.5)))
          (setq pieces (n1-add-group pieces key)))
@@ -1137,22 +1170,7 @@
     (setq i (1+ i))
   )
   (princ (strcat "\nИзмерено: " (itoa measured) " из " (itoa total)))
-  (if (> skipped 0)
-    (princ (strcat "\n  Пропущено (нулевые/ошибки): " (itoa skipped))))
-  (if (> skipped-short 0)
-    (princ (strcat "\n  Пропущено (короче " (rtos min-len 2 0) " мм): "
-                   (itoa skipped-short))))
-  (if (> skipped-long 0)
-    (princ (strcat "\n  Пропущено (длиннее " (rtos max-len 2 0) " мм): "
-                   (itoa skipped-long))))
-  (if (> skipped-broken 0)
-    (princ (strcat "\n  Пропущено (ломаные MLINE, >2 вершин): "
-                   (itoa skipped-broken)))
-  )
-  (if (> skipped-diag 0)
-    (princ (strcat "\n  Пропущено (диагональные MLINE): "
-                   (itoa skipped-diag)))
-  )
+  (n1-print-rejects)
   (mapcar '(lambda (x) (list (* (float (car x)) tol) (cdr x)))
           (reverse pieces))
 )
@@ -2268,5 +2286,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 12: U2, П1-П3, V5 мягкий лимит 10000 (alert+запрос на продолжение)). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 13: U2, П1-П3, V5 мягкий лимит 10000, V4 rejects-контракт отбраковки). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
