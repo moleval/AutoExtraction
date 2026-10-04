@@ -18,6 +18,11 @@
 ;;; от точного расчета (до ~0.005 на строку, т.е. десятые на итог).
 ;;; В XLS добавлена скрытая колонка с точной площадью строки:
 ;;; формулы подытогов/итого = ROUND(SUM(точные),2).
+;;; ред. 5: таблица AutoCAD строится по схеме FAST_TABLES - сразу после
+;;; AddTable подавляется регенерация (RegenerateTableSuppressed),
+;;; заполнение идет без пересборок, снятие подавления = единственная
+;;; полная сборка; vla-Update убран (давал вторую сборку). Время
+;;; построения каждой таблицы печатается в командную строку.
 ;;;
 ;;; КОМАНДА: ZAPOLNENIE2 (алиас ЗАПОЛНЕНИЕ2)
 ;;; Требует общие модули (загружаются штатным RELOAD):
@@ -360,7 +365,8 @@
     lastGroupIdx rowInGroup maxNameLen nameStr maxMarkLen markStr
     tip h w cnt mark area total-cnt total-area
     grpName grpCnt grpArea
-    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width)
+    maxNumLen zpGroups grpEntry grpIdx numStr col0Width col1Width
+    tms0 tms1)
 
   (if (null data)
     (progn (princ "\nНет данных для таблицы Заполнение2.") nil)
@@ -428,6 +434,7 @@
             (setq nRows (+ 2 (car chunk)))
             (if is-last (setq nRows (1+ nRows)))
             (setq items (cdr chunk))
+            (setq tms0 (getvar "MILLISECS"))
             (setq tbl (vl-catch-all-apply 'vla-addtable
               (list space (vlax-3d-point pt_wcs) nRows nCols 10.0 50.0)))
 
@@ -435,6 +442,9 @@
               (princ (strcat "\nОшибка создания таблицы Заполнение2: "
                              (vl-catch-all-error-message tbl)))
               (progn
+                ;; ред. 5: подавление пересборки на все заполнение
+                (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                  (list tbl :vlax-true))
                 (vla-SetColumnWidth tbl 0 col0Width)
                 (vla-SetColumnWidth tbl 1 col1Width)
                 (if *z2-has-marks*
@@ -552,9 +562,14 @@
                         (vla-SetCellAlignment tbl row 4 5)
                         (vla-SetCellAlignment tbl row 5 5)))))
 
-                (vla-update tbl)
+                ;; ред. 5: снятие подавления = единственная полная сборка
+                ;; (vla-Update после этого дал бы вторую сборку - убран)
+                (vl-catch-all-apply 'vla-put-RegenerateTableSuppressed
+                  (list tbl :vlax-false))
+                (setq tms1 (getvar "MILLISECS"))
                 (princ (strcat "\nТаблица Заполнение2 "
-                               (itoa (1+ chunk-idx)) " создана."))
+                               (itoa (1+ chunk-idx)) " создана за "
+                               (rtos (/ (- tms1 tms0) 1000.0) 2 2) " с."))
                 (setq pt_wcs
                   (tu-next-table-point pt_wcs nRows 10.0 20.0))))
 
@@ -899,5 +914,5 @@
     (setq result (append result (list (vl-string-trim " " str)))))
   result)
 
-(princ "\nZAPOLNENIE2.LSP загружен (ред. 4: подытоги/итого из точных сумм). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
+(princ "\nZAPOLNENIE2.LSP загружен (ред. 5: точные суммы + быстрое построение таблиц). Команда: ZAPOLNENIE2 / ЗАПОЛНЕНИЕ2")
 (princ)
