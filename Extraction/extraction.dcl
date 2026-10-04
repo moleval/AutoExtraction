@@ -14,7 +14,6 @@ extraction_dialog : dialog {
   // ==========================================================
 
   : row {
-    alignment = right;
     : text {
       label = "Настройка задачи";
       alignment = left;
@@ -26,6 +25,9 @@ extraction_dialog : dialog {
       fixed_width = false;
     }
 
+    : row {
+      fixed_width = true;
+      children_fixed_width = true;
     : button {
       key = "btn_settings";
       label = "Настройки";
@@ -38,6 +40,7 @@ extraction_dialog : dialog {
       label = "?";
       fixed_width = true;
       width = 4;
+    }
     }
   }
 
@@ -115,7 +118,8 @@ extraction_dialog : dialog {
 
         key = "lst_layers";
 
-        width = 36;
+        width = 40;
+        fixed_width = true;
         height = 14;
 
         multiple_select = true;
@@ -153,15 +157,15 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_search";
         alignment = left;
-        width = 36;
+        width = 40;
         fixed_width = true;
-        edit_width = 36;
+        edit_width = 40;
       }
 
       : list_box {
         key = "lst_blocks";
         alignment = left;
-        width = 36;
+        width = 40;
         fixed_width = true;
         height = 13;
         multiple_select = false;
@@ -171,9 +175,9 @@ extraction_dialog : dialog {
       : edit_box {
         key = "edt_block_rename";
         alignment = left;
-        width = 36;
+        width = 40;
         fixed_width = true;
-        edit_width = 36;
+        edit_width = 40;
       }
 
       // ------------------------------------------------------
