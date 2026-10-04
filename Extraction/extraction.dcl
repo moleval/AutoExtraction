@@ -98,7 +98,7 @@ extraction_dialog : dialog {
 
       label = "Слои";
 
-      width = 40;
+      width = 42;
       fixed_width = true;
 
       : row {
@@ -118,7 +118,7 @@ extraction_dialog : dialog {
 
         key = "lst_layers";
 
-        width = 40;
+        width = 42;
         fixed_width = true;
         height = 14;
 
@@ -182,28 +182,31 @@ extraction_dialog : dialog {
 
       // ------------------------------------------------------
       // КНОПКИ КОПИЯ + ВСТАВИТЬ + ИМЯ
-      // Суммарная ширина 12+12+12 = 36 = ширина list_box
+      // Суммарная ширина 13+13+14 = 40 = ширина list_box
       // ------------------------------------------------------
 
       : row {
+        fixed_width = true;
+        children_fixed_width = true;
+        alignment = left;
         : button {
           key = "btn_block_copy";
           label = "Копия";
-          width = 12;
+          width = 13;
           fixed_width = true;
         }
 
         : button {
           key = "btn_block_insert";
           label = "Вставить";
-          width = 12;
+          width = 13;
           fixed_width = true;
         }
 
         : button {
           key = "btn_block_rename";
           label = "Имя";
-          width = 12;
+          width = 14;
           fixed_width = true;
         }
       }
