@@ -141,6 +141,13 @@
               (chk-parens-scan fullpath)
             )
           )
+          ;; Локализация сбоя: бисекция по верхнеуровневым формам (CHKLOAD)
+          (if (= (type chk-load-find) 'SUBR)
+            (progn
+              (princ "\n--- поиск формы со сбоем (CHKLOAD) ---")
+              (chk-load-find fullpath)
+            )
+          )
           nil
         )
         (progn
