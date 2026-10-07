@@ -310,6 +310,18 @@ CUTLINE_GEOMETRY_ENTMAKE = [
     '(list\n        (cons 0 "SOLID")',
 ]
 
+# Диагностика (скан цепочки БД, определение владельца, снятие состава блока)
+# не имеет права уронить раскрой: все вызовы под vl-catch-all-apply,
+# печать — через n1-safe-str (любой тип значения).
+CUTLINE_DIAG_GUARDS = [
+    ("(defun n1-safe-str", "n1-safe-str: приведение к строке"),
+    ("(vl-catch-all-apply (function n1-scan-foreign-entities)", "скан под vl-catch-all-apply"),
+    ("(vl-catch-all-apply (function n1-owner-name)", "владелец под vl-catch-all-apply"),
+    ("(vl-catch-all-apply (function handent)", "handent под vl-catch-all-apply"),
+    ("(vl-catch-all-apply (function n1-block-type-tally)", "состав блока под vl-catch-all-apply"),
+    ("(vl-catch-all-apply (function entnext)", "обход базы под vl-catch-all-apply"),
+]
+
 
 def check_cutline_wrap_guard() -> list[str]:
     path = ROOT / "Extraction/cutline.lsp"
@@ -340,6 +352,12 @@ def check_cutline_wrap_guard() -> list[str]:
         if f"(entmake {marker}" in text or f"(entmake\n{marker}" in text:
             errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: "
                           f"геометрия создаётся в обход n1-mk ({marker})")
+    # Диагностика не должна ронять работу (ред. 17): без этих вызовов
+    # сбой служебной печати снова убьёт весь раскрой.
+    for needle, what in CUTLINE_DIAG_GUARDS:
+        if needle not in text:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: "
+                          f"диагностика без защиты — нет '{what}'")
     return errors
 
 
