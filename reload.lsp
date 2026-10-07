@@ -141,12 +141,18 @@
               (chk-parens-scan fullpath)
             )
           )
-          ;; Локализация сбоя: бисекция по верхнеуровневым формам (CHKLOAD)
-          (if (= (type chk-load-find) 'SUBR)
+          ;; Локализация сбоя: бисекция по верхнеуровневым формам (CHKLOAD).
+          ;; type пользовательской функции может быть SUBR или USUBR -
+          ;; проверяем оба. Если функция недоступна (tests/chkparens.lsp нет
+          ;; или он старого образца), печатаем это явно: иначе отсутствие
+          ;; блока [CHKLOAD] в логе ничем не объясняется.
+          (if (member (type chk-load-find) '(SUBR USUBR))
             (progn
               (princ "\n--- поиск формы со сбоем (CHKLOAD) ---")
               (chk-load-find fullpath)
             )
+            (princ (strcat "\n--- CHKLOAD недоступен: tests\\chkparens.lsp не найден"
+                           " или старой версии (нужна команда CHKLOAD) ---"))
           )
           nil
         )
