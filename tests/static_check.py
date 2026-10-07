@@ -279,6 +279,48 @@ def check_required_files() -> list[str]:
 
 
 # ----------------------------------------------------------------------
+# CUTLINE: защита упаковки раскладки в блок (ред. 15)
+# ----------------------------------------------------------------------
+
+# Команда -BLOCK добавляет к переданному набору выделенные (grip) объекты:
+# посторонние объекты уходят внутрь блока раскладки и пропадают из чертежа.
+# Инвариант: перед -BLOCK предвыделение снимается и PICKFIRST выключается,
+# после упаковки состав блока сверяется с составом раскладки.
+CUTLINE_WRAP_BEFORE = [
+    ("(n1-clear-pickfirst nil)", "снятие предвыделения перед -BLOCK"),
+    ('(getvar "PICKFIRST")', "чтение PICKFIRST перед -BLOCK"),
+    ('(list "PICKFIRST" 0)', "выключение PICKFIRST на время -BLOCK"),
+    ("n1-ss-type-tally", "ожидаемый состав раскладки"),
+]
+CUTLINE_WRAP_AFTER = [
+    ("n1-block-type-tally", "контроль состава блока после -BLOCK"),
+    ("n1-tally-equal-p", "сверка состава блока с раскладкой"),
+    ("tu-undo-cancel", "откат раскладки при захвате посторонних объектов"),
+]
+
+
+def check_cutline_wrap_guard() -> list[str]:
+    path = ROOT / "Extraction/cutline.lsp"
+    if not path.exists():
+        return []          # отдельная проверка сообщит об отсутствии файла
+    text = read_text(path)
+    marker = '"_.-BLOCK"'
+    idx = text.find(marker)
+    if idx < 0:
+        return [f"{path.relative_to(ROOT)}: не найдена упаковка раскладки в блок ({marker})"]
+    errors: list[str] = []
+    for needle, what in CUTLINE_WRAP_BEFORE:
+        if needle not in text[:idx]:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: нет '{what}' до -BLOCK")
+    for needle, what in CUTLINE_WRAP_AFTER:
+        if needle not in text[idx:]:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: нет '{what}' после -BLOCK")
+    if "(sssetfirst nil nil)" not in text:
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: нет (sssetfirst nil nil)")
+    return errors
+
+
+# ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
 
@@ -304,6 +346,8 @@ def main() -> int:
     for path in dcl_files():
         errors += check_dcl_syntax(path)
 
+    errors += check_cutline_wrap_guard()
+
     if errors:
         print("ERRORS:")
         for e in errors:
@@ -314,6 +358,7 @@ def main() -> int:
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
+        f" / cutline-wrap-guard"
     )
     print("RESULT: PASS")
     return 0
