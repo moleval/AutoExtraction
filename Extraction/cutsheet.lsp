@@ -731,6 +731,222 @@
 (defun cs-total-actual-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (nth 6 r)))) a)
 (defun cs-total-bbox-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))))) a)
 
+;; ============================================================
+;; УЧЁТ ОБЪЕКТОВ КАРТЫ (ред. 25)
+;; Набор для упаковки в блок — ТОЛЬКО объекты, созданные отрисовкой.
+;; Обход базы (entnext) для этого не годится: он затягивает посторонние
+;; объекты чертежа (ATTRIB/SEQEND динамических блоков), CopyObjects на таком
+;; составе падает с «Недопустимый объект-владелец», а оригиналы деталей
+;; могли быть удалены как «оригиналы карты».
+;; ============================================================
+
+(if (not (boundp '*cs-created*))
+  (setq *cs-created* nil)
+)
+(if (not (boundp '*cs-created-miss*))
+  (setq *cs-created-miss* 0)
+)
+
+;; Всё, что печатается, приводится к строке: диагностика не имеет права
+;; упасть на чужом типе значения (например, на имени объекта вместо строки).
+(defun cs-safe-str (x)
+  (if (= (type x) 'STR) x (vl-princ-to-string x))
+)
+
+(defun cs-type-key (typ / s)
+  (setq s (cs-safe-str typ))
+  (strcase s)
+)
+
+;; Создать объект и запомнить его в *cs-created*.
+;; Тип проверяется: entlast обязан вернуть именно созданный объект.
+(defun cs-mk (dxf / want before res e)
+  (setq want (cs-type-key (cdr (assoc 0 dxf))))
+  (setq before (entlast))
+  (setq res (entmake dxf))
+  (if res
+    (progn
+      (setq e (entlast))
+      (if (and e (not (eq e before))
+               (= (cs-type-key (cdr (assoc 0 (entget e)))) want))
+        (setq *cs-created* (cons e *cs-created*))
+        (setq *cs-created-miss* (1+ *cs-created-miss*))
+      )
+    )
+  )
+  res
+)
+
+;; Набор карты: только созданные отрисовкой объекты (и ещё живые)
+(defun cs-ss-from-created (/ ss ent)
+  (setq ss (ssadd))
+  (foreach ent *cs-created*
+    (if (entget ent) (ssadd ent ss))
+  )
+  ss
+)
+
+(defun cs-ss-type-tally (ss / i ent typ rec out)
+  (setq out '() i 0)
+  (if ss
+    (repeat (sslength ss)
+      (setq ent (ssname ss i))
+      (setq typ (cs-type-key (cdr (assoc 0 (entget ent)))))
+      (setq rec (assoc typ out))
+      (if rec
+        (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+        (setq out (append out (list (cons typ 1))))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Состав одной строкой: "LINE 12, LWPOLYLINE 40, TEXT 33"
+(defun cs-tally-str (tally / s rec)
+  (setq s "")
+  (foreach rec tally
+    (setq s (strcat s (if (= s "") "" ", ")
+                    (car rec) " " (itoa (cdr rec)))))
+  s
+)
+
+(defun cs-tally-sort (tally)
+  (vl-sort (mapcar '(lambda (x) (cons (car x) (cdr x))) tally)
+    '(lambda (a b) (< (car a) (car b))))
+)
+
+(defun cs-tally-equal-p (a b)
+  (equal (cs-tally-sort a) (cs-tally-sort b))
+)
+
+;; Типы, которые ActiveX не копирует в определение блока по отдельности:
+;; их владелец — INSERT/POLYLINE, чужой владелец отвергается с ошибкой
+;; «Недопустимый объект-владелец» (именно она валила упаковку карты).
+(defun cs-copyable-p (ent / k)
+  (setq k (if (entget ent) (cs-type-key (cdr (assoc 0 (entget ent)))) "?"))
+  (not (member k '("ATTRIB" "SEQEND" "VERTEX" "BLOCK" "ENDBLK")))
+)
+
+;; Тип объекта внутри блока: тем же способом, что и у набора карты
+;; (DXF-код 0 через ename); ObjectName — только запасной путь.
+(defun cs-object-type-key (obj / e typ)
+  (setq typ nil)
+  (setq e (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+  (if (not (vl-catch-all-error-p e))
+    (setq typ (cs-type-key (cdr (assoc 0 (entget e)))))
+  )
+  (if (or (null typ) (= typ ""))
+    (setq typ (cs-type-key (vl-catch-all-apply 'vla-get-ObjectName (list obj))))
+  )
+  (if (or (null typ) (= typ "")) "?" typ)
+)
+
+;; Состав определения блока (ActiveX-обход): (ВСЕГО ТИП . КОЛИЧЕСТВО ...)
+(defun cs-block-type-tally (blockName / acad doc blocks blk obj n out typ rec)
+  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
+  (if (vl-catch-all-error-p acad)
+    nil
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
+      (if (vl-catch-all-error-p doc)
+        nil
+        (progn
+          (setq blocks (vl-catch-all-apply 'vla-get-Blocks (list doc)))
+          (setq blk
+            (if (vl-catch-all-error-p blocks)
+              nil
+              (vl-catch-all-apply 'vla-Item (list blocks blockName))))
+          (if (vl-catch-all-error-p blk)
+            nil
+            (progn
+              (setq n 0 out '())
+              (vlax-for obj blk
+                (setq n (1+ n))
+                (setq typ (cs-object-type-key obj))
+                (setq rec (assoc typ out))
+                (if rec
+                  (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+                  (setq out (append out (list (cons typ 1))))
+                )
+              )
+              (cons n out)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Имя владельца объекта: слой/пространство/определение блока — диагностика.
+;; Код 330 возвращает то handle-строку, то имя объекта (зависит от контекста),
+;; поэтому обрабатываются оба случая. Только чтение, все вызовы под защитой.
+(defun cs-owner-name (ent / d h oe od name)
+  (setq name nil)
+  (setq d (vl-catch-all-apply 'entget (list ent)))
+  (if (not (vl-catch-all-error-p d))
+    (progn
+      (setq h (cdr (assoc 330 d)))
+      (cond
+        ((= (type h) 'ENAME) (setq oe h))
+        ((= (type h) 'STR)
+         (setq oe (vl-catch-all-apply 'handent (list h)))
+         (if (vl-catch-all-error-p oe) (setq oe nil)))
+      )
+      (if oe
+        (progn
+          (setq od (vl-catch-all-apply 'entget (list oe)))
+          (if (not (vl-catch-all-error-p od))
+            (setq name (cdr (assoc 2 od)))
+          )
+        )
+      )
+    )
+  )
+  (cond
+    ((= (type name) 'STR) name)
+    ((= (type h) 'ENAME) (strcat "имя объекта " (cs-safe-str h)))
+    ((= (type h) 'STR) (strcat "handle " h))
+    (T "?")
+  )
+)
+
+;; Диагностика: что обход базы затянул бы в блок помимо карты.
+;; Только чтение и НИКОГДА не возвращает ошибку наружу: при сбое печатается
+;; причина, раскрой продолжается (диагностика не роняет работу).
+(defun cs-scan-foreign-entities (from-ent ssNew / ent n typ layer owner)
+  (setq n 0)
+  (setq ent (vl-catch-all-apply 'entnext
+              (if from-ent (list from-ent) '())))
+  (while (and ent (not (vl-catch-all-error-p ent)))
+    (if (not (ssmemb ent ssNew)) ; ssmemb: встроенная проверка, линейный поиск недопустим
+      (progn
+        (setq typ   (cs-safe-str (cs-type-key (cdr (assoc 0 (entget ent))))))
+        (setq layer (cs-safe-str (cdr (assoc 8 (entget ent)))))
+        (setq owner (vl-catch-all-apply 'cs-owner-name (list ent)))
+        (if (vl-catch-all-error-p owner)
+          (setq owner (strcat "ошибка определения: "
+                              (cs-safe-str (vl-catch-all-error-message owner)))))
+        (setq n (1+ n))
+        (if (<= n 10)
+          (princ (strcat "\n[CUTSHEET][SCAN] посторонний объект в цепочке БД: "
+                         typ " (слой " layer ", владелец " (cs-safe-str owner) ")")))
+      )
+    )
+    (setq ent (vl-catch-all-apply 'entnext (list ent)))
+  )
+  (if (and ent (vl-catch-all-error-p ent))
+    (princ (strcat "\n[CUTSHEET][SCAN] Обход прерван: "
+                   (cs-safe-str (vl-catch-all-error-message ent)))))
+  (if (> n 0)
+    (princ (strcat "\n[CUTSHEET][SCAN] Посторонних объектов в цепочке БД: "
+                   (itoa n) " — в блок карты не берутся."))
+    (princ "\n[CUTSHEET][SCAN] Посторонних объектов в цепочке БД нет."))
+  n
+)
+
 ;; ================= ГРАФИКА =================
 (defun cs-ensure-italic-style (/ result)
   (if (tblsearch "STYLE" "Раскрой Italic") T
@@ -753,13 +969,13 @@
       (if result (tblsearch "STYLE" "Основной стиль (надписи без наклона)") nil))))
 
 (defun cs-draw-line (p1 p2 color)
-  (entmake (list '(0 . "LINE") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "LINE") '(100 . "AcDbEntity")
                  (cons 62 color)
                  (cons 10 (list (car p1) (cadr p1) 0.0))
                  (cons 11 (list (car p2) (cadr p2) 0.0)))))
 
 (defun cs-draw-rect (p1 p2 color)
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
                  (cons 62 color) '(100 . "AcDbPolyline")
                  '(90 . 4) '(70 . 1)
                  (cons 10 (list (car p1) (cadr p1)))
@@ -788,9 +1004,9 @@
   (if (> aci 90) (setq aci 90))
   (if (< aci 0) (setq aci 0))
   
-  ;; Создаем SOLID БЕЗ кода 62
+  ;; Создаем SOLID БЕЗ кода 62 (через cs-mk — объект попадает в *cs-created*)
   (setq res
-    (entmake
+    (cs-mk
       (list
         '(0 . "SOLID")
         '(100 . "AcDbEntity")
@@ -831,21 +1047,21 @@
 
 (defun cs-draw-text (pt h txt color / style)
   (setq style (cs-text-style "Раскрой Italic"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-bold (pt h txt color / style)
   (setq style (cs-text-style "Основной стиль (надписи без наклона)"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-center (pt h txt color / style)
   (setq style (cs-text-style "Раскрой Italic"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
@@ -1082,8 +1298,8 @@
         y1 (- (cadr (car bbox)) *CUTSHEET-FRAME-PAD-BOTTOM*)
         x2 (+ (car (cadr bbox)) *CUTSHEET-FRAME-PAD-RIGHT*)
         y2 (+ (cadr (cadr bbox)) *CUTSHEET-FRAME-PAD-TOP*))
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
-                 (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline")
+  (cs-mk (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+               (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline")
                  '(90 . 4) '(70 . 1)
                  (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
                  (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
@@ -1307,7 +1523,8 @@
   ;; U3: единый генератор - см. common/task-utils.lsp
   (tu-unique-block-name base))
 
-(defun cs-wrap-to-block (blockName basePt ss / ok r oldRefs si e retained ins-result finalRefs insertPt3 acad doc ms result)
+(defun cs-wrap-to-block (blockName basePt ss / ok r oldRefs si e retained ins-result finalRefs insertPt3 acad doc ms result
+                         objList skipped tmpStr blkTally expTally tallyOk)
   ;; П2.3: упаковка набора в блок через ActiveX (замер 5.2: vl-cmdf "_.-BLOCK"
   ;; = 93% стоимости wrap - 1140 мс на 743 примитива). CopyObjects копирует
   ;; набор в определение блока (базовая точка = basePt), оригиналы стираем,
@@ -1327,19 +1544,39 @@
       (pu-begin "CUTSHEET:wrap:block")
       (setq result
         (vl-catch-all-apply
-          '(lambda ( / blocks blkDef arr i)
+          '(lambda ( / blocks blkDef arr i o k)
              (setq blocks (vla-get-Blocks doc)
                    blkDef (vla-Add blocks
                                   (vlax-3d-point (list (car basePt) (cadr basePt) 0.0))
                                   blockName))
-             (setq arr (vlax-make-safearray vlax-vbObject
-                         (cons 0 (1- (sslength ss))))
-                   i 0)
+             ;; Ред. 25: CopyObjects нельзя отдавать ATTRIB/SEQEND/VERTEX —
+             ;; у них владелец INSERT/POLYLINE, и ActiveX отвечает
+             ;; «Недопустимый объект-владелец», роняя всю упаковку.
+             (setq objList '() skipped '() i 0)
              (repeat (sslength ss)
-               (vlax-safearray-put-element arr i (vlax-ename->vla-object (ssname ss i)))
-               (setq i (1+ i)))
-             (vla-CopyObjects doc arr blkDef)
-             T)))
+               (setq e (ssname ss i) i (1+ i))
+               (setq k (if (entget e)
+                         (cs-type-key (cdr (assoc 0 (entget e))))
+                         "?"))
+               (if (cs-copyable-p e)
+                 (progn
+                   (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+                   (if (or (vl-catch-all-error-p o) (null o))
+                     (setq skipped (cons k skipped))
+                     (setq objList (cons o objList))))
+                 (setq skipped (cons k skipped))))
+             (setq objList (reverse objList) skipped (reverse skipped))
+             (if (null objList)
+               nil
+               (progn
+                 (setq arr (vlax-make-safearray vlax-vbObject
+                             (cons 0 (1- (length objList))))
+                       i 0)
+                 (foreach o objList
+                   (vlax-safearray-put-element arr i o)
+                   (setq i (1+ i)))
+                 (vla-CopyObjects doc arr blkDef)
+                 T))))) ; progn, if, lambda, vl-catch-all-apply, setq
       (pu-end "CUTSHEET:wrap:block")
       (cond
         ((vl-catch-all-error-p result)
@@ -1352,32 +1589,59 @@
          (pu-begin "CUTSHEET:wrap:insert")
          (setq ok T)
          (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa oldRefs)))
-         ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
-         (setq si 0 retained 0)
-         (repeat (sslength ss)
-           (setq e (ssname ss si))
-           (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
-           (setq si (1+ si)))
-         (if (> retained 0)
-           (princ (strcat "\n[wrap] Удалено оригиналов после копии в блок: " (itoa retained))))
-         ;; Вставляем ровно один INSERT обратно в базовую точку
-         (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-         (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
-         (if (ex-safe-ok-p ins-result)
+         (if skipped
            (progn
-             (if (= (type ae-settings-output-layer) 'SUBR)
-               (ae-settings-apply-vla-layer
-                 (ex-safe-value ins-result)
-                 (ae-settings-output-layer 'CUTSHEET)))
-             (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
-           )
-           (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
-         ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
-         (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-         (setq finalRefs (if r (sslength r) 0))
-         (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
-                        ", после вставки: " (itoa finalRefs)
-                        (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)")))
+             (setq tmpStr "")
+             (foreach k skipped
+               (setq tmpStr (strcat tmpStr (if (= tmpStr "") "" ", ") (cs-safe-str k))))
+             (princ (strcat "\n[CUTSHEET][GUARD] в наборе карты несовместимые с блоком объекты, "
+                            "они не копировались: " tmpStr))))
+         ;; Ред. 25: контроль состава — в определении блока должно лежать ровно
+         ;; то, что нарисовала карта. При несовпадении оригиналы НЕ удаляем и
+         ;; INSERT не вставляем: данные важнее завершённости операции.
+         (setq blkTally (cs-block-type-tally blockName))
+         (setq expTally (cs-ss-type-tally ss))
+         (setq tallyOk (and blkTally (cs-tally-equal-p (cdr blkTally) expTally)))
+         (if tallyOk
+           (princ (strcat "\n[CUTSHEET] В блоке объектов: " (itoa (car blkTally))
+                          " (карта: " (itoa (sslength ss)) ") — "
+                          (cs-tally-str (cdr blkTally))))
+           (progn
+             (setq ok nil)
+             (princ (strcat "\n[CUTSHEET][GUARD] состав блока не совпал с набором карты — "
+                            "оригиналы не удалены, INSERT не вставлен: "
+                            (if blkTally
+                              (strcat "в блоке " (itoa (car blkTally)) " (" (cs-tally-str (cdr blkTally))
+                                      "), в наборе " (itoa (sslength ss)) " (" (cs-tally-str expTally) ")")
+                              "состав блока недоступен")))))
+         (if tallyOk
+           (progn
+             ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
+             (setq si 0 retained 0)
+             (repeat (sslength ss)
+               (setq e (ssname ss si))
+               (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
+               (setq si (1+ si)))
+             (if (> retained 0)
+               (princ (strcat "\n[wrap] Удалено оригиналов после копии в блок: " (itoa retained))))
+             ;; Вставляем ровно один INSERT обратно в базовую точку
+             (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+             (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
+             (if (ex-safe-ok-p ins-result)
+               (progn
+                 (if (= (type ae-settings-output-layer) 'SUBR)
+                   (ae-settings-apply-vla-layer
+                     (ex-safe-value ins-result)
+                     (ae-settings-output-layer 'CUTSHEET))
+                 (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
+               )
+               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
+             ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
+             (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+             (setq finalRefs (if r (sslength r) 0))
+             (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
+                            ", после вставки: " (itoa finalRefs)
+                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)"))))))
          (pu-end "CUTSHEET:wrap:insert")))
       ok)))
 
@@ -1565,6 +1829,12 @@
             (progn (tu-undo-begin) (setq uMark T)))
           
           (setq lastEnt (entlast))
+
+          ;; Ред. 25: набор для блока строится ТОЛЬКО из объектов, созданных
+          ;; отрисовкой (обход базы затягивал чужие объекты и ронял упаковку).
+          (setq *cs-created* '())
+          (setq *cs-created-miss* 0)
+          (princ "\n[CUTSHEET][STEP] отрисовка карты: старт")
           
           (pu-begin "CUTSHEET:draw-layout")
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
@@ -1576,8 +1846,7 @@
           (pu-end "CUTSHEET:draw-summary")
           
           ;; Собрать созданные примитивы для фактического bbox
-          (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
-          (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          (setq ssNew (cs-ss-from-created))
           (tu-diag "DRAW" (strcat "примитивов карты: " (itoa (sslength ssNew))))
           
           ;; Этап 2: рамка - по ФАКТИЧЕСКИМ границам результата (GetBoundingBox
@@ -1597,8 +1866,16 @@
           (setq bbox (cs-combine-bbox bbox bbox3))
           
           ;; Пересобрать набор с учетом рамки для обертки в блок
-          (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
-          (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          (setq ssNew (cs-ss-from-created))
+          (princ (strcat "\n[CUTSHEET][STEP] отрисовка карты: готово (листы, сводка, рамка)"))
+          (princ (strcat "\n[CUTSHEET][STEP] набор для блока: "
+                         (itoa (sslength ssNew)) " объектов карты"
+                         (if (> *cs-created-miss* 0)
+                           (strcat ", НЕ отслежено: " (itoa *cs-created-miss*))
+                           "")))
+          (vl-catch-all-apply 'cs-scan-foreign-entities
+                              (list lastEnt ssNew))
+          (princ "\n[CUTSHEET][STEP] диагностика цепочки БД: завершена")
 
           
           (if (> (sslength ssNew) 0)
@@ -1638,5 +1915,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 24: фильтры слоёв диспетчера Мои/Фасады/Витражи/Окна; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 25: карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
