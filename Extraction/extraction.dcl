@@ -58,6 +58,11 @@ extraction_dialog : dialog {
     alignment = left;
 
     : toggle {
+      key = "chk_filter_my";
+      label = "Мои";
+    }
+
+    : toggle {
       key = "chk_filter_facades";
       label = "Фасады";
     }
@@ -68,8 +73,8 @@ extraction_dialog : dialog {
     }
 
     : toggle {
-      key = "chk_filter_fonar";
-      label = "Фонарь 3D";
+      key = "chk_filter_windows";
+      label = "Окна";
     }
 
     : toggle {
@@ -126,6 +131,7 @@ extraction_dialog : dialog {
       }
 
       : text {
+        key = "txt_layers_hint";
         label = "Если слои не выбраны — поиск по всем слоям";
       }
     }

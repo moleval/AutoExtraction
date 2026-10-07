@@ -57,16 +57,10 @@
   (setq *EXTRACTION-LAST-SUBSYSTEM-CHECKS* '(T T T))
 )
 
-(if (not (boundp '*EXTRACTION-LAST-FILTER-FACADES*))
-  (setq *EXTRACTION-LAST-FILTER-FACADES* nil)
-)
-
-(if (not (boundp '*EXTRACTION-LAST-FILTER-VITRAZH*))
-  (setq *EXTRACTION-LAST-FILTER-VITRAZH* nil)
-)
-
-(if (not (boundp '*EXTRACTION-LAST-FILTER-FONAR*))
-  (setq *EXTRACTION-LAST-FILTER-FONAR* nil)
+;; Встроенные фильтры слоев диспетчера (ред. 2): Мои / Фасады / Витражи / Окна.
+;; Состояние чекбоксов между открытиями окна — список ключей либо nil.
+(if (not (boundp '*EXTRACTION-LAST-LAYER-FILTERS*))
+  (setq *EXTRACTION-LAST-LAYER-FILTERS* nil)
 )
 
 (if (not (boundp '*extraction-preselected-set*))
@@ -157,9 +151,24 @@
 (setq *EXTRACTION-SELECTED-LAYERS* nil)
 (setq *EXTRACTION-SELECTED-INDICES* nil)
 
-(setq *EXTRACTION-FILTER-FACADES* nil)
-(setq *EXTRACTION-FILTER-VITRAZH* nil)
-(setq *EXTRACTION-FILTER-FONAR* nil)
+;; Активные фильтры слоев — список ключей (MY FACADES VITRAZH WINDOWS)
+(setq *EXTRACTION-LAYER-FILTERS* nil)
+
+;; Источник слоев последнего запуска: 'FILTER (групповые фильтры), 'MANUAL, nil
+(setq *EXTRACTION-LAYERS-SOURCE* nil)
+
+;; Ключи, DCL-плитки и подписи встроенных фильтров слоев
+(setq *EXTRACTION-LAYER-FILTER-KEYS* '(MY FACADES VITRAZH WINDOWS))
+(setq *EXTRACTION-LAYER-FILTER-TILES*
+  '((MY . "chk_filter_my")
+    (FACADES . "chk_filter_facades")
+    (VITRAZH . "chk_filter_vitrazh")
+    (WINDOWS . "chk_filter_windows")))
+(setq *EXTRACTION-LAYER-FILTER-LABELS*
+  '((MY . "Мои")
+    (FACADES . "Фасады")
+    (VITRAZH . "Витражи")
+    (WINDOWS . "Окна")))
 
 (setq *EXTRACTION-TASK-ID* *EXTRACTION-LAST-TASK*)
 (setq *EXTRACTION-REPORT-MODE* *EXTRACTION-LAST-REPORT-MODE*)
@@ -447,36 +456,126 @@
 
 
 ;; ============================================================
-;; ФИЛЬТРАЦИЯ СЛОЕВ ПО КЛЮЧЕВЫМ СЛОВАМ
+;; ВСТРОЕННЫЕ ФИЛЬТРЫ СЛОЕВ (групповые фильтры AutoCAD)
+;; Имена/маски фильтров — в common/layer-utils.lsp (ред. 1)
 ;; ============================================================
 
-(defun extraction-filter-layers-by-keywords (keywords / filters result f fname)
-  (setq filters
-    (vl-catch-all-apply 'tu-group-filter-names-and-layers '()))
+;; DCL-плитка чекбокса фильтра
+(defun extraction-layer-filter-tile (key)
+  (cdr (assoc key *EXTRACTION-LAYER-FILTER-TILES*))
+)
 
-  (if (vl-catch-all-error-p filters)
-    (setq filters nil))
+;; Подпись фильтра: «Мои», «Фасады», «Витражи», «Окна»
+(defun extraction-layer-filter-label (key)
+  (cdr (assoc key *EXTRACTION-LAYER-FILTER-LABELS*))
+)
 
-  (setq result '())
-
-  (if (listp filters)
-    (foreach f filters
-      (setq fname (car f))
-
-      (if (and
-            (= (type fname) 'STR)
-            (vl-some
-              '(lambda (k)
-                 (and
-                   (= (type k) 'STR)
-                   (vl-string-search (strcase k) (strcase fname))))
-              keywords))
-        (setq result (append result (cadr f)))
-      )
-    )
+;; Подписи активных фильтров одной строкой: «Мои, Окна»
+(defun extraction-layer-filter-list-str (keys / s key lab)
+  (setq s "")
+  (foreach key keys
+    (setq lab (extraction-layer-filter-label key))
+    (if lab
+      (setq s (if (= s "") lab (strcat s ", " lab))))
   )
+  s
+)
 
-  (extraction-unique-ci result)
+;; Заголовок источника слоев: «по фильтру: Мои» / «по фильтрам: Фасады, Окна»
+(defun extraction-layer-filter-title (keys / s)
+  (setq s (extraction-layer-filter-list-str keys))
+  (if (= s "")
+    nil
+    (strcat (if (= (length keys) 1) "по фильтру: " "по фильтрам: ") s)
+  )
+)
+
+;; Подпись источника слоев текущего запуска (CUTLINE/CUTSHEET, отчеты)
+(defun extraction-layer-filter-source-title ()
+  (if (eq *EXTRACTION-LAYERS-SOURCE* 'FILTER)
+    (extraction-layer-filter-title *EXTRACTION-LAYER-FILTERS*)
+    nil
+  )
+)
+
+;; Есть ли активные фильтры слоев
+(defun extraction-layer-filter-active-p ()
+  (if *EXTRACTION-LAYER-FILTERS* T nil)
+)
+
+;; Состояние одного чекбокса
+(defun extraction-layer-filter-tile-on-p (key / tile)
+  (setq tile (extraction-layer-filter-tile key))
+  (if tile (= (get_tile tile) "1") nil)
+)
+
+;; Считать активные фильтры из чекбоксов окна
+(defun extraction-layer-filter-read-tiles ( / out key)
+  (setq out '())
+  (foreach key *EXTRACTION-LAYER-FILTER-KEYS*
+    (if (extraction-layer-filter-tile-on-p key)
+      (setq out (append out (list key))))
+  )
+  out
+)
+
+;; Программно выставить чекбоксы по списку ключей (внутри updating-ui)
+(defun extraction-layer-filter-set-tiles (keys / key)
+  (foreach key *EXTRACTION-LAYER-FILTER-KEYS*
+    (set_tile (extraction-layer-filter-tile key)
+      (if (member key keys) "1" "0"))
+  )
+)
+
+;; Слои по активным фильтрам (через common/layer-utils.lsp)
+(defun extraction-layer-filter-layers (keys / r)
+  (setq r (vl-catch-all-apply 'tu-layer-filter-layers-for-keys (list keys)))
+  (if (vl-catch-all-error-p r) nil r)
+)
+
+;; Доступен ли в чертеже словарь групповых фильтров
+(defun extraction-layer-filter-dictionary-p ( / r)
+  (setq r (vl-catch-all-apply 'tu-layer-filter-available-p '()))
+  (if (vl-catch-all-error-p r) nil r)
+)
+
+;; Диагностика пустого результата фильтра (единый формат сообщений)
+(defun extraction-layer-filter-fail-msg (keys)
+  (if (extraction-layer-filter-dictionary-p)
+    (strcat "[EXTRACTION][LAYER-UTILS] Групповые фильтры по маскам не найдены: "
+            (extraction-layer-filter-list-str keys) ".")
+    "[EXTRACTION][LAYER-UTILS] Словарь групповых фильтров в чертеже не найден."
+  )
+)
+
+;; Слои для запуска задачи.
+;; Возвращает (СЛОИ ИСТОЧНИК) либо nil, если запуск запрещен:
+;; фильтр активен, но не дал ни одного слоя — молча брать все слои нельзя.
+(defun extraction-resolve-layers (clean / manual layers)
+  (setq manual (extraction-selected-names))
+
+  (cond
+    ((and manual (> (length manual) 0))
+     (list manual 'MANUAL))
+
+    ((extraction-layer-filter-active-p)
+     (if *EXTRACTION-VISIBLE-LAYERS*
+       (progn
+         (setq layers *EXTRACTION-VISIBLE-LAYERS*)
+         (if clean
+           (setq layers (extraction-cut-clean-filter-layers layers)))
+         (list layers 'FILTER))
+       (progn
+         (alert
+           (strcat "Групповые фильтры не дали слоев: "
+                   (extraction-layer-filter-list-str *EXTRACTION-LAYER-FILTERS*)
+                   ".\nЗадача не запущена — обработка всех слоев вместо фильтра"
+                   " запрещена.\nПроверьте имена групповых фильтров в чертеже."))
+         (princ (strcat "\n"
+                        (extraction-layer-filter-fail-msg *EXTRACTION-LAYER-FILTERS*)))
+         nil)))
+
+    (T (list nil nil)))
 )
 
 
@@ -506,29 +605,42 @@
 ;; Защищено флагом *extraction-updating-ui*
 ;; ============================================================
 
-(defun extraction-rebuild-layer-list ( / vis keywords)
+(defun extraction-rebuild-layer-list ( / keys layers hint msg)
+
   (setq *extraction-updating-ui* T)
 
   (setq *EXTRACTION-SELECTED-INDICES* '())
-  (setq keywords '())
 
-  (if *EXTRACTION-FILTER-FACADES*
-    (setq keywords (cons "фасад" keywords)))
+  (setq keys *EXTRACTION-LAYER-FILTERS*)
 
-  (if *EXTRACTION-FILTER-VITRAZH*
-    (setq keywords (cons "витраж" keywords)))
-
-  (if *EXTRACTION-FILTER-FONAR*
-    (setq keywords (cons "фонар" keywords)))
-
-  (if keywords
+  (if keys
     (progn
-      (setq vis (extraction-filter-layers-by-keywords keywords))
-      (if (or (null vis) (not (listp vis)))
-        (setq vis *EXTRACTION-ALL-LAYERS*))
-      (setq *EXTRACTION-VISIBLE-LAYERS* vis)
-    )
-    (setq *EXTRACTION-VISIBLE-LAYERS* *EXTRACTION-ALL-LAYERS*)
+      ;; Слои фильтров строит common/layer-utils.lsp
+      (setq layers (extraction-layer-filter-layers keys))
+
+      (if (extraction-layer-filter-dictionary-p)
+        (setq msg nil)
+        (setq msg (extraction-layer-filter-fail-msg keys))
+      )
+
+      (cond
+        (msg
+         (setq hint msg))
+        ((null layers)
+         (setq msg (extraction-layer-filter-fail-msg keys))
+         (setq hint msg))
+        (T
+         (setq hint
+           (strcat "Фильтр " (extraction-layer-filter-list-str keys)
+                   ": слоев " (itoa (length layers)))))
+      )
+
+      ;; Пустой результат фильтра НЕ подменяем всеми слоями чертежа
+      (if msg (princ (strcat "\n" msg)))
+      (setq *EXTRACTION-VISIBLE-LAYERS* (if (listp layers) layers '())))
+    (progn
+      (setq *EXTRACTION-VISIBLE-LAYERS* *EXTRACTION-ALL-LAYERS*)
+      (setq hint "Если слои не выбраны — поиск по всем слоям"))
   )
 
   (setq *EXTRACTION-VISIBLE-LAYERS*
@@ -540,8 +652,12 @@
           '()))
       '(lambda (a b) (< (strcase a) (strcase b)))))
 
+  (setq *EXTRACTION-VISIBLE-LAYERS*
+    (extraction-unique-ci *EXTRACTION-VISIBLE-LAYERS*))
+
   (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
+  (set_tile "txt_layers_hint" hint)
   (extraction-update-select-buttons)
 
   (setq *extraction-updating-ui* nil)
@@ -867,7 +983,7 @@
 ;; ЧТЕНИЕ ПАРАМЕТРОВ
 ;; ============================================================
 
-(defun extraction-read-params ( / selected)
+(defun extraction-read-params ( / selected r ok)
 
   (cond
     ((= (get_tile "rb_task_fasonka") "1")
@@ -890,50 +1006,50 @@
   )
 
   (setq *EXTRACTION-LAST-TASK* *EXTRACTION-TASK-ID*)
-  (setq selected (extraction-selected-names))
 
-  (if (and (null selected)
-           (or *EXTRACTION-FILTER-FACADES*
-               *EXTRACTION-FILTER-VITRAZH*
-               *EXTRACTION-FILTER-FONAR*))
-    (setq selected *EXTRACTION-VISIBLE-LAYERS*)
+  ;; Слои задачи (ред. 2): ручной выбор -> слои фильтров -> все слои (nil).
+  ;; Фильтр активен, но слоёв нет — запуск запрещён (extraction-resolve-layers).
+  (setq r (extraction-resolve-layers nil))
+
+  (if r
+    (progn
+      (setq selected (car r))
+      (setq *EXTRACTION-LAYERS-SOURCE* (cadr r))
+    )
+    (setq selected '())
   )
 
-  (setq *EXTRACTION-SELECTED-LAYERS* selected)
+  (setq *EXTRACTION-SELECTED-LAYERS* (if r selected nil))
+  (setq ok (if r T nil))
 
-  (cond
-    ((eq *EXTRACTION-TASK-ID* 'FASONKA)
-     (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected)
-     T
-    )
+  (if ok
+    (cond
+      ((eq *EXTRACTION-TASK-ID* 'FASONKA)
+       (setq *EXTRACTION-LAST-FASONKA-LAYERS* selected)
+      )
 
-    ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-     (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
-     (if (null selected)
-       (progn
-         (alert "Не выбрано ни одного слоя подсистемы.")
-         nil
+      ((eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
+       (setq *EXTRACTION-LAST-SUBSYSTEM-LAYERS* selected)
+       (if (null selected)
+         (progn
+           (alert "Не выбрано ни одного слоя подсистемы.")
+           (setq ok nil)
+         )
        )
-       T
-     )
-    )
+      )
 
-    ((eq *EXTRACTION-TASK-ID* 'CLADDING)
-     (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected)
-     T
-    )
+      ((eq *EXTRACTION-TASK-ID* 'CLADDING)
+       (setq *EXTRACTION-LAST-CLADDING-LAYERS* selected)
+      )
 
-    ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
-     (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected)
-     T
-    )
+      ((eq *EXTRACTION-TASK-ID* 'VITRAZH)
+       (setq *EXTRACTION-LAST-VITRAZH-LAYERS* selected)
+      )
 
-    ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
-     (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected)
-     T
+      ((eq *EXTRACTION-TASK-ID* 'ZAPOLNENIE)
+       (setq *EXTRACTION-LAST-ZAPOLNENIE-LAYERS* selected)
+      )
     )
-
-    (T T)
   )
 
   (setq *EXTRACTION-REPORT-MODE*
@@ -956,7 +1072,8 @@
 
   (setq *EXTRACTION-LAST-CREATE-TABLE* *EXTRACTION-CREATE-TABLE*)
 
-  T
+  ;; Фильтр активен, но слоёв нет — запуск запрещён (диалог остаётся открытым)
+  (if ok T nil)
 )
 
 
@@ -1089,145 +1206,106 @@
 ;; ============================================================
 ;; КНОПКА "РАСКРОЙ ХЛЫСТА"
 ;; ============================================================
-(defun extraction-cutline ( / selected manual-selected)
+(defun extraction-cutline ( / r selected)
+
   (setq *CUTLINE-CREATE-TABLE* (= (get_tile "chk_acad") "1"))
   (setq *CUTLINE-CREATE-XLS*  (= (get_tile "chk_xls") "1"))
 
   (setq *CUTLINE-IS-AUTO-FILTER* nil)
 
-  (setq manual-selected (extraction-selected-names))
+  ;; Слои: ручной выбор -> слои фильтров (без слоя 0/DEFPOINTS) -> все слои
+  (setq r (extraction-resolve-layers T))
 
-  (if (and manual-selected (> (length manual-selected) 0))
-    (setq selected manual-selected)
+  (if (null r)
+    nil
     (progn
-      (if (or *EXTRACTION-FILTER-FACADES*
-              *EXTRACTION-FILTER-VITRAZH*
-              *EXTRACTION-FILTER-FONAR*)
-        (progn
-          (setq selected (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
-          (setq *CUTLINE-IS-AUTO-FILTER* T)
-        )
-        (setq selected nil)
+      (setq selected (car r))
+      (setq *EXTRACTION-LAYERS-SOURCE* (cadr r))
+
+      (if (eq *EXTRACTION-LAYERS-SOURCE* 'FILTER)
+        (setq *CUTLINE-IS-AUTO-FILTER* T)
       )
+
+      (if selected
+        (setq selected (vl-sort selected '(lambda (a b) (< (strcase a) (strcase b)))))
+      )
+
+      (setq *EXTRACTION-SELECTED-LAYERS* selected)
+      (setq *EXTRACTION-ACTION* 'CUTLINE)
+      (done_dialog 1)
     )
   )
-
-  (if selected
-    (setq selected (vl-sort selected '(lambda (a b) (< (strcase a) (strcase b)))))
-  )
-
-  (setq *EXTRACTION-SELECTED-LAYERS* selected)
-  (setq *EXTRACTION-ACTION* 'CUTLINE)
-  (done_dialog 1)
 )
 
 
 ;; ============================================================
 ;; КНОПКА "РАСКРОЙ ЛИСТА"
 ;; ============================================================
-(defun extraction-cutsheet ( / selected)
+(defun extraction-cutsheet ( / r selected)
   (setq *CUTSHEET-CREATE-TABLE*
     (= (get_tile "chk_acad") "1"))
 
   (setq *CUTSHEET-CREATE-XLS*
     (= (get_tile "chk_xls") "1"))
 
-  (if (or *EXTRACTION-FILTER-FACADES*
-          *EXTRACTION-FILTER-VITRAZH*
-          *EXTRACTION-FILTER-FONAR*)
+  ;; Слои: ручной выбор -> слои фильтров (без слоя 0/DEFPOINTS) -> все слои
+  (setq r (extraction-resolve-layers T))
+
+  (if r
     (progn
-      (setq selected
-        (extraction-cut-clean-filter-layers *EXTRACTION-VISIBLE-LAYERS*))
-    )
-    (progn
-      (setq selected (extraction-selected-names))
+      (setq selected (car r))
+      (setq *EXTRACTION-LAYERS-SOURCE* (cadr r))
+
+      (setq *EXTRACTION-SELECTED-LAYERS* selected)
+      (setq *EXTRACTION-ACTION* 'CUTSHEET)
+      (done_dialog 1)
     )
   )
-
-  (setq *EXTRACTION-SELECTED-LAYERS* selected)
-
-  (setq *EXTRACTION-ACTION* 'CUTSHEET)
-  (done_dialog 1)
 )
 
 
 ;; ============================================================
-;; ФИЛЬТРЫ
-;; Пользовательские callback'и: проверяют *extraction-updating-ui*
+;; ФИЛЬТРЫ СЛОЁВ — ЕДИНЫЙ ОБРАБОТЧИК ЧЕКБОКСОВ
+;; Пользовательский callback: проверяет *extraction-updating-ui*
 ;; ============================================================
 
-(defun extraction-filter-facades ()
+(defun extraction-layer-filter-changed ( / keys keep)
+
+  ;; Если это программное обновление UI — пропускаем
   (if *extraction-updating-ui*
     nil
     (progn
-      (setq *EXTRACTION-FILTER-FACADES*
-        (= (get_tile "chk_filter_facades") "1"))
+      ;; 1-2) состояние чекбоксов -> список активных фильтров
+      (setq keys (extraction-layer-filter-read-tiles))
+      (setq *EXTRACTION-LAYER-FILTERS* keys)
 
-      (setq *EXTRACTION-LAST-FILTER-FACADES*
-        *EXTRACTION-FILTER-FACADES*)
+      ;; 3) состояние запоминается между открытиями окна
+      (setq *EXTRACTION-LAST-LAYER-FILTERS* keys)
 
+      ;; Ручной выбор до перестройки списка
+      (setq keep (extraction-selected-names))
+
+      ;; 4-7) новый список слоёв: фильтры, дубликаты, сортировка
       (extraction-rebuild-layer-list)
 
-      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-        (if *EXTRACTION-LAST-FASONKA-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-FASONKA-LAYERS*))
-      )
+      ;; 8-9) сохраняем только тот ручной выбор, который остался видимым
+      (setq keep (extraction-visible-only keep))
+      (extraction-select-layers-in-list keep)
     )
   )
 )
 
 
-(defun extraction-filter-vitrazh ()
-  (if *extraction-updating-ui*
-    nil
-    (progn
-      (setq *EXTRACTION-FILTER-VITRAZH*
-        (= (get_tile "chk_filter_vitrazh") "1"))
-
-      (setq *EXTRACTION-LAST-FILTER-VITRAZH*
-        *EXTRACTION-FILTER-VITRAZH*)
-
-      (extraction-rebuild-layer-list)
-
-      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-        (if *EXTRACTION-LAST-FASONKA-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-FASONKA-LAYERS*))
-      )
+;; Оставить из списка только слои, видимые в текущем списке окна
+(defun extraction-visible-only (layers / out item)
+  (setq out '())
+  (foreach item layers
+    (if (vl-some '(lambda (x) (= (strcase x) (strcase item)))
+                 *EXTRACTION-VISIBLE-LAYERS*)
+      (setq out (cons item out))
     )
   )
-)
-
-
-(defun extraction-filter-fonar ()
-  (if *extraction-updating-ui*
-    nil
-    (progn
-      (setq *EXTRACTION-FILTER-FONAR*
-        (= (get_tile "chk_filter_fonar") "1"))
-
-      (setq *EXTRACTION-LAST-FILTER-FONAR*
-        *EXTRACTION-FILTER-FONAR*)
-
-      (extraction-rebuild-layer-list)
-
-      (if (eq *EXTRACTION-TASK-ID* 'SUBSYSTEM)
-        (if *EXTRACTION-LAST-SUBSYSTEM-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-SUBSYSTEM-LAYERS*))
-        (if *EXTRACTION-LAST-FASONKA-LAYERS*
-          (extraction-select-layers-in-list
-            *EXTRACTION-LAST-FASONKA-LAYERS*))
-      )
-    )
-  )
+  (reverse out)
 )
 
 
@@ -1321,9 +1399,9 @@
       (setq *EXTRACTION-ALL-LAYERS* (extraction-layer-names))
       (setq *EXTRACTION-SELECTED-LAYERS* nil)
 
-      (setq *EXTRACTION-FILTER-FACADES* *EXTRACTION-LAST-FILTER-FACADES*)
-      (setq *EXTRACTION-FILTER-VITRAZH* *EXTRACTION-LAST-FILTER-VITRAZH*)
-      (setq *EXTRACTION-FILTER-FONAR*   *EXTRACTION-LAST-FILTER-FONAR*)
+      ;; Встроенные фильтры слоёв: состояние из прошлого открытия окна
+      (setq *EXTRACTION-LAYER-FILTERS* *EXTRACTION-LAST-LAYER-FILTERS*)
+      (setq *EXTRACTION-LAYERS-SOURCE* nil)
 
       (setq *EXTRACTION-TASK-ID*      *EXTRACTION-LAST-TASK*)
       (setq *EXTRACTION-REPORT-MODE*  *EXTRACTION-LAST-REPORT-MODE*)
@@ -1358,12 +1436,8 @@
               (set_tile "chk_acad"
                 (if *EXTRACTION-LAST-CREATE-TABLE* "1" "0"))
 
-              (set_tile "chk_filter_facades"
-                (if *EXTRACTION-LAST-FILTER-FACADES* "1" "0"))
-              (set_tile "chk_filter_vitrazh"
-                (if *EXTRACTION-LAST-FILTER-VITRAZH* "1" "0"))
-              (set_tile "chk_filter_fonar"
-                (if *EXTRACTION-LAST-FILTER-FONAR* "1" "0"))
+              (extraction-layer-filter-set-tiles
+                *EXTRACTION-LAST-LAYER-FILTERS*)
 
               (set_tile "rb_task_fasonka"
                 (if (eq *EXTRACTION-LAST-TASK* 'FASONKA) "1" "0"))
@@ -1432,9 +1506,10 @@
 
               (action_tile "btn_select_all"      "(extraction-select-all-layers)")
               (action_tile "btn_clear_all"       "(extraction-clear-all-layers)")
-              (action_tile "chk_filter_facades"  "(extraction-filter-facades)")
-              (action_tile "chk_filter_vitrazh"  "(extraction-filter-vitrazh)")
-              (action_tile "chk_filter_fonar"    "(extraction-filter-fonar)")
+              (action_tile "chk_filter_my"       "(extraction-layer-filter-changed)")
+              (action_tile "chk_filter_facades"  "(extraction-layer-filter-changed)")
+              (action_tile "chk_filter_vitrazh"  "(extraction-layer-filter-changed)")
+              (action_tile "chk_filter_windows"  "(extraction-layer-filter-changed)")
               (action_tile "lst_layers"          "(extraction-layer-selection)")
 
               (action_tile "rb_detail"
@@ -1618,7 +1693,7 @@
 )
 
 
-(princ "\nEXTRACTION.LSP загружен (ред. 1: панель Блоки - кнопка Вставить, поиск-подсказка).")
+(princ "\nEXTRACTION.LSP загружен (ред. 2: фильтры слоёв Мои/Фасады/Витражи/Окна по групповым фильтрам AutoCAD).")
 
 ;; ============================================================
 ;; ЗАГЛУШКИ
