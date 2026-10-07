@@ -10,6 +10,7 @@
   3. Дубликаты имён defun (project-wide, с whitelist).
   4. DCL-ключи, на которые ссылаются .lsp, объявлены в .dcl.
   5. Наличие основных *-main функций.
+  6. Баланс и лексика файлов tests/*.lsp (chkparens.lsp автозагружает RELOAD).
 
 Кодировка:
   - .lsp / .dcl — Windows-1251 (ANSI), fallback: utf-8
@@ -25,6 +26,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 LISP_DIRS = [ROOT / "Extraction", ROOT / "common"]
 DCL_DIRS  = [ROOT / "Extraction"]
+# tests/*.lsp в основные группы не входят (там свои defun и свои правила),
+# но баланс и лексика проверяются отдельно: chkparens.lsp автозагружает RELOAD.
+TEST_DIR = ROOT / "tests"
 
 # ----------------------------------------------------------------------
 # Whitelist
@@ -94,6 +98,11 @@ def dcl_files():
     for d in DCL_DIRS:
         if d.exists():
             yield from sorted(d.glob("*.dcl"))
+
+
+def test_lisp_files():
+    if TEST_DIR.exists():
+        yield from sorted(TEST_DIR.glob("*.lsp"))
 
 
 # ----------------------------------------------------------------------
@@ -453,7 +462,7 @@ def check_cutsheet_wrap_guard() -> list[str]:
 
 
 
-def check_lisp_lexical() -> list[str]:
+def check_lisp_lexical(files=None) -> list[str]:
     """Причины «синтаксической ошибки» при целом балансе скобок.
 
     AutoCAD читает .lsp как ANSI: BOM, управляющие байты и не-ANSI символы
@@ -461,7 +470,7 @@ def check_lisp_lexical() -> list[str]:
     а баланс скобок при этом остаётся нулевым.
     """
     errors: list[str] = []
-    for path in lisp_files():
+    for path in (files if files is not None else lisp_files()):
         raw = path.read_bytes()
         rel = path.relative_to(ROOT)
         if raw.startswith(b"\xef\xbb\xbf"):
@@ -534,6 +543,15 @@ def main() -> int:
     errors += check_cutsheet_wrap_guard()
     errors += check_lisp_lexical()
 
+    # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
+    tests_count = 0
+    for path in test_lisp_files():
+        tests_count += 1
+        ok, msg = check_balance(path)
+        if not ok:
+            errors.append(f"{path.relative_to(ROOT)}: {msg}")
+    errors += check_lisp_lexical(list(test_lisp_files()))
+
     if errors:
         print("ERRORS:")
         for e in errors:
@@ -542,9 +560,9 @@ def main() -> int:
         return 1
 
     print(
-        f"PASS: lisp={lisp_count} dcl={dcl_count} "
+        f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
-        f" / cutline-wrap-guard / cutsheet-wrap-guard / lexical"
+        f" / cutline-wrap-guard / cutsheet-wrap-guard / lexical / tests-balance / tests-lexical"
     )
     print("RESULT: PASS")
     return 0
