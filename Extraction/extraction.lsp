@@ -533,18 +533,41 @@
   (if (vl-catch-all-error-p r) nil r)
 )
 
-;; Доступен ли в чертеже словарь групповых фильтров
-(defun extraction-layer-filter-dictionary-p ( / r)
+;; Есть ли в чертеже хотя бы один групповой фильтр (пустой словарь = нет)
+(defun extraction-layer-filter-available-p ( / r)
   (setq r (vl-catch-all-apply 'tu-layer-filter-available-p '()))
   (if (vl-catch-all-error-p r) nil r)
 )
 
-;; Диагностика пустого результата фильтра (единый формат сообщений)
+;; Диагностика пустого результата фильтра (единый формат сообщений, командная строка)
 (defun extraction-layer-filter-fail-msg (keys)
-  (if (extraction-layer-filter-dictionary-p)
+  (if (extraction-layer-filter-available-p)
     (strcat "[EXTRACTION][LAYER-UTILS] Групповые фильтры по маскам не найдены: "
             (extraction-layer-filter-list-str keys) ".")
-    "[EXTRACTION][LAYER-UTILS] Словарь групповых фильтров в чертеже не найден."
+    "[EXTRACTION][LAYER-UTILS] Групповой фильтр отсутствует в чертеже."
+  )
+)
+
+;; Текст проблемы фильтра для окна: короткий, без служебных меток
+;; (строка состояния обрезается по ширине окна).
+;; no-dict = T — в чертеже нет ни одного группового фильтра.
+(defun extraction-layer-filter-problem-text (keys no-dict / title)
+  (if no-dict
+    "Групповой фильтр отсутствует"
+    (progn
+      (setq title (extraction-layer-filter-title keys))
+      (if title
+        (strcat "Нет слоев " title)
+        "Нет слоев по фильтру"))
+  )
+)
+
+;; Короткая подсказка в строку состояния окна. nil — фильтры дали слои.
+(defun extraction-layer-filter-hint-msg (keys)
+  (if (extraction-layer-filter-layers keys)
+    nil
+    (extraction-layer-filter-problem-text
+      keys (not (extraction-layer-filter-available-p)))
   )
 )
 
@@ -567,10 +590,11 @@
          (list layers 'FILTER))
        (progn
          (alert
-           (strcat "Групповые фильтры не дали слоев: "
-                   (extraction-layer-filter-list-str *EXTRACTION-LAYER-FILTERS*)
+           (strcat (extraction-layer-filter-problem-text
+                     *EXTRACTION-LAYER-FILTERS*
+                     (not (extraction-layer-filter-available-p)))
                    ".\nЗадача не запущена — обработка всех слоев вместо фильтра"
-                   " запрещена.\nПроверьте имена групповых фильтров в чертеже."))
+                   " запрещена.\nПроверьте групповые фильтры слоев в чертеже."))
          (princ (strcat "\n"
                         (extraction-layer-filter-fail-msg *EXTRACTION-LAYER-FILTERS*)))
          nil)))
@@ -618,21 +642,16 @@
       ;; Слои фильтров строит common/layer-utils.lsp
       (setq layers (extraction-layer-filter-layers keys))
 
-      (if (extraction-layer-filter-dictionary-p)
-        (setq msg nil)
-        (setq msg (extraction-layer-filter-fail-msg keys))
-      )
-
-      (cond
-        (msg
-         (setq hint msg))
-        ((null layers)
-         (setq msg (extraction-layer-filter-fail-msg keys))
-         (setq hint msg))
-        (T
-         (setq hint
-           (strcat "Фильтр " (extraction-layer-filter-list-str keys)
-                   ": слоев " (itoa (length layers)))))
+      (if layers
+        (setq hint
+          (strcat "Фильтр " (extraction-layer-filter-list-str keys)
+                  ": слоев " (itoa (length layers))))
+        (progn
+          ;; Причины разные: нет групповых фильтров в чертеже либо
+          ;; фильтры есть, но слоев по ним нет. В окно — короткий текст,
+          ;; в командную строку — сообщение с меткой (fail-msg).
+          (setq msg (extraction-layer-filter-fail-msg keys))
+          (setq hint (extraction-layer-filter-hint-msg keys)))
       )
 
       ;; Пустой результат фильтра НЕ подменяем всеми слоями чертежа
@@ -1693,7 +1712,7 @@
 )
 
 
-(princ "\nEXTRACTION.LSP загружен (ред. 2: фильтры слоёв Мои/Фасады/Витражи/Окна по групповым фильтрам AutoCAD).")
+(princ "\nEXTRACTION.LSP загружен (ред. 3: фильтры слоёв Мои/Фасады/Витражи/Окна по групповым фильтрам AutoCAD).")
 
 ;; ============================================================
 ;; ЗАГЛУШКИ
