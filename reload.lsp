@@ -126,6 +126,9 @@
               fullpath
               "\n  Причина: "
               (vl-catch-all-error-message result)
+              (if (vl-file-size fullpath)
+                (strcat "\n  Размер файла: " (itoa (vl-file-size fullpath)) " байт")
+                "")
             )
           )
           ;; ----------------------------------------------------
@@ -134,7 +137,7 @@
           ;; ----------------------------------------------------
           (if (= (type chk-parens-scan) 'SUBR)
             (progn
-              (princ "\n--- диагностика скобок ---")
+              (princ "\n--- диагностика файла: скобки, строки, скрытые байты ---")
               (chk-parens-scan fullpath)
             )
           )

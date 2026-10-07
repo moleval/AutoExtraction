@@ -7,14 +7,34 @@
 ;;;          (включа€ экранированные \") и комментарии до конца строки
 ;;; ============================================================
 
-(defun chk-parens-scan (path / f ln line bal i ch instr incomm skip tr top problems)
+(defun chk-parens-scan (path / f ln line bal i ch instr incomm skip tr top problems
+                        size sum bytes bom ctrlline hbline hbany code tok tokpos)
+  ;; –асширено (2026-10-07): кроме баланса скобок провер€ютс€ причины
+  ;; Ђсинтаксической ошибкиї, при которой баланс скобок цел:
+  ;;   - BOM (UTF-8) в начале файла Ч AutoCAD читает .lsp как ANSI;
+  ;;   - управл€ющие байты; не-ANSI символы вне строк/комментариев
+  ;;     (кроме имЄн команд вида c:»ћя);
+  ;;   - незакрыта€ строкова€ константа в строке;
+  ;;   - скрытые байты (NUL, смешанные переводы строк): размер против
+  ;;     числа прочитанных символов.
+  ;; ѕечатает размер файла Ч по нему свер€етс€, та ли верси€ файла загружена.
   (setq f (open path "r"))
   (if (null f)
     (progn (princ (strcat "\n[CHK] не открыт: " path)) 1)
     (progn
-      (setq ln 0 bal 0 problems 0)
+      (setq size (vl-file-size path))
+      (setq ln 0 bal 0 problems 0 sum 0 ctrlline 0 hbline 0 bom nil)
       (while (setq line (read-line f))
         (setq ln (1+ ln))
+        (setq sum (+ sum (strlen line)))
+        (if (and (= ln 1) (>= (strlen line) 1) (= (ascii (substr line 1 1)) 239))
+          (progn
+            (princ (strcat "\n[CHK] " path " —“–ќ ј 1: BOM (байт 239) Ч AutoCAD читает файл как ANSI,"
+                           " пересохранить без BOM"))
+            (setq bom T)
+            (setq problems (1+ problems))
+          )
+        )
         (setq tr (vl-string-trim " \t" line))
         (setq top (= (substr line 1 1) "("))
         (if (and top (= (substr tr 1 6) "(defun") (/= bal 0))
@@ -27,6 +47,7 @@
         (setq i 1 instr nil incomm nil skip nil)
         (while (<= i (strlen line))
           (setq ch (substr line i 1))
+          (setq code (ascii ch))
           (cond
             (skip (setq skip nil))
             (incomm nil)
@@ -36,8 +57,41 @@
             ((= ch "\"") (setq instr T))
             ((= ch "(") (setq bal (1+ bal)))
             ((= ch ")") (setq bal (1- bal)))
+            ((and (< code 32) (/= code 9))
+             (if (/= ctrlline ln)
+               (progn
+                 (princ (strcat "\n[CHK] " path " строка " (itoa ln)
+                                ": управл€ющий символ (код " (itoa code) ")"))
+                 (setq ctrlline ln problems (1+ problems))
+               )
+             )
+            )
+            ((> code 127)
+             (setq tokpos i)
+             (while (and (> tokpos 1)
+                         (not (member (substr line (1- tokpos) 1)
+                                      '(" " "\t" "(" ")" "\"" ";"))))
+               (setq tokpos (1- tokpos))
+             )
+             (setq tok (substr line tokpos (- (1+ i) tokpos)))
+             (if (= hbline ln) (setq hbany T) (setq hbany nil))
+             (if (and (not hbany) (not (wcmatch (strcase tok) "C:*")))
+               (progn
+                 (princ (strcat "\n[CHK] " path " строка " (itoa ln)
+                                ": не-ANSI символ вне строки/комментари€ (слово \"" tok "\")"))
+                 (setq hbline ln problems (1+ problems))
+               )
+             )
+            )
           )
           (setq i (1+ i))
+        )
+        (if instr
+          (progn
+            (princ (strcat "\n[CHK] " path " строка " (itoa ln)
+                           ": строкова€ константа не закрыта (нет закрывающей кавычки)"))
+            (setq problems (1+ problems))
+          )
         )
         (if (< bal 0)
           (progn
@@ -49,6 +103,17 @@
         )
       )
       (close f)
+      (setq bytes (+ sum ln))
+      (if (and size (not bom)
+               (/= size bytes) (/= size (1- bytes)) (/= size (+ sum ln ln)))
+        (progn
+          (princ (strcat "\n[CHK] " path " размер " (itoa size)
+                         " байт, прочитано символов " (itoa sum)
+                         " Ч есть скрытые байты (NUL или смешанные переводы строк)"))
+          (setq problems (1+ problems))
+        )
+      )
+      (princ (strcat "\n[CHK] " path " размер " (itoa size) " байт"))
       (if (/= bal 0)
         (progn
           (princ (strcat "\n[CHK] " path " »“ќ√: " (itoa bal) " (не закрыто)"))

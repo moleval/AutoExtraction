@@ -451,6 +451,59 @@ def check_cutsheet_wrap_guard() -> list[str]:
     return errors
 
 
+
+
+def check_lisp_lexical() -> list[str]:
+    """Причины «синтаксической ошибки» при целом балансе скобок.
+
+    AutoCAD читает .lsp как ANSI: BOM, управляющие байты и не-ANSI символы
+    вне строк/комментариев (кроме имён команд c:ИМЯ) валят загрузку файла,
+    а баланс скобок при этом остаётся нулевым.
+    """
+    errors: list[str] = []
+    for path in lisp_files():
+        raw = path.read_bytes()
+        rel = path.relative_to(ROOT)
+        if raw.startswith(b"\xef\xbb\xbf"):
+            errors.append(f"{rel}: BOM (UTF-8) в начале файла — AutoCAD читает .lsp как ANSI")
+            raw = raw[3:]
+        try:
+            text = raw.decode("cp1251")
+        except UnicodeDecodeError as exc:
+            errors.append(f"{rel}: байт 0x{raw[exc.start]:02X} не читается как ANSI (cp1251)")
+            continue
+        for ln, line in enumerate(text.split("\n"), 1):
+            i = 0
+            in_str = False
+            while i < len(line):
+                c = line[i]
+                if in_str:
+                    if c == "\\":
+                        i += 2
+                        continue
+                    if c == '"':
+                        in_str = False
+                elif c == '"':
+                    in_str = True
+                elif c == ";":
+                    break
+                elif ord(c) < 32 and c != "\t":
+                    errors.append(f"{rel}: строка {ln}: управляющий символ (код {ord(c)})")
+                    break
+                elif ord(c) > 127:
+                    start = i
+                    while start > 0 and line[start - 1] not in ' \t()";':
+                        start -= 1
+                    token = line[start:i + 1]
+                    if not token.upper().startswith("C:"):
+                        errors.append(f"{rel}: строка {ln}: не-ANSI символ вне строки/комментария "
+                                      f"(слово '{token}')")
+                        break
+                i += 1
+            if in_str:
+                errors.append(f"{rel}: строка {ln}: строковая константа не закрыта")
+    return errors
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -479,6 +532,7 @@ def main() -> int:
 
     errors += check_cutline_wrap_guard()
     errors += check_cutsheet_wrap_guard()
+    errors += check_lisp_lexical()
 
     if errors:
         print("ERRORS:")
@@ -490,7 +544,7 @@ def main() -> int:
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
-        f" / cutline-wrap-guard / cutsheet-wrap-guard"
+        f" / cutline-wrap-guard / cutsheet-wrap-guard / lexical"
     )
     print("RESULT: PASS")
     return 0
