@@ -794,15 +794,14 @@
   )
 )
 
-(defun n1-filter-name-str ( / f1 f2 f3 s)
-  (setq f1 (if (boundp '*EXTRACTION-FILTER-FACADES*) *EXTRACTION-FILTER-FACADES* nil))
-  (setq f2 (if (boundp '*EXTRACTION-FILTER-VITRAZH*) *EXTRACTION-FILTER-VITRAZH* nil))
-  (setq f3 (if (boundp '*EXTRACTION-FILTER-FONAR*) *EXTRACTION-FILTER-FONAR* nil))
-  (setq s "")
-  (if f1 (setq s "Фасады"))
-  (if f2 (setq s (if (= s "") "Витражи" (strcat s ", Витражи"))))
-  (if f3 (setq s (if (= s "") "Фонарь 3D" (strcat s ", Фонарь 3D"))))
-  (if (= s "") nil s)
+(defun n1-filter-name-str ( / s)
+  ;; Ред. 14: общая система фильтров диспетчера (extraction.lsp, ред. 2).
+  ;; Возвращает «по фильтру: Мои» / «по фильтрам: Фасады, Окна» либо nil.
+  (setq s nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq s (extraction-layer-filter-source-title))
+  )
+  s
 )
 
 ;; ============================================================
@@ -817,7 +816,7 @@
           *CUTLINE-IS-AUTO-FILTER*
           fname)
      (setq suffix " (за исключением слоя 0)")
-     (list (strcat "Групповой фильтр " fname suffix))
+     (list (strcat fname suffix))
     )
     ((or (null layers) (not (listp layers)) (= (length layers) 0))
      (list "Все слои")
@@ -2329,5 +2328,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 13: U2, П1-П3, V5 мягкий лимит 10000, V4 rejects-контракт отбраковки). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 14: фильтры слоёв диспетчера Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
