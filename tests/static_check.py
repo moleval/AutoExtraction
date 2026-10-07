@@ -10,7 +10,9 @@
   3. Дубликаты имён defun (project-wide, с whitelist).
   4. DCL-ключи, на которые ссылаются .lsp, объявлены в .dcl.
   5. Наличие основных *-main функций.
-  6. Баланс и лексика файлов tests/*.lsp (chkparens.lsp автозагружает RELOAD).
+  6. Защита диагностики загрузки в reload.lsp: перехват загрузки tests/chkparens.lsp,
+     проверка результата самообновления, встроенный поиск формы (резерв CHKLOAD).
+  7. Баланс и лексика файлов tests/*.lsp (chkparens.lsp автозагружает RELOAD).
 
 Кодировка:
   - .lsp / .dcl — Windows-1251 (ANSI), fallback: utf-8
@@ -144,6 +146,63 @@ def strip_code(text: str) -> str:
                 chars.append(" " if in_string else ch)
         out.append("".join(chars))
     return "\n".join(out)
+
+
+def strip_lisp(text: str) -> tuple[str, bool]:
+    """Код без строковых констант и комментариев (вместо них пробелы).
+
+    Возвращает (код, незакрытая_строка). Учитывает экранирование \\" и \\.
+    """
+    out: list[str] = []
+    instr = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if instr:
+            if ch == "\\":
+                out.append("  ")
+                i += 2
+                continue
+            if ch == '"':
+                instr = False
+            out.append(" ")
+        else:
+            if ch == '"':
+                instr = True
+                out.append(" ")
+            elif ch == ";":
+                while i < n and text[i] != "\n":
+                    out.append(" ")
+                    i += 1
+                continue
+            else:
+                out.append(ch)
+        i += 1
+    return "".join(out), instr
+
+
+def check_balance_lex(path: Path) -> tuple[bool, str]:
+    """Баланс скобок ПО КОДУ: строки в кавычках и комментарии не считаются.
+
+    Наивный подсчёт всех скобок пропускает лишнюю ")" внутри строки - именно
+    так в tests/chkparens.lsp прошла незамеченной лишняя скобка.
+    """
+    code, unterminated = strip_lisp(read_text(path))
+    if unterminated:
+        return False, "незакрытая строковая константа"
+    bal = 0
+    for line_no, line in enumerate(code.split("\n"), start=1):
+        for ch in line:
+            if ch == "(":
+                bal += 1
+            elif ch == ")":
+                bal -= 1
+                if bal < 0:
+                    return False, f"лишняя ')' около строки {line_no}"
+    if bal != 0:
+        return False, f"дисбаланс скобок: {bal:+d}"
+    return True, ""
 
 
 def check_balance(path: Path) -> tuple[bool, str]:
@@ -462,6 +521,45 @@ def check_cutsheet_wrap_guard() -> list[str]:
 
 
 
+RELOAD_CHKLOAD_MUST = [
+    ("(vl-catch-all-apply 'load (list ae-chk-path))",
+     "перехвата ошибки загрузки tests\\chkparens.lsp (её сбой обрывает загрузку reload.lsp)"),
+    ("(vl-catch-all-error-p *ae-reload-self*)",
+     "проверки результата самообновления reload.lsp (в сессии молча остаются старые определения)"),
+    ("(ae-reload-chkload-run fullpath)",
+     "вызова поиска формы (CHKLOAD) при ошибке загрузки модуля"),
+    ("(defun ae-reload-probe-file",
+     "встроенного поиска формы (резерв, когда tests\\chkparens.lsp недоступен)"),
+    ("(defun ae-reload-probe-try",
+     "встроенной пробы префиксов для поиска формы"),
+    ("[RELOAD] сверка версий",
+     "строки сверки версий файлов в логе"),
+]
+
+RELOAD_CHKLOAD_FORBIDDEN = [
+    ("(= (type chk-load-find) 'SUBR)",
+     "хрупкая проверка (= (type f) 'SUBR) без USUBR: вызов CHKLOAD может молча не сработать"),
+    ("(load ae-chk-path)\n",
+     "загрузка tests\\chkparens.lsp без перехвата ошибки"),
+]
+
+
+def check_reload_chkload_guard() -> list[str]:
+    """RELOAD: диагностика сбоя загрузки не должна теряться молча."""
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    errors: list[str] = []
+    for needle, what in RELOAD_CHKLOAD_MUST:
+        if needle not in text:
+            errors.append(f"{path.relative_to(ROOT)}: диагностика загрузки: нет {what}")
+    for needle, what in RELOAD_CHKLOAD_FORBIDDEN:
+        if needle in text:
+            errors.append(f"{path.relative_to(ROOT)}: диагностика загрузки: {what}")
+    return errors
+
+
 def check_lisp_lexical(files=None) -> list[str]:
     """Причины «синтаксической ошибки» при целом балансе скобок.
 
@@ -525,7 +623,7 @@ def main() -> int:
     lisp_count = 0
     for path in lisp_files():
         lisp_count += 1
-        ok, msg = check_balance(path)
+        ok, msg = check_balance_lex(path)
         if not ok:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
 
@@ -541,13 +639,14 @@ def main() -> int:
 
     errors += check_cutline_wrap_guard()
     errors += check_cutsheet_wrap_guard()
+    errors += check_reload_chkload_guard()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
     tests_count = 0
     for path in test_lisp_files():
         tests_count += 1
-        ok, msg = check_balance(path)
+        ok, msg = check_balance_lex(path)
         if not ok:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(test_lisp_files()))
@@ -562,7 +661,8 @@ def main() -> int:
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
-        f" / cutline-wrap-guard / cutsheet-wrap-guard / lexical / tests-balance / tests-lexical"
+        f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
+        f" / lexical / tests-balance / tests-lexical"
     )
     print("RESULT: PASS")
     return 0
