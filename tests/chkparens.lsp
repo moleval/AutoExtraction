@@ -103,15 +103,17 @@
         )
       )
       (close f)
+      ;; Размер файла должен укладываться в окно для LF/CRLF:
+      ;;   минимум sum+ln-1 (LF, последняя строка без перевода),
+      ;;   максимум sum+2*ln (CRLF, перевод после последней строки).
+      ;; Внутри окна «скрытых байт» нет: CR в конце строк законен.
       (setq bytes (+ sum ln))
       (if (and size (not bom)
-               (/= size bytes) (/= size (1- bytes)) (/= size (1+ bytes))
-               (/= size (+ sum ln ln)) (/= size (1- (+ sum ln ln)))
-               (/= size (1+ (+ sum ln ln))))
+               (or (< size (1- bytes)) (> size (+ bytes ln))))
         (progn
           (princ (strcat "\n[CHK] " path " размер " (itoa size)
                          " байт, прочитано символов " (itoa sum)
-                         " — есть скрытые байты (NUL или смешанные переводы строк)"))
+                         " — размер не сходится с содержимым (посторонние байты)"))
           (setq problems (1+ problems))
         )
       )
@@ -203,11 +205,13 @@
 
 ;; Записать первые k-1 строк во временный файл и загрузить его.
 ;; T = префикс падает, то есть форма со сбоем внутри него.
-(defun chk-load-fails-p (lines k tmp / i f res)
+;; Записать первые k-1 строк во временный файл (LF, перевод после каждой
+;; строки) и загрузить. nil = префикс загрузился; иначе — текст ошибки.
+(defun chk-load-try (lines k tmp / i f res)
   (setq i 0)
   (setq f (open tmp "w"))
   (if (null f)
-    nil
+    "не открыт временный файл"
     (progn
       (while (< i (1- k))
         (write-line (nth i lines) f)
@@ -216,7 +220,9 @@
       (close f)
       (setq res (vl-catch-all-apply 'load (list tmp)))
       (vl-file-delete tmp)
-      (vl-catch-all-error-p res)
+      (if (vl-catch-all-error-p res)
+        (vl-catch-all-error-message res)
+        nil)
     )
   )
 )
@@ -231,7 +237,7 @@
   tmp
 )
 
-(defun chk-load-find (path / f line lines bals bounds i lo hi mid tmp found n prev cur)
+(defun chk-load-find (path / f line lines bals bounds i lo hi mid tmp found n prev cur msg tot bad)
   (setq f (open path "r"))
   (if (null f)
     (progn (princ (strcat "\n[CHKLOAD] не открыт: " path)) nil)
@@ -255,38 +261,46 @@
                         ": границы форм не найдены (нет строк, начинающихся с \"(\")")))
         (T
          (setq tmp (chk-temp-name path))
+         (setq tot 0)
+         (foreach line lines (setq tot (+ tot (strlen line))))
          (princ (strcat "\n[CHKLOAD] " path ", строк " (itoa n)
+                        ", символов " (itoa tot)
                         ", форм верхнего уровня " (itoa (length bounds))))
          (princ "\n[CHKLOAD] грузятся префиксы — сообщения модуля ниже к загрузке не относятся")
-         (if (not (chk-load-fails-p lines (1+ n) tmp))
-           (princ (strcat "\n[CHKLOAD] префиксы грузятся, а файл целиком — нет"
-                          " (сбой вне верхнеуровневых форм)"))
+         (setq msg (chk-load-try lines (1+ n) tmp))
+         (if (null msg)
+           (princ (strcat "\n[CHKLOAD] копия файла (LF) грузится, а сам файл — нет"
+                          " (дело не в содержимом форм)"))
            (progn
+             (princ (strcat "\n[CHKLOAD] загрузка всего файла: " msg))
              (setq lo 0 hi (1- (length bounds)) found nil)
              (while (<= lo hi)
                (setq mid (fix (/ (+ lo hi) 2.0)))
-               (if (chk-load-fails-p lines (nth mid bounds) tmp)
+               (if (chk-load-try lines (nth mid bounds) tmp)
                  (progn (setq found mid hi (1- mid)))
                  (setq lo (1+ mid))
                )
              )
-             (cond
-               ((null found)
-                (princ "\n[CHKLOAD] сбой не локализован"))
-               (T
-                (setq cur (nth found bounds))
-                (princ (strcat "\n[CHKLOAD] СБОЙ В ФОРМЕ, строки " (itoa cur) ".."
-                               (itoa (if (< (1+ found) (length bounds))
-                                       (1- (nth (1+ found) bounds))
-                                       n))))
-                (setq i 0)
-                (foreach line lines
-                  (setq i (1+ i))
-                  (if (and (>= i cur) (<= i (+ cur 2)))
-                    (princ (strcat "\n[CHKLOAD]   " (itoa i) ": " (substr line 1 120)))
-                  )
-                )
+             ;; Префикс перед формой k падает, префикс перед формой k-1 грузится
+             ;; -> дефект именно в форме k-1. Если падает только целый файл,
+             ;; значит дефект в ПОСЛЕДНЕЙ форме (её префикс равен целому файлу).
+             (setq bad (if found (if (> found 0) (1- found) 0) (1- (length bounds))))
+             (setq cur (nth bad bounds))
+             (setq msg (chk-load-try lines
+                         (if found (nth found bounds) (1+ n)) tmp))
+             (princ (strcat "\n[CHKLOAD] СБОЙ В ФОРМЕ №" (itoa (1+ bad))
+                            ", строки " (itoa cur) ".."
+                            (itoa (if (< (1+ bad) (length bounds))
+                                    (1- (nth (1+ bad) bounds))
+                                    n))
+                            " | ошибка: " (if msg msg "нет")))
+             (setq i 0)
+             (foreach line lines
+               (setq i (1+ i))
+               (if (and (>= i cur) (<= i (+ cur 11)))
+                 (princ (strcat "\n[CHKLOAD]   " (itoa i) ": " (substr line 1 160)))
                )
+             )
              )
            )
          )
@@ -295,7 +309,6 @@
       (princ)
     )
   )
-)
 
 (defun c:chkload ( / p)
   (setq p (getstring T "\nПуть к lsp-файлу: "))
