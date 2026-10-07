@@ -291,11 +291,23 @@ CUTLINE_WRAP_BEFORE = [
     ('(getvar "PICKFIRST")', "чтение PICKFIRST перед -BLOCK"),
     ('(list "PICKFIRST" 0)', "выключение PICKFIRST на время -BLOCK"),
     ("n1-ss-type-tally", "ожидаемый состав раскладки"),
+    ("*n1-created*", "учёт созданных отрисовкой объектов"),
+    ("(foreach ent *n1-created*", "набор для блока из своих объектов"),
+    ("n1-scan-foreign-entities", "скан посторонних объектов базы"),
+    ("n1-wrap-mark-begin", "своя undo-метка раскладки"),
 ]
 CUTLINE_WRAP_AFTER = [
     ("n1-block-type-tally", "контроль состава блока после -BLOCK"),
     ("n1-tally-equal-p", "сверка состава блока с раскладкой"),
-    ("tu-undo-cancel", "откат раскладки при захвате посторонних объектов"),
+    ("n1-wrap-mark-end", "откат группы раскладки при захвате посторонних"),
+]
+
+# Отрисовка обязана идти через n1-mk (объект попадает в *n1-created*)
+CUTLINE_GEOMETRY_ENTMAKE = [
+    '(list (cons 0 "TEXT")',
+    '(list (cons 0 "LINE")',
+    '(list (cons 0 "LWPOLYLINE")',
+    '(list\n        (cons 0 "SOLID")',
 ]
 
 
@@ -317,6 +329,17 @@ def check_cutline_wrap_guard() -> list[str]:
             errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: нет '{what}' после -BLOCK")
     if "(sssetfirst nil nil)" not in text:
         errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: нет (sssetfirst nil nil)")
+    # Геометрия раскладки должна создаваться через n1-mk: иначе объект не попадёт
+    # в *n1-created*, и набор для блока снова придётся брать обходом базы.
+    tracked = text.count("(n1-mk (list") + text.count("(n1-mk\n")
+    if tracked < 8:
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: "
+                      f"через n1-mk создаётся только {tracked} видов объектов (ожидалось >= 8)")
+    for needle in CUTLINE_GEOMETRY_ENTMAKE:
+        marker = needle.replace("\\n", "\n")
+        if f"(entmake {marker}" in text or f"(entmake\n{marker}" in text:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки в блок: "
+                          f"геометрия создаётся в обход n1-mk ({marker})")
     return errors
 
 
