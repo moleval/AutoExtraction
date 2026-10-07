@@ -329,13 +329,47 @@
   (setq *n1-created-miss* 0)
 )
 
-;; Имя владельца объекта: слой/пространство/определение блока
-(defun n1-owner-name (ent / d h oe od)
-  (setq d (entget ent))
-  (setq h (if d (cdr (assoc 330 d))))
-  (setq oe (if (and h (handent h)) (handent h)))
-  (setq od (if oe (entget oe)))
-  (if od (cdr (assoc 2 od)) "?")
+;; Всё, что печатается, приводится к строке: диагностика не имеет права
+;; упасть на чужом типе (например, на имени объекта вместо имени).
+(defun n1-safe-str (x)
+  (if (= (type x) 'STR) x (vl-princ-to-string x))
+)
+
+;; Имя владельца объекта: слой/пространство/определение блока.
+;; Код 330 возвращает то handle-строку, то имя объекта (зависит от контекста),
+;; поэтому обрабатываются оба случая. Только чтение, все вызовы под защитой:
+;; диагностика НЕ имеет права упасть и уронить раскрой.
+(defun n1-owner-name (ent / d h oe od name)
+  (setq name nil)
+  (setq d (vl-catch-all-apply (function entget) (list ent)))
+  (if (not (vl-catch-all-error-p d))
+    (progn
+      (setq h (cdr (assoc 330 d)))
+      (cond
+        ;; Владелец уже пришёл именем объекта
+        ((= (type h) 'ENAME) (setq oe h))
+        ;; Владелец пришёл handle-строкой
+        ((= (type h) 'STR)
+         (setq oe (vl-catch-all-apply (function handent) (list h)))
+         (if (vl-catch-all-error-p oe) (setq oe nil)))
+      )
+      (if oe
+        (progn
+          (setq od (vl-catch-all-apply (function entget) (list oe)))
+          (if (not (vl-catch-all-error-p od))
+            (setq name (cdr (assoc 2 od)))
+          )
+        )
+      )
+    )
+  )
+  (cond
+    ((= (type name) 'STR) name)
+    ((= (type h) 'ENAME)
+     (strcat "имя объекта " (n1-safe-str h)))
+    ((= (type h) 'STR) (strcat "handle " h))
+    (T "?")
+  )
 )
 
 ;; Создать объект и запомнить его в *n1-created*.
@@ -357,24 +391,35 @@
   res
 )
 
-;; Диагностика: что обход базы затянул бы в блок помимо раскладки
-(defun n1-scan-foreign-entities (from-ent ssNew / ent n typ layer owner)
-  (setq n 0 ent (if from-ent (entnext from-ent) (entnext)))
-  (while ent
+;; Диагностика: что обход базы затянул бы в блок помимо раскладки.
+;; Работает только на чтение и НИКОГДА не возвращает ошибку наружу: при сбое
+;; печатается причина, раскрой продолжается (диагностика не роняет работу).
+(defun n1-scan-foreign-entities (from-ent ssNew / ent n typ layer owner res)
+  (setq n 0)
+  (setq ent (vl-catch-all-apply (function entnext)
+              (if from-ent (list from-ent) '())))
+  (while (and ent (not (vl-catch-all-error-p ent)))
     (if (not (n1-ss-contains-p ssNew ent))
       (progn
-        (setq typ   (n1-type-key (cdr (assoc 0 (entget ent)))))
-        (setq layer (cdr (assoc 8 (entget ent))))
-        (setq owner (n1-owner-name ent))
+        (setq typ   (n1-safe-str
+                      (n1-type-key (cdr (assoc 0 (entget ent))))))
+        (setq layer (n1-safe-str (cdr (assoc 8 (entget ent)))))
+        (setq owner (vl-catch-all-apply (function n1-owner-name) (list ent)))
+        (if (vl-catch-all-error-p owner)
+          (setq owner (strcat "ошибка определения: "
+                              (n1-safe-str
+                                (vl-catch-all-error-message owner)))))
         (setq n (1+ n))
         (if (<= n 10)
           (princ (strcat "\n[CUTLINE][SCAN] посторонний объект в цепочке БД: "
-                         typ " (слой " (if layer layer "?")
-                         ", владелец " (if owner owner "?") ")")))
+                         typ " (слой " layer ", владелец " owner ")")))
       )
     )
-    (setq ent (entnext ent))
+    (setq ent (vl-catch-all-apply (function entnext) (list ent)))
   )
+  (if (and ent (vl-catch-all-error-p ent))
+    (princ (strcat "\n[CUTLINE][SCAN] Обход прерван: "
+                   (n1-safe-str (vl-catch-all-error-message ent)))))
   (if (> n 0)
     (princ (strcat "\n[CUTLINE][SCAN] Посторонних объектов в цепочке БД: "
                    (itoa n) " — в блок раскладки не берутся."))
@@ -2419,6 +2464,9 @@
           (setq *n1-created* '())
           (setq *n1-created-miss* 0)
           (setq wrapMark (n1-wrap-mark-begin doc))
+          (princ (strcat "\n[CUTLINE][STEP] отрисовка раскладки: старт ("
+                         (n1-safe-str (if wrapMark "метка UNDO открыта"
+                                          "метка UNDO недоступна")) ")"))
 
           ;; ШАПКА КАРТЫ РАСКРОЯ (над первым хлыстом)
           (pu-begin "CUTLINE:draw-header")
@@ -2447,6 +2495,7 @@
                 (list (car (car bbox2))
                       (- (cadr (car bbox2)) (* barHeight 2.0))))
               nil))
+          (princ "\n[CUTLINE][STEP] отрисовка раскладки: готово (шапка, хлысты, рамка, таблицы)")
 
           ;; Ред. 16: только объекты, созданные отрисовкой (*n1-created*).
           ;; Обход базы entnext затягивал в блок посторонние объекты чертежа:
@@ -2456,11 +2505,15 @@
           (foreach ent *n1-created*
             (if (entget ent) (ssadd ent ssNew)))
           (setq ssNewCount (sslength ssNew))
-          (if (> *n1-created-miss* 0)
-            (princ (strcat "\n[CUTLINE] ВНИМАНИЕ: не отслежено объектов раскладки: "
-                           (itoa *n1-created-miss*)))
-          )
-          (n1-scan-foreign-entities lastEnt ssNew)
+          (princ (strcat "\n[CUTLINE][STEP] набор для блока: "
+                         (itoa ssNewCount) " объектов раскладки"
+                         (if (> *n1-created-miss* 0)
+                           (strcat ", НЕ отслежено: "
+                                   (itoa *n1-created-miss*))
+                           "")))
+          (vl-catch-all-apply (function n1-scan-foreign-entities)
+                              (list lastEnt ssNew))
+          (princ "\n[CUTLINE][STEP] диагностика цепочки БД: завершена")
 
           (princ "\nCUTLINE: упаковка раскладки в блок...")
           (pu-begin "CUTLINE:wrap-block")
@@ -2541,7 +2594,10 @@
           ;; раскладки; посторонние (предвыделение) = потеря объектов чертежа.
           (if (and (not blkGuard) (tblsearch "BLOCK" blockName))
             (progn
-              (setq blkTally (n1-block-type-tally blockName))
+              (setq blkTally
+                (vl-catch-all-apply (function n1-block-type-tally)
+                                    (list blockName)))
+              (if (vl-catch-all-error-p blkTally) (setq blkTally nil))
               (if blkTally
                 (progn
                   (setq blkObjCount (car blkTally)
@@ -2651,5 +2707,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 16: в блок идёт только раскладка — учёт своих объектов, скан посторонних, откат группы раскладки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 17: в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
