@@ -1,6 +1,6 @@
 ;;; ============================================================
 ;;; tests/layer-filter-test.lsp — приёмочный тест фильтров слоёв
-;;; Ред. 1 (2026-10-07)
+;;; Ред. 2 (2026-10-07)
 ;;;
 ;;; Запуск в AutoCAD (файл лежит в папке tests):
 ;;;   (load "layer-filter-test.lsp")
@@ -120,15 +120,16 @@
   (setq *lft-fail* 0)
   (setq *lft-skip* 0)
 
-  (princ "\n=== ТЕСТ ФИЛЬТРОВ СЛОЁВ AutoExtraction (ред. 1) ===")
+  (princ "\n=== ТЕСТ ФИЛЬТРОВ СЛОЁВ AutoExtraction (ред. 2) ===")
 
   ;; --- 1. Словарь и дерево ---
   (setq tree (tu-layer-filter-tree))
 
-  (lft-check "Словарь групповых фильтров найден"
-             (tu-layer-filter-available-p))
-  (lft-check "Дерево фильтров не пустое"
-             (and (listp tree) (> (length tree) 0)))
+  (if (tu-layer-filter-available-p)
+    (lft-check "Групповые фильтры в чертеже найдены"
+               (and (listp tree) (> (length tree) 0)))
+    (lft-skip "В чертеже нет групповых фильтров — нужен профиль с фильтрами")
+  )
 
   (princ "\n\n--- Дерево групповых фильтров ---")
   (foreach node tree
@@ -235,6 +236,36 @@
   (lft-check "«Мои» + «Фасады» не дают дублей"
              (lft-unique-p (tu-layer-filter-layers-for-keys '(MY FACADES))))
 
+  ;; --- 8. Подсказки диспетчера (строка состояния окна) ---
+  ;; Тексты детерминированные: проверяются оба случая без правки чертежа.
+  (if (= (type extraction-layer-filter-problem-text) 'SUBR)
+    (progn
+      (lft-check "Нет групповых фильтров: «Групповой фильтр отсутствует»"
+                 (= (extraction-layer-filter-problem-text '(MY) T)
+                    "Групповой фильтр отсутствует"))
+      (lft-check "Фильтры есть, слоев нет: «Нет слоев по фильтру: Мои»"
+                 (= (extraction-layer-filter-problem-text '(MY) nil)
+                    "Нет слоев по фильтру: Мои"))
+      (lft-check "Несколько фильтров: «Нет слоев по фильтрам: ...»"
+                 (wcmatch (extraction-layer-filter-problem-text
+                            '(FACADES WINDOWS) nil)
+                          "Нет слоев по фильтрам: *"))
+      (lft-check "Пустой список фильтров — текст есть"
+                 (= (type (extraction-layer-filter-problem-text nil T)) 'STR))
+      (lft-check "Подсказка помещается в строку состояния окна (<= 40 символов)"
+                 (< (strlen (extraction-layer-filter-problem-text '(MY) T)) 40))
+      (lft-check "Диагностика в командную строку различает причины"
+                 (and (wcmatch (extraction-layer-filter-fail-msg '(MY))
+                               "*[EXTRACTION][LAYER-UTILS]*")
+                      (if (tu-layer-filter-available-p)
+                        (wcmatch (extraction-layer-filter-fail-msg '(MY))
+                                 "*по маскам не найдены*")
+                        (wcmatch (extraction-layer-filter-fail-msg '(MY))
+                                 "*Групповой фильтр отсутствует*"))))
+    )
+    (lft-skip "extraction-layer-filter-problem-text не загружен (нужен RELOAD)")
+  )
+
   ;; --- Итог ---
   (princ (strcat "\n\nИтог: PASS " (itoa *lft-pass*)
                  ", FAIL " (itoa *lft-fail*)
@@ -256,5 +287,5 @@
   s
 )
 
-(princ "\nLAYER-FILTER-TEST.LSP загружен (ред. 1). Команда: LAYERFILTERTEST")
+(princ "\nLAYER-FILTER-TEST.LSP загружен (ред. 2). Команда: LAYERFILTERTEST")
 (princ)

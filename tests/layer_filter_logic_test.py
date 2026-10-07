@@ -14,7 +14,9 @@
   * «Отключенные» входят в «Мои» даже вне «Стройплэкс» и не попадают
     в «Фасады» / «Витражи» / «Окна»;
   * уровни: корневой фильтр «Все» -> уровень 0, «Стройплэкс» -> 1, тематика -> 2;
-  * пустой список фильтров = «все слои» (nil), объединение чекбоксов без дублей.
+  * пустой список фильтров = «все слои» (nil), объединение чекбоксов без дублей;
+  * «в чертеже нет групповых фильтров» != «по фильтрам нет совпадений»:
+    в первом случае дерево пустое и диспетчер пишет «Групповой фильтр отсутствует».
 
 Только stdlib. Запуск: python3 tests/layer_filter_logic_test.py
 """
@@ -142,8 +144,27 @@ def walk(data, level, parent, visited):
     return out
 
 
+def dictionary_data():
+    """Порт tu-layer-filter-dictionary-data.
+
+    Сначала ACLYDICTIONARY; если его нет — сам расширенный словарь коллекции
+    слоёв (в нём лежат ACAD_LAYERFILTERS/ACAD_LAYERSTATES). Именно из-за этого
+    fallback «словарь найден» не означает «групповые фильтры есть».
+    """
+    return dict_entry(TABLE_EXT, "ACLYDICTIONARY") or entget(TABLE_EXT)
+
+
 def tree():
-    return walk(dict_entry(TABLE_EXT, "ACLYDICTIONARY"), 1, None, [])
+    return walk(dictionary_data(), 1, None, [])
+
+
+def available(tr):
+    """Порт tu-layer-filter-available-p (ред. 1): фильтры есть, если дерево не пусто.
+
+    Пустой словарь (или его отсутствие) — это «групповых фильтров нет»
+    (диспетчер пишет «Групповой фильтр отсутствует»), а не «совпадений нет».
+    """
+    return bool(tr)
 
 
 def norm(s):
@@ -378,12 +399,53 @@ def scenario_4():
           name_match("  Стройплэкс ", "Стройплэкс"))
 
 
+def scenario_5():
+    """Чертеж без групповых фильтров: словарь есть, фильтров нет.
+
+    Так выглядит файл, где пользователь не создавал групповые фильтры:
+    расширенный словарь коллекции слоёв существует (ACAD_LAYERFILTERS и т.п.),
+    но ACLYDICTIONARY с групповыми фильтрами пуст или отсутствует.
+    Ожидание: фильтров нет -> available() = None, слоёв по фильтру нет,
+    и диспетчер пишет «Групповой фильтр отсутствует», а не «совпадений нет».
+    """
+    global TABLE_EXT
+    # Вариант A: ACLYDICTIONARY нет, в расширенном словаре только фильтр свойств
+    reset()
+    prop = "XRECORD:ACAD_LAYERFILTERS"
+    OBJ[prop] = [(0, "XRECORD"), (1, "Свойства фасадов"), (330, mk_layer("FAC-ONLY"))]
+    TABLE_EXT = "TABLE_EXT"
+    OBJ[TABLE_EXT] = [(0, "DICTIONARY"), (3, "ACAD_LAYERFILTERS"), (350, prop)]
+
+    tr = tree()
+    check("без ACLYDICTIONARY: дерево пустое (фильтр свойств не групповой)", tr == [])
+    check("без ACLYDICTIONARY: фильтров нет (available = False)", not available(tr))
+    check("без ACLYDICTIONARY: слоёв по фильтру нет",
+          layers_for_keys(["MY", "FACADES", "VITRAZH", "WINDOWS"], tr) == [])
+
+    # Вариант B: ACLYDICTIONARY есть, но пустой
+    reset()
+    build([])
+    tr = tree()
+    check("пустой ACLYDICTIONARY: дерево пустое", tr == [])
+    check("пустой ACLYDICTIONARY: фильтров нет (available = False)", not available(tr))
+
+    # Вариант C: фильтры появились — available = True даже без совпадений по маскам
+    reset()
+    build([("Стройплэкс", record("Стройплэкс", layers_n(2, "sp5"),
+                                 children=[("Витражи", layers_n(3, "vit5"))]))])
+    tr = tree()
+    check("фильтры есть: available = True", available(tr))
+    check("фильтры есть, но по маске «Фасад*» совпадений нет",
+          layers_for_key("FACADES", tr) == [])
+
+
 def main():
     print("=== Тест логики фильтров слоёв (спецификация ТЗ) ===")
     scenario_1()
     scenario_2()
     scenario_3()
     scenario_4()
+    scenario_5()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[LAYER-FILTER-LOGIC][OK]")
