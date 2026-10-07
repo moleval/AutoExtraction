@@ -312,6 +312,106 @@
   (equal (n1-tally-sort a) (n1-tally-sort b))
 )
 
+;; ============================================================
+;; УЧЁТ ОБЪЕКТОВ РАСКЛАДКИ (ред. 16)
+;; Набор для упаковки в блок — ТОЛЬКО объекты, созданные отрисовкой.
+;; Обход базы (entnext) для этого не годится: он затягивает посторонние
+;; объекты чертежа (атрибуты и вставки из других пространств/определений),
+;; а -BLOCK вместе с атрибутами уносит в блок и их вставку-владельца.
+;; ============================================================
+
+(if (not (boundp '*n1-created*))
+  (setq *n1-created* nil)
+)
+
+;; Сколько объектов не удалось отследить (диагностика)
+(if (not (boundp '*n1-created-miss*))
+  (setq *n1-created-miss* 0)
+)
+
+;; Имя владельца объекта: слой/пространство/определение блока
+(defun n1-owner-name (ent / d h oe od)
+  (setq d (entget ent))
+  (setq h (if d (cdr (assoc 330 d))))
+  (setq oe (if (and h (handent h)) (handent h)))
+  (setq od (if oe (entget oe)))
+  (if od (cdr (assoc 2 od)) "?")
+)
+
+;; Создать объект и запомнить его в *n1-created*.
+;; Тип проверяется: entlast обязан вернуть именно созданный объект.
+(defun n1-mk (dxf / want before res e)
+  (setq want (n1-type-key (cdr (assoc 0 dxf))))
+  (setq before (entlast))
+  (setq res (entmake dxf))
+  (if res
+    (progn
+      (setq e (entlast))
+      (if (and e (not (eq e before))
+               (= (n1-type-key (cdr (assoc 0 (entget e)))) want))
+        (setq *n1-created* (cons e *n1-created*))
+        (setq *n1-created-miss* (1+ *n1-created-miss*))
+      )
+    )
+  )
+  res
+)
+
+;; Диагностика: что обход базы затянул бы в блок помимо раскладки
+(defun n1-scan-foreign-entities (from-ent ssNew / ent n typ layer owner)
+  (setq n 0 ent (if from-ent (entnext from-ent) (entnext)))
+  (while ent
+    (if (not (n1-ss-contains-p ssNew ent))
+      (progn
+        (setq typ   (n1-type-key (cdr (assoc 0 (entget ent)))))
+        (setq layer (cdr (assoc 8 (entget ent))))
+        (setq owner (n1-owner-name ent))
+        (setq n (1+ n))
+        (if (<= n 10)
+          (princ (strcat "\n[CUTLINE][SCAN] посторонний объект в цепочке БД: "
+                         typ " (слой " (if layer layer "?")
+                         ", владелец " (if owner owner "?") ")")))
+      )
+    )
+    (setq ent (entnext ent))
+  )
+  (if (> n 0)
+    (princ (strcat "\n[CUTLINE][SCAN] Посторонних объектов в цепочке БД: "
+                   (itoa n) " — в блок раскладки не берутся."))
+    (princ "\n[CUTLINE][SCAN] Посторонних объектов в цепочке БД нет."))
+  n
+)
+
+;; Собственная undo-метка вокруг отрисовки и упаковки раскладки.
+;; Нужна для детерминированного отката: сравнивать DBMOD нельзя (в уже
+;; несохранённом чертеже он не меняется), а откатывать нужно ровно группу
+;; раскладки (UNDO Back после EndUndoMark).
+(defun n1-wrap-mark-begin (doc)
+  (if (and doc (not (vl-catch-all-error-p doc))
+           (not (vl-catch-all-error-p
+                  (vl-catch-all-apply 'vla-StartUndoMark (list doc)))))
+    T
+    nil
+  )
+)
+
+(defun n1-wrap-mark-end (doc ok / old-echo)
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (vl-catch-all-apply 'vla-EndUndoMark (list doc))
+      (if (not ok)
+        (progn
+          (setq old-echo (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (princ "\n[CUTLINE] Откат раскладки (UNDO Back)...")
+          (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "1"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" old-echo))
+        )
+      )
+    )
+  )
+)
+
 (defun n1-ss-contains-p (ss ent / i found)
   (setq i 0 found nil)
   (if ss
@@ -355,7 +455,7 @@
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq c (if (and color (numberp color)) color 7))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
@@ -370,7 +470,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)))
 )
@@ -385,7 +485,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -401,7 +501,7 @@
   (setq c (if (and color (numberp color)) color 7))
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 0.0)
@@ -419,7 +519,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -438,7 +538,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -452,14 +552,14 @@
 ;; ============================================================
 
 (defun n1-draw-line (p1 p2 color)
-  (entmake (list (cons 0 "LINE") (cons 62 color)
+  (n1-mk (list (cons 0 "LINE") (cons 62 color)
                  (cons 10 (list (car p1) (cadr p1) 0.0))
                  (cons 11 (list (car p2) (cadr p2) 0.0))))
 )
 
 (defun n1-draw-rect (p1 p2 color / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (entmake (list (cons 0 "LWPOLYLINE") (cons 100 "AcDbEntity")
+  (n1-mk (list (cons 0 "LWPOLYLINE") (cons 100 "AcDbEntity")
                  (cons 62 color) (cons 100 "AcDbPolyline")
                  (cons 90 4) (cons 70 1)
                  (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
@@ -496,7 +596,7 @@
   (if (< aci 0) (setq aci 0))
 
   (setq res
-    (entmake
+    (n1-mk
       (list
         (cons 0 "SOLID")
         (cons 100 "AcDbEntity")
@@ -560,7 +660,7 @@
   (setq y1 (- (cadr (car  bbox)) *CUTLINE-FRAME-PAD-BOTTOM*))
   (setq x2 (+ (car  (cadr bbox)) *CUTLINE-FRAME-PAD-RIGHT*))
   (setq y2 (+ (cadr (cadr bbox)) *CUTLINE-FRAME-PAD-TOP*))
-  (entmake
+  (n1-mk
     (list '(0 . "LWPOLYLINE")
           '(100 . "AcDbEntity")
           (cons 8 *CUTLINE-FRAME-LAYER*)
@@ -2058,7 +2158,7 @@
                        dialog-result r xls-ok
                        old-transparency-display svSaved v5ans
                        pfCount oldPickfirst blkExpected blkTally
-                       blkObjCount blkTypes ssNewCount blkGuard)
+                       blkObjCount blkTypes ssNewCount blkGuard wrapMark)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
@@ -2314,6 +2414,12 @@
 
           (setq lastEnt (entlast))
 
+          ;; Ред. 16: своя undo-метка на отрисовку+упаковку раскладки и сброс
+          ;; учёта созданных объектов (набор для блока строится из него).
+          (setq *n1-created* '())
+          (setq *n1-created-miss* 0)
+          (setq wrapMark (n1-wrap-mark-begin doc))
+
           ;; ШАПКА КАРТЫ РАСКРОЯ (над первым хлыстом)
           (pu-begin "CUTLINE:draw-header")
           (setq bbox0 (n1-draw-header insPt stock kerf))
@@ -2342,14 +2448,19 @@
                       (- (cadr (car bbox2)) (* barHeight 2.0))))
               nil))
 
+          ;; Ред. 16: только объекты, созданные отрисовкой (*n1-created*).
+          ;; Обход базы entnext затягивал в блок посторонние объекты чертежа:
+          ;; атрибуты и вставки иных пространств/определений (диагностика ниже,
+          ;; только чтение и печать).
           (setq ssNew (ssadd))
-          (if lastEnt
-            (setq ent (entnext lastEnt))
-            (setq ent (entnext)))
-          (while ent
-            (ssadd ent ssNew)
-            (setq ent (entnext ent)))
+          (foreach ent *n1-created*
+            (if (entget ent) (ssadd ent ssNew)))
           (setq ssNewCount (sslength ssNew))
+          (if (> *n1-created-miss* 0)
+            (princ (strcat "\n[CUTLINE] ВНИМАНИЕ: не отслежено объектов раскладки: "
+                           (itoa *n1-created-miss*)))
+          )
+          (n1-scan-foreign-entities lastEnt ssNew)
 
           (princ "\nCUTLINE: упаковка раскладки в блок...")
           (pu-begin "CUTLINE:wrap-block")
@@ -2459,8 +2570,7 @@
                       (princ (strcat "\n[CUTLINE][GUARD] Раскладка откатывается ("
                                      blockName
                                      "); объекты чертежа возвращаются на место."))
-                      (if (and uMark doc)
-                        (progn (tu-undo-cancel doc) (setq uMark nil)))
+                      ;; откат делает ветка blkGuard ниже (своя метка)
                     )
                     (if (not (n1-tally-equal-p blkTypes blkExpected))
                       (princ (strcat "\n[CUTLINE] ВНИМАНИЕ: состав блока отличается от раскладки: "
@@ -2476,11 +2586,24 @@
             (progn
               (n1-clear-pickfirst T)
               (n1-disable-transparency-display old-transparency-display)
-              (princ "\n[CUTLINE] Раскрой отменён защитой (захват посторонних объектов).")
-              (princ "\n[CUTLINE] Запустите раскрой повторно — чертёж не изменён.")
+              ;; Ред. 16: откат всей группы раскладки (метка открыта до отрисовки)
+              (n1-wrap-mark-end doc nil)
+              (setq wrapMark nil)
+              (if uMark (progn (tu-undo-end doc) (setq uMark nil)))
+              (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (if (and blkRefsSet (> (sslength blkRefsSet) 0))
+                (princ "\n[CUTLINE][GUARD] Автооткат не удался — удалите блок раскроя и выполните UNDO вручную.")
+                (princ "\n[CUTLINE] Раскладка откатана: чертёж не изменён.")
+              )
+              (princ "\n[CUTLINE] Запустите раскрой повторно.")
               (princ)
               (exit)
             )
+          )
+
+          ;; Ред. 16: раскладка построена и упакована — закрываем свою метку
+          (if wrapMark
+            (progn (n1-wrap-mark-end doc T) (setq wrapMark nil))
           )
 
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
@@ -2528,5 +2651,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 15: защита упаковки в блок от предвыделения, контроль состава блока; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 16: в блок идёт только раскладка — учёт своих объектов, скан посторонних, откат группы раскладки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
