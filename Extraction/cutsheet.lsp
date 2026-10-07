@@ -1390,7 +1390,8 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc v5ans)
+                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc v5ans
+                      srcTitle)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1412,6 +1413,16 @@
         *CUTSHEET-FRAME-LAYER*)))
   
   (princ "\n=== РАСКРОЙ ЛИСТА ===")
+
+  ;; Ред. 24: подпись источника слоёв от общей системы фильтров диспетчера
+  ;; («по фильтру: Мои» / «по фильтрам: Фасады, Окна»), если слои дал фильтр
+  (setq srcTitle nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq srcTitle (extraction-layer-filter-source-title))
+  )
+  (if srcTitle
+    (princ (strcat "\n" srcTitle))
+  )
   
   (if (eq layers-from-caller 'ASK)
     (progn
@@ -1627,5 +1638,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 23: U2, П1-П3, V5 мягкий лимит 10000 (alert+запрос на продолжение)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 24: фильтры слоёв диспетчера Мои/Фасады/Витражи/Окна; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
