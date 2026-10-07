@@ -361,6 +361,96 @@ def check_cutline_wrap_guard() -> list[str]:
     return errors
 
 
+
+# --- CUTSHEET: упаковка карты в блок (ред. 25) -------------------------
+# Набор для блока — только объекты, созданные отрисовкой (*cs-created* через
+# cs-mk). Обход базы entnext затягивал ATTRIB/SEQEND динамических блоков:
+# CopyObjects падал с «Недопустимый объект-владелец», а оригиналы деталей
+# могли быть удалены как «оригиналы карты».
+CUTSHEET_WRAP_BEFORE = [
+    ("(defun cs-mk", "создание объектов через cs-mk"),
+    ("*cs-created*", "учёт созданных объектов"),
+    ("(defun cs-ss-from-created", "набор только из созданных объектов"),
+    ("(defun cs-copyable-p", "фильтр несовместимых с блоком типов"),
+    ("(defun cs-scan-foreign-entities", "диагностика обхода базы"),
+    ("(defun cs-safe-str", "безопасная печать любого значения"),
+    ("(defun cs-owner-name", "безопасное имя владельца"),
+]
+CUTSHEET_WRAP_AFTER = [
+    ("(cs-block-type-tally blockName)", "контроль состава определения блока"),
+    ("cs-tally-equal-p", "сверка состава блока с набором карты"),
+    ("[CUTSHEET] В блоке объектов", "отчёт о составе блока"),
+]
+CUTSHEET_DIAG_GUARDS = [
+    ("(vl-catch-all-apply 'cs-scan-foreign-entities", "скан под vl-catch-all-apply"),
+    ("(vl-catch-all-apply 'entnext", "обход базы под vl-catch-all-apply"),
+    ("(vl-catch-all-apply 'handent", "handent под vl-catch-all-apply"),
+    ("(ssmemb ent ssNew)", "быстрая проверка принадлежности набору"),
+]
+# Обход базы для сбора набора — корень дефекта: в модуле его быть не должно
+CUTSHEET_FORBIDDEN = [
+    ("(setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))",
+     "сбор набора обходом базы"),
+    ("(while ent (ssadd ent ssNew) (setq ent (entnext ent)))",
+     "сбор набора обходом базы"),
+]
+
+def check_cutsheet_wrap_guard() -> list[str]:
+    """CUTSHEET ред. 25: карта упаковывается только из своих объектов."""
+    path = ROOT / "Extraction/cutsheet.lsp"
+    if not path.exists():
+        return []          # отдельная проверка сообщит об отсутствии файла
+    text = read_text(path)
+    marker = "vla-CopyObjects"
+    idx = text.find(marker)
+    if idx < 0:
+        return [f"{path.relative_to(ROOT)}: не найдена упаковка карты в блок ({marker})"]
+    errors: list[str] = []
+    for needle, what in CUTSHEET_WRAP_BEFORE:
+        if needle not in text[:idx]:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                          f"нет '{what}' до CopyObjects")
+    for needle, what in CUTSHEET_WRAP_AFTER:
+        if needle not in text[idx:]:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                          f"нет '{what}' после CopyObjects")
+    for needle, what in CUTSHEET_FORBIDDEN:
+        if needle in text:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                          f"вернулся {what} (посторонние объекты снова попадут в блок)")
+    for needle, what in CUTSHEET_DIAG_GUARDS:
+        if needle not in text:
+            errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                          f"диагностика без защиты — нет '{what}'")
+    if "(setq *cs-created* '())" not in text:
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                      f"нет сброса учёта созданных объектов на прогон")
+    if "[CUTSHEET][STEP]" not in text or "[CUTSHEET][SCAN]" not in text:
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                      f"нет пошаговых меток [CUTSHEET][STEP]/[CUTSHEET][SCAN]")
+    # Геометрия карты создаётся через cs-mk, иначе объект не попадёт в *cs-created*
+    tracked = text.count("(cs-mk (list") + text.count("(cs-mk\n")
+    if tracked < 6:
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                      f"через cs-mk создаётся только {tracked} видов объектов (ожидалось >= 6)")
+    # Любой entmake вне cs-mk допустим только для табличных записей (STYLE/LAYER)
+    pos = 0
+    while True:
+        i = text.find("(entmake", pos)
+        if i < 0:
+            break
+        pos = i + 1
+        window = text[i:i + 220]
+        if "(entmake dxf)" in window:
+            continue        # ядро cs-mk
+        if '"STYLE"' in window or '"LAYER"' in window:
+            continue        # табличные записи в блок не попадают
+        errors.append(f"{path.relative_to(ROOT)}: защита упаковки карты в блок: "
+                      f"геометрия создаётся в обход cs-mk "
+                      f"(entmake без STYLE/LAYER: {window[:40]}...)")
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -388,6 +478,7 @@ def main() -> int:
         errors += check_dcl_syntax(path)
 
     errors += check_cutline_wrap_guard()
+    errors += check_cutsheet_wrap_guard()
 
     if errors:
         print("ERRORS:")
@@ -399,7 +490,7 @@ def main() -> int:
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
-        f" / cutline-wrap-guard"
+        f" / cutline-wrap-guard / cutsheet-wrap-guard"
     )
     print("RESULT: PASS")
     return 0
