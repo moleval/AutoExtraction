@@ -182,6 +182,136 @@
   ent
 )
 
+;; ============================================================
+;; ЗАЩИТА УПАКОВКИ РАСКЛАДКИ В БЛОК (ред. 15)
+;; Если в чертеже есть выделенные (grip) объекты, команда -BLOCK
+;; добавляет их к переданному набору: посторонние объекты уходят
+;; внутрь блока и пропадают из чертежа. Перед -BLOCK предвыделение
+;; снимается, а PICKFIRST на время команды выключается.
+;; ============================================================
+
+;; Сколько объектов сейчас выделено (grip). 0 — предвыделения нет.
+(defun n1-pickfirst-count ( / pf)
+  (setq pf (ssgetfirst))
+  (if (and pf (cadr pf)) (sslength (cadr pf)) 0)
+)
+
+;; Снять предвыделение. quiet=T — без сообщения.
+;; Возвращает число снятых объектов (0 — снимать было нечего).
+(defun n1-clear-pickfirst (quiet / n)
+  (setq n (n1-pickfirst-count))
+  (sssetfirst nil nil)
+  (if (and (> n 0) (not quiet))
+    (princ (strcat "\n[CUTLINE] Снято предвыделение: " (itoa n)
+                   " объект(ов) — в блок раскладки они не попадут."))
+  )
+  n
+)
+
+;; Ключ типа объекта: DXF-код 0 и ActiveX ObjectName -> один словарь
+(defun n1-type-key (typ / s)
+  (setq s (strcase (if (= (type typ) 'STR) typ "")))
+  (cond
+    ((= s "ACDBLINE")          "LINE")
+    ((= s "ACDBPOLYLINE")      "LWPOLYLINE")
+    ((= s "ACDBTEXT")          "TEXT")
+    ((= s "ACDBMTEXT")         "MTEXT")
+    ((= s "ACDBTRACE")         "SOLID")
+    ((= s "ACDBSOLID")         "SOLID")
+    ((= s "ACDBMLINE")         "MLINE")
+    ((= s "ACDBBLOCKREFERENCE") "INSERT")
+    (T s)
+  )
+)
+
+;; Состав набора: список пар (ТИП . КОЛИЧЕСТВО)
+(defun n1-ss-type-tally (ss / i ent typ rec out)
+  (setq out '() i 0)
+  (if ss
+    (repeat (sslength ss)
+      (setq ent (ssname ss i))
+      (setq typ (n1-type-key (cdr (assoc 0 (entget ent)))))
+      (setq rec (assoc typ out))
+      (if rec
+        (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+        (setq out (append out (list (cons typ 1))))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Тип объекта внутри блока: тем же способом, что и у набора раскладки
+;; (DXF-код 0 через ename); ObjectName — только запасной путь.
+(defun n1-object-type-key (obj / e typ)
+  (setq typ nil)
+  (setq e (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+  (if (not (vl-catch-all-error-p e))
+    (setq typ (n1-type-key (cdr (assoc 0 (entget e)))))
+  )
+  (if (or (null typ) (= typ ""))
+    (setq typ (n1-type-key (vl-catch-all-apply 'vla-get-ObjectName (list obj))))
+  )
+  (if (or (null typ) (= typ "")) "?" typ)
+)
+
+;; Состав определения блока (ActiveX-обход): (ВСЕГО ТИП . КОЛИЧЕСТВО ...)
+(defun n1-block-type-tally (blockName / acad doc blocks blk obj n out typ rec)
+  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
+  (if (vl-catch-all-error-p acad)
+    nil
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
+      (if (vl-catch-all-error-p doc)
+        nil
+        (progn
+          (setq blocks (vl-catch-all-apply 'vla-get-Blocks (list doc)))
+          (setq blk
+            (if (vl-catch-all-error-p blocks)
+              nil
+              (vl-catch-all-apply 'vla-Item (list blocks blockName))))
+          (if (vl-catch-all-error-p blk)
+            nil
+            (progn
+              (setq n 0 out '())
+              (vlax-for obj blk
+                (setq n (1+ n))
+                (setq typ (n1-object-type-key obj))
+                (setq rec (assoc typ out))
+                (if rec
+                  (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+                  (setq out (append out (list (cons typ 1))))
+                )
+              )
+              (cons n out)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Состав одной строкой: "LINE 12, LWPOLYLINE 40, TEXT 33"
+(defun n1-tally-str (tally / s rec)
+  (setq s "")
+  (foreach rec tally
+    (setq s (strcat s (if (= s "") "" ", ")
+                    (car rec) " " (itoa (cdr rec)))))
+  s
+)
+
+(defun n1-tally-sort (tally)
+  (vl-sort (mapcar '(lambda (x) (cons (car x) (cdr x))) tally)
+    '(lambda (a b) (< (car a) (car b))))
+)
+
+;; Совпадают ли составы (порядок не важен)
+(defun n1-tally-equal-p (a b)
+  (equal (n1-tally-sort a) (n1-tally-sort b))
+)
+
 (defun n1-ss-contains-p (ss ent / i found)
   (setq i 0 found nil)
   (if ss
@@ -1926,7 +2056,9 @@
                        default-xls default-acad
                        default-stock default-kerf
                        dialog-result r xls-ok
-                       old-transparency-display svSaved v5ans)
+                       old-transparency-display svSaved v5ans
+                       pfCount oldPickfirst blkExpected blkTally
+                       blkObjCount blkTypes ssNewCount blkGuard)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
@@ -2217,6 +2349,7 @@
           (while ent
             (ssadd ent ssNew)
             (setq ent (entnext ent)))
+          (setq ssNewCount (sslength ssNew))
 
           (princ "\nCUTLINE: упаковка раскладки в блок...")
           (pu-begin "CUTLINE:wrap-block")
@@ -2232,12 +2365,19 @@
               (setq blkRefsBeforeSet blkRefsSet)
               (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
+              ;; Ред. 15: предвыделение недопустимо — -BLOCK добавляет
+              ;; выделенные объекты к набору и уносит их в блок раскладки.
+              (setq pfCount (n1-clear-pickfirst nil))
+              (setq oldPickfirst (getvar "PICKFIRST"))
+              (vl-catch-all-apply 'setvar (list "PICKFIRST" 0))
+              (setq blkExpected (n1-ss-type-tally ssNew))
               (pu-begin "CUTLINE:wrap:block")
               (setq blkCmdResult
                     (vl-catch-all-apply 'vl-cmdf
                       (list "_.-BLOCK" blockName insPt ssNew "")))
               (pu-end "CUTLINE:wrap:block")
               (setvar "CMDECHO" oldEcho)
+              (vl-catch-all-apply 'setvar (list "PICKFIRST" oldPickfirst))
               (cond
                 ((vl-catch-all-error-p blkCmdResult)
                  (princ (strcat "\nОшибка при создании блока: "
@@ -2286,6 +2426,63 @@
           )
           (pu-end "CUTLINE:wrap-block")
 
+          ;; Ред. 15: контроль состава. В блоке должны быть ТОЛЬКО объекты
+          ;; раскладки; посторонние (предвыделение) = потеря объектов чертежа.
+          (if (and (not blkGuard) (tblsearch "BLOCK" blockName))
+            (progn
+              (setq blkTally (n1-block-type-tally blockName))
+              (if blkTally
+                (progn
+                  (setq blkObjCount (car blkTally)
+                        blkTypes   (cdr blkTally))
+                  (princ (strcat "\n[CUTLINE] В блоке объектов: "
+                                 (itoa blkObjCount)
+                                 " (раскладка: " (itoa ssNewCount) ") — "
+                                 (n1-tally-str blkTypes)))
+                  (if (/= blkObjCount ssNewCount)
+                    ;; Число объектов в блоке не совпало с нарисованным:
+                    ;; больше — -BLOCK забрал посторонние (предвыделение),
+                    ;; меньше — часть раскладки в блок не попала. И то и другое
+                    ;; портит результат, поэтому раскладку откатываем.
+                    (progn
+                      (setq blkGuard T)
+                      (princ (strcat "\n[CUTLINE][GUARD] В блоке объектов "
+                                     (itoa blkObjCount) " вместо "
+                                     (itoa ssNewCount) ": "
+                                     (if (> blkObjCount ssNewCount)
+                                       "в блок забраны посторонние объекты."
+                                       "часть объектов раскладки в блок не попала.")))
+                      (princ (strcat "\n[CUTLINE][GUARD] Состав блока: "
+                                     (n1-tally-str blkTypes)))
+                      (princ (strcat "\n[CUTLINE][GUARD] Ожидался состав: "
+                                     (n1-tally-str blkExpected)))
+                      (princ (strcat "\n[CUTLINE][GUARD] Раскладка откатывается ("
+                                     blockName
+                                     "); объекты чертежа возвращаются на место."))
+                      (if (and uMark doc)
+                        (progn (tu-undo-cancel doc) (setq uMark nil)))
+                    )
+                    (if (not (n1-tally-equal-p blkTypes blkExpected))
+                      (princ (strcat "\n[CUTLINE] ВНИМАНИЕ: состав блока отличается от раскладки: "
+                                     (n1-tally-str blkTypes)))
+                    )
+                  )
+                )
+              )
+            )
+          )
+
+          (if blkGuard
+            (progn
+              (n1-clear-pickfirst T)
+              (n1-disable-transparency-display old-transparency-display)
+              (princ "\n[CUTLINE] Раскрой отменён защитой (захват посторонних объектов).")
+              (princ "\n[CUTLINE] Запустите раскрой повторно — чертёж не изменён.")
+              (princ)
+              (exit)
+            )
+          )
+
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
           (setq bbox (n1-combine-bbox bbox-frame
                         (if bbox3 (n1-combine-bbox bbox2 bbox3) bbox2)))
@@ -2299,6 +2496,9 @@
               (setq uMark nil)
             )
           )
+
+          ;; Ред. 15: не оставляем пользователю подсвеченное выделение
+          (n1-clear-pickfirst T)
 
           (n1-disable-transparency-display old-transparency-display)
         )
@@ -2328,5 +2528,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 14: фильтры слоёв диспетчера Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 15: защита упаковки в блок от предвыделения, контроль состава блока; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
