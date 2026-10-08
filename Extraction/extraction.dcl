@@ -54,7 +54,7 @@ extraction_dialog : dialog {
   : row {
 
   : spacer {
-    width = 1.2;
+    width = 0.6;
     fixed_width = true;
   }
 
@@ -479,14 +479,23 @@ extraction_dialog : dialog {
       width = 47.2;
       fixed_width = true;
 
+      // Остаток высоты делят поровну отступы сверху и снизу — кнопки
+      // оказываются по центру рамки. В соседней рамке «Вывод» три
+      // флажка против двух кнопок здесь, поэтому остаток и возникает.
+      : spacer {
+        height = 0.1;
+      }
+
       : radio_button {
         key = "rb_detail";
         label = "Подробный";
+        fixed_height = true;
       }
 
       : radio_button {
         key = "rb_summary";
         label = "Краткий";
+        fixed_height = true;
       }
 
       // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
@@ -580,7 +589,7 @@ extraction_dialog : dialog {
   }
 
   : spacer {
-    width = 1.2;
+    width = 0.6;
     fixed_width = true;
   }
 
