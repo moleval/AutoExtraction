@@ -267,6 +267,73 @@ def scenario_brief():
           0.45 < 0.62 and 0.70 < 0.80)
 
 
+# ---------------------------------------------------------------
+# Порт: подписи на детали не наползают друг на друга
+#   ЛИСТ  — марка снизу, габарит выше строки марки
+#   ХЛЫСТ — узкая полоса, обе подписи в ряд: марка слева,
+#           габарит центрируется в оставшемся справа месте
+# ---------------------------------------------------------------
+
+def sheet_layout(mark, w, h, text_h=60.0):
+    """cs-draw-placement: возвращает (рисовать_марку, низ_габарита)."""
+    mk_h = min(text_h * 0.55, 0.085 * min(w, h)) if mark else 0.0
+    draw = bool(mark) and mk_h > text_h * 0.25 \
+        and w > len(mark) * mk_h * 0.8 and h > mk_h * 3.0
+    size_h = min(text_h, 0.12 * min(w, h))
+    size_y = max(h * 0.53, 1.5 * mk_h + 0.5 * size_h) if draw else h * 0.53
+    if draw and size_y + size_h > h:
+        draw, size_y = False, h * 0.53
+    return draw, size_y, 1.5 * mk_h, size_h
+
+
+def bar_layout(mark, piece, bar_h, txt_h):
+    """n1-draw-layout: возвращает (рисовать_марку, левый_край_габарита)."""
+    mk_h = txt_h * 0.75 if mark else 0.0
+    mark_w = (0.35 * mk_h + len(mark) * mk_h * 0.6) if mark else 0.0
+    size_w = len(str(int(piece))) * txt_h * 1.1 * 0.6
+    draw = bool(mark) and bar_h > mk_h * 2.4 and piece > mark_w + size_w + 0.5 * mk_h
+    if not draw:
+        mark_w = 0.0
+    text_x = mark_w + (piece - mark_w) * 0.5
+    return draw, text_x - size_w / 2, mark_w
+
+
+def scenario_overlap():
+    """Марка и габарит не перекрываются ни на листе, ни на хлысте."""
+    # ЛИСТ: габарит всегда выше строки марки
+    for w, h in ((300, 300), (400, 200), (605, 605), (250, 160), (1500, 750)):
+        draw, size_y, mark_top, size_h = sheet_layout("М-12", w, h)
+        ok = (not draw) or (size_y >= mark_top)
+        check("лист %dx%d: габарит не опускается в строку марки" % (w, h), ok)
+        if draw:
+            check("лист %dx%d: габарит не вылезает за деталь" % (w, h),
+                  size_y + size_h <= h)
+
+    # ЛИСТ: без марки положение габарита прежнее
+    d0, y0, _, _ = sheet_layout(None, 605, 605)
+    check("лист: без марки габарит на прежнем месте", abs(y0 - 605 * 0.53) < 1e-9)
+
+    # ХЛЫСТ: габарит начинается правее марки
+    txt = (4000.0 / 30.0) * 0.30
+    bar = 4000.0 / 45.0
+    for piece in (150.0, 200.0, 300.0, 600.0, 2400.0):
+        draw, size_left, mark_w = bar_layout("М-12", piece, bar, txt)
+        check("хлыст %d: габарит правее марки" % piece,
+              (not draw) or size_left >= mark_w)
+
+    # ХЛЫСТ: на короткой детали снимается МАРКА, а не габарит
+    draw, size_left, mark_w = bar_layout("М-12", 150.0, bar, txt)
+    check("хлыст: на короткой детали марка снимается", not draw)
+    check("хлыст: габарит при этом центрируется по всей детали",
+          abs(size_left - (150.0 / 2 - len("150") * txt * 1.1 * 0.6 / 2)) < 1e-9)
+
+    # ХЛЫСТ: без марки положение габарита прежнее
+    d0, left0, mw0 = bar_layout(None, 600.0, bar, txt)
+    check("хлыст: без марки габарит по центру детали",
+          (not d0) and mw0 == 0.0
+          and abs(left0 - (300.0 - len("600") * txt * 1.1 * 0.6 / 2)) < 1e-9)
+
+
 def main():
     print("=== Тест подписи марок в картах раскроя ===")
     scenario_attr()
@@ -274,6 +341,7 @@ def main():
     scenario_bar()
     scenario_interchange()
     scenario_brief()
+    scenario_overlap()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[MARK-LOGIC][OK]")

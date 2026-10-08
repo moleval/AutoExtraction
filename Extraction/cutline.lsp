@@ -1625,7 +1625,7 @@
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util pgi pgn
     curx p str col labelX labelY1 labelY2 centerY
-    waste-txt-h waste-center-y waste-x mk mkH)
+    waste-txt-h waste-center-y waste-x mk mkH drawMk markW sizeW textX)
 
   ;; ============================================================
   ;; ПАРАМЕТРЫ РАСКЛАДКИ (РЕГУЛИРОВАТЬ ЗДЕСЬ)
@@ -1698,17 +1698,24 @@
     (setq curx x0)
     (foreach p pieces
       (setq str (itoa (fix p)))
-      (n1-draw-text-bold-center (list (+ curx (* p 0.5)) (+ y0 (* barHeight 0.5)))
-                                (* txtH 1.1) str *NEST-COLOR-PART-TEXT* 0.0)
-      ;; Марка элемента — в левом нижнем углу детали, если помещается
+      ;; Марка считается ПЕРВОЙ: деталь на хлысте — узкая полоса, обе
+      ;; подписи идут в один ряд, поэтому габарит центрируется не по
+      ;; всей детали, а по месту, оставшемуся справа от марки.
       (setq mk (n1-mark-take p))
-      (if mk
-        (progn
-          (setq mkH (* txtH 0.75))
-          (if (and (> p (* (strlen mk) mkH 0.8))
-                   (> barHeight (* mkH 2.4)))
-            (n1-draw-text (list (+ curx (* mkH 0.35)) (+ y0 (* mkH 0.35)))
-                          mkH mk *CUTLINE-MARK-COLOR*))))
+      (setq mkH (if mk (* txtH 0.75) 0.0))
+      (setq markW (if mk (+ (* mkH 0.35) (* (strlen mk) mkH 0.6)) 0.0))
+      (setq sizeW (* (strlen str) txtH 1.1 0.6))
+      ;; обе подписи влезают, только если хватает места по длине детали
+      (setq drawMk (and mk
+                        (> barHeight (* mkH 2.4))
+                        (> p (+ markW sizeW (* mkH 0.5)))))
+      (if (not drawMk) (setq markW 0.0))
+      (setq textX (+ curx markW (* (- p markW) 0.5)))
+      (n1-draw-text-bold-center (list textX (+ y0 (* barHeight 0.5)))
+                                (* txtH 1.1) str *NEST-COLOR-PART-TEXT* 0.0)
+      (if drawMk
+        (n1-draw-text (list (+ curx (* mkH 0.35)) (+ y0 (* mkH 0.35)))
+                      mkH mk *CUTLINE-MARK-COLOR*))
       (setq curx (+ curx p kerf))
     )
 
@@ -2830,5 +2837,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 20: марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 21: подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

@@ -1114,6 +1114,35 @@ def check_summary_marks() -> list[str]:
                 errors.append(f"Extraction/cutline.lsp: ширина таблицы меняется от колонки "
                               f"«Марка» ({a} против {b}) — геометрия отчёта поедет")
 
+    # Порядок вычислений: марка считается раньше подписи габарита, иначе
+    # габарит некуда сдвигать и подписи наползают на мелких деталях.
+    # Тело берём по ИМЕНИ функции отрисовки детали: в cutsheet строка
+    # «(setq mk (cs-part-mark r))» встречается и в cs-aggregate, поиск
+    # по первому вхождению брал не ту функцию и ничего не проверял.
+    for rel, fname, mark_call, size_call in (
+        ("Extraction/cutsheet.lsp", "cs-draw-placement",
+         "(cs-part-mark r)", "cs-draw-text-center"),
+        ("Extraction/cutline.lsp", "n1-draw-layout",
+         "(n1-mark-take p)", "n1-draw-text-bold-center"),
+    ):
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        text_all = read_text(path)
+        start = text_all.find("(defun " + fname)
+        if start < 0:
+            errors.append(f"{rel}: не найдена функция отрисовки детали {fname}")
+            continue
+        end = text_all.find("\n(defun ", start + 1)
+        body = text_all[start:end if end > 0 else len(text_all)]
+        i_mark = body.find(mark_call)
+        i_size = body.find(size_call)
+        if i_mark < 0:
+            errors.append(f"{rel}: марка не считается в {fname}")
+        elif 0 <= i_size < i_mark:
+            errors.append(f"{rel}: в {fname} подпись габарита считается РАНЬШЕ марки — "
+                          "сдвинуть габарит будет нечем, подписи наползут")
+
     cs = ROOT / "Extraction/cutsheet.lsp"
     if cs.exists():
         text = read_text(cs)

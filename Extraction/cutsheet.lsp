@@ -1297,7 +1297,8 @@
                 (cs-itoa-safe sheetW) *CUTSHEET-VALUE-COLOR*))
 
 ;; ОТРИСОВКА ИЗДЕЛИЯ: Заливка SOLID + Обводка + Подпись
-(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col mk mkH)
+(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col mk mkH
+                                               drawMk sizeH sizeY)
   (setq r (car pl)
         x (+ x0 (cadr pl))
         y (+ y0 (caddr pl))
@@ -1310,23 +1311,33 @@
   ;; 2. Обводка (поверх заливки)
   (cs-draw-rect (list x y) (list (+ x w) (+ y h)) *CUTSHEET-OUTLINE-COLOR*)
   ;; 3. Подпись
-  (if (> (* w h) *CUTSHEET-MIN-TEXT-AREA*)
-    (cs-draw-text-center (list (+ x (* w 0.5)) (+ y (* h 0.53)))
-                         (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
-                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
-  ;; 4. Марка элемента — в левом нижнем углу детали. Рисуется только
-  ;; если реально помещается: подпись не должна вылезать за деталь.
+  ;; 3-4. Подпись габарита и марка. Марка считается ПЕРВОЙ: от неё
+  ;; зависит, куда встанет габарит, иначе на приплюснутых деталях
+  ;; подписи наползают друг на друга.
   (setq mk (cs-part-mark r))
-  (if mk
-    (progn
-      (setq mkH (min (* *CUTSHEET-TEXT-H* 0.55) (* 0.085 (min w h))))
-      ;; порог читаемости: мельче четверти основной высоты текста
-      ;; подпись на карте уже не читается — лучше не рисовать совсем
-      (if (and (> mkH (* *CUTSHEET-TEXT-H* 0.25))
-               (> w (* (strlen mk) mkH 0.8))
-               (> h (* mkH 3.0)))
-        (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
-                      mkH mk *CUTSHEET-MARK-COLOR*)))))
+  (setq mkH (if mk (min (* *CUTSHEET-TEXT-H* 0.55) (* 0.085 (min w h))) 0.0))
+  ;; порог читаемости: мельче четверти основной высоты текста подпись
+  ;; на карте уже не читается — лучше не рисовать совсем
+  (setq drawMk (and mk
+                    (> mkH (* *CUTSHEET-TEXT-H* 0.25))
+                    (> w (* (strlen mk) mkH 0.8))
+                    (> h (* mkH 3.0))))
+  (setq sizeH (min *CUTSHEET-TEXT-H* (* 0.12 (min w h))))
+  ;; базовая линия габарита: обычное место, но не ниже строки марки
+  (setq sizeY (if drawMk
+                (max (* h 0.53) (+ (* mkH 1.5) (* sizeH 0.5)))
+                (* h 0.53)))
+  ;; если из-за марки габарит вылезает за деталь — снимаем МАРКУ,
+  ;; размер детали важнее её обозначения
+  (if (and drawMk (> (+ sizeY sizeH) h))
+    (setq drawMk nil sizeY (* h 0.53)))
+  (if (> (* w h) *CUTSHEET-MIN-TEXT-AREA*)
+    (cs-draw-text-center (list (+ x (* w 0.5)) (+ y sizeY))
+                         sizeH
+                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
+  (if drawMk
+    (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
+                  mkH mk *CUTSHEET-MARK-COLOR*)))
 
 (defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g hasMarks colMark colCnt colArea)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
@@ -2156,5 +2167,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 31: марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 32: подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
