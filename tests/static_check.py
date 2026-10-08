@@ -965,6 +965,74 @@ def check_dcl_gap_prototypes() -> list[str]:
     return errors
 
 
+def check_mark_labels() -> list[str]:
+    """Подпись марки элемента в картах раскроя.
+
+    Главный инвариант — решатель НЕ ЗНАЕТ про марки. В хлысте марки
+    живут в побочной очереди «длина -> марки», потому что FFD работает
+    с голыми длинами; если марка просочится в n1-ffd, это будет правка
+    алгоритма раскроя, чего делать нельзя.
+    """
+    errors: list[str] = []
+
+    tu = ROOT / "common/task-utils.lsp"
+    if tu.exists():
+        text = read_text(tu)
+        for fn in ("(defun tu-block-attr", "(defun tu-entity-mark"):
+            if fn not in text:
+                errors.append(f"common/task-utils.lsp: нет {fn[7:]}")
+        if "*AE-MARK-ATTR*" not in text:
+            errors.append("common/task-utils.lsp: имя тега марки не вынесено в переменную")
+
+    cs = ROOT / "Extraction/cutsheet.lsp"
+    if cs.exists():
+        text = read_text(cs)
+        for need, what in (
+            ("(tu-entity-mark ent)", "марка не читается при сборе записи"),
+            ("(defun cs-part-mark", "нет доступа к марке записи"),
+            ("(cs-part-mark r)", "марка не используется при отрисовке"),
+        ):
+            if need not in text:
+                errors.append(f"Extraction/cutsheet.lsp: {what}")
+
+    cl = ROOT / "Extraction/cutline.lsp"
+    if cl.exists():
+        text = read_text(cl)
+        for need, what in (
+            ("(defun n1-mark-add", "нет сбора марок"),
+            ("(defun n1-mark-take", "нет выдачи марок"),
+            ("(defun n1-marks-begin", "нет сброса очереди перед отрисовкой"),
+            ("(tu-entity-mark ent)", "марка не читается при измерении"),
+            ("(n1-mark-take p)", "марка не используется при отрисовке"),
+            ("(n1-marks-begin)", "очередь не сбрасывается перед отрисовкой"),
+        ):
+            if need not in text:
+                errors.append(f"Extraction/cutline.lsp: {what}")
+        # Решатель не должен ничего знать про марки. Границы формы берём
+        # у разборщика s-выражений: поиск «до следующего defun» захватывал
+        # код ПОСЛЕ решателя и давал ложное срабатывание.
+        try:
+            forms = lisp_parse(text)
+        except LispParseError:
+            forms = []
+        lines = text.split("\n")
+        for idx, form in enumerate(forms):
+            if form[0] != "list" or len(form[1]) < 2:
+                continue
+            head = form[1][0]
+            name = form[1][1]
+            if (head[0] == "atom" and head[1].upper() == "DEFUN"
+                    and name[0] == "atom" and name[1].lower() == "n1-ffd"):
+                start = form[2] - 1
+                end = (forms[idx + 1][2] - 1) if idx + 1 < len(forms) else len(lines)
+                body = "\n".join(lines[start:end])
+                if "mark" in body.lower():
+                    errors.append("Extraction/cutline.lsp: решатель n1-ffd знает про "
+                                  "марки — алгоритм раскроя трогать нельзя")
+                break
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -1019,6 +1087,7 @@ def main() -> int:
     errors += check_defun_duplicates_in_file()
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
+    errors += check_mark_labels()
 
     if errors:
         print("ERRORS:")
@@ -1033,6 +1102,7 @@ def main() -> int:
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
+        f" / mark-labels"
     )
     print("RESULT: PASS")
     return 0

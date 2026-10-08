@@ -41,6 +41,8 @@
 (setq *NEST-COLOR-KPD*     1)
 ;; Цвет текста длины детали (желтый)
 (setq *NEST-COLOR-PART-TEXT* 2)
+;; Марка элемента (атрибут МАРКА динамического блока) в углу детали
+(setq *CUTLINE-MARK-COLOR* 7)
 
 ;; ================= ПАРАМЕТРЫ ШАПКИ КАРТЫ РАСКРОЯ =================
 (setq *CUTLINE-ROW-H*          200.0)   ;; высота строки шапки
@@ -877,6 +879,47 @@
   bars
 )
 
+;; ============================================================
+;; МАРКИ ДЕТАЛЕЙ
+;; Решатель FFD работает с голыми длинами: связь детали с исходным
+;; объектом теряется ещё при группировке по длине, а трогать решатель
+;; нельзя. Поэтому марки собираются в побочную очередь «длина -> марки»
+;; при измерении и выдаются при отрисовке по длине детали.
+;;
+;; Следствие, которое надо знать: детали ОДНОЙ длины взаимозаменяемы —
+;; это один и тот же рез, — поэтому марка может достаться соседней
+;; детали той же длины. На раскрой и на длины это не влияет.
+;; ============================================================
+
+(setq *n1-marks* '())     ;; собранные при измерении: (ключ . список марок)
+(setq *n1-marks-q* '())   ;; расходуемая копия на время отрисовки
+
+;; Ключ длины: целые доли миллиметра, чтобы не сравнивать float напрямую
+(defun n1-mark-key (len)
+  (fix (+ (* (float len) 1000.0) 0.5)))
+
+(defun n1-mark-add (len mk / k f)
+  (if (and mk (= (type mk) 'STR) (/= mk ""))
+    (progn
+      (setq k (n1-mark-key len) f (assoc k *n1-marks*))
+      (if f
+        (setq *n1-marks* (subst (cons k (append (cdr f) (list mk))) f *n1-marks*))
+        (setq *n1-marks* (cons (cons k (list mk)) *n1-marks*)))))
+  mk)
+
+;; Копия очереди на отрисовку: повторный вызов отрисовки не остаётся без марок
+(defun n1-marks-begin ()
+  (setq *n1-marks-q* *n1-marks*))
+
+;; Очередная марка для детали данной длины; nil, если марок больше нет
+(defun n1-mark-take (len / k f v)
+  (setq k (n1-mark-key len) f (assoc k *n1-marks-q*) v nil)
+  (if (and f (cdr f))
+    (progn
+      (setq v (car (cdr f)))
+      (setq *n1-marks-q* (subst (cons k (cdr (cdr f))) f *n1-marks-q*))))
+  v)
+
 (defun n1-add-group (groups key / found)
   (setq found (assoc key groups))
   (if found
@@ -1456,7 +1499,7 @@
                             i ent typ len key pieces total geom
                             measured obj)
   (setq pieces '() i 0 total (sslength ss) measured 0
-        *n1-rejects* '() *n1-reject-reason* nil)
+        *n1-rejects* '() *n1-reject-reason* nil *n1-marks* '())
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
@@ -1510,6 +1553,8 @@
        (n1-reject-note (strcat "длиннее максимума (" (rtos max-len 2 0) " мм)")))
       (T (setq measured (1+ measured))
          (setq key (fix (+ (/ len tol) 0.5)))
+         ;; марка берётся по ОКРУГЛЁННОЙ длине — ровно та, что уйдёт в решатель
+         (n1-mark-add (* (float key) tol) (tu-entity-mark ent))
          (setq pieces (n1-add-group pieces key)))
     )
     (setq i (1+ i))
@@ -1573,7 +1618,7 @@
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util pgi pgn
     curx p str col labelX labelY1 labelY2 centerY
-    waste-txt-h waste-center-y waste-x)
+    waste-txt-h waste-center-y waste-x mk mkH)
 
   ;; ============================================================
   ;; ПАРАМЕТРЫ РАСКЛАДКИ (РЕГУЛИРОВАТЬ ЗДЕСЬ)
@@ -1589,6 +1634,8 @@
   ;; ============================================================
 
   (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
+  ;; свежая копия очереди марок: повторная отрисовка не остаётся без них
+  (n1-marks-begin)
   ;; П3 (п.20): прогресс в статусной строке
   (setq pgi 0 pgn (length bars))
   (foreach bar bars
@@ -1646,6 +1693,15 @@
       (setq str (itoa (fix p)))
       (n1-draw-text-bold-center (list (+ curx (* p 0.5)) (+ y0 (* barHeight 0.5)))
                                 (* txtH 1.1) str *NEST-COLOR-PART-TEXT* 0.0)
+      ;; Марка элемента — в левом нижнем углу детали, если помещается
+      (setq mk (n1-mark-take p))
+      (if mk
+        (progn
+          (setq mkH (* txtH 0.75))
+          (if (and (> p (* (strlen mk) mkH 0.8))
+                   (> barHeight (* mkH 2.4)))
+            (n1-draw-text (list (+ curx (* mkH 0.35)) (+ y0 (* mkH 0.35)))
+                          mkH mk *CUTLINE-MARK-COLOR*))))
       (setq curx (+ curx p kerf))
     )
 
@@ -2748,5 +2804,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 18: заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 19: марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

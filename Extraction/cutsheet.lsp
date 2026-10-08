@@ -1213,7 +1213,9 @@
   (if mk
     (progn
       (setq mkH (min (* *CUTSHEET-TEXT-H* 0.55) (* 0.085 (min w h))))
-      (if (and (> mkH 1.0)
+      ;; порог читаемости: мельче четверти основной высоты текста
+      ;; подпись на карте уже не читаетс€ Ч лучше не рисовать совсем
+      (if (and (> mkH (* *CUTSHEET-TEXT-H* 0.25))
                (> w (* (strlen mk) mkH 0.8))
                (> h (* mkH 3.0)))
         (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
