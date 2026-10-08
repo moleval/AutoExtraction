@@ -542,6 +542,8 @@ RELOAD_CHKLOAD_MUST = [
      "вызова поиска формы (CHKLOAD) при ошибке загрузки модуля"),
     ("(defun ae-reload-probe-file",
      "встроенного поиска формы (резерв, когда tests\\chkparens.lsp недоступен)"),
+    ("(defun ae-reload-version-line",
+     "функции строки сверки версий (её печатает верхний уровень reload.lsp)"),
     ("(defun ae-reload-probe-try",
      "встроенной пробы префиксов для поиска формы"),
     ("[RELOAD] сверка версий",
@@ -820,6 +822,64 @@ def check_special_forms(files=None) -> list[str]:
     return errors
 
 
+def check_reload_version_line() -> list[str]:
+    """Сверка версий должна печататься с ВЕРХНЕГО уровня reload.lsp.
+
+    Тело c:RELOAD выполняется в редакции, загруженной ДО самообновления:
+    если в сессии осталось старое c:RELOAD, печать изнутри тела молча
+    пропадает (прогон RELOAD #21). Печать на верхнем уровне срабатывает
+    при каждом чтении файла с диска.
+    """
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    try:
+        forms = lisp_parse(read_text(path))
+    except LispParseError as exc:
+        return [f"reload.lsp: разбор форм: {exc}"]
+
+    def calls(node) -> bool:
+        if node[0] == "atom":
+            return node[1].lower() == "ae-reload-version-line"
+        if node[0] in ("list", "quote"):
+            return any(calls(c) for c in node[1])
+        return False
+
+    for form in forms:
+        if form[0] != "list" or not form[1]:
+            continue
+        head = form[1][0][1].upper() if form[1][0][0] == "atom" else ""
+        if head.startswith("DEFUN"):
+            continue
+        if calls(form):
+            return []
+    return ["reload.lsp: сверка версий не вызывается с верхнего уровня "
+            "(печать только из тела c:RELOAD теряется при старых определениях в сессии)"]
+
+
+def check_defun_duplicates_in_file() -> list[str]:
+    """Один и тот же defun объявлен в файле дважды.
+
+    Дубль переопределяет первую редакцию молча: сканеры баланса и
+    спецформ его не видят. Проверяются все .lsp, включая reload.lsp и
+    tests/*.lsp, которые в общий поиск дубликатов не входят.
+    """
+    errors: list[str] = []
+    for path in all_lisp_files():
+        seen: dict[str, int] = {}
+        for name, line in find_defuns(path):
+            key = name.upper()
+            # *error* объявляется локально в каждой команде — норма.
+            if name.lower() in {w.lower() for w in WHITELIST_DEFUN}:
+                continue
+            if key in seen:
+                errors.append(f"{path.relative_to(ROOT)}: defun {name} объявлен дважды "
+                              f"(строки {seen[key]} и {line})")
+            else:
+                seen[key] = line
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -870,6 +930,8 @@ def main() -> int:
 
     # Спецформы по всем .lsp сразу (модули + tests + reload.lsp)
     errors += check_special_forms()
+    errors += check_reload_version_line()
+    errors += check_defun_duplicates_in_file()
 
     if errors:
         print("ERRORS:")
@@ -883,6 +945,7 @@ def main() -> int:
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
+        f" / reload-version-line / defun-dup-in-file"
     )
     print("RESULT: PASS")
     return 0

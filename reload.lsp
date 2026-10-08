@@ -444,23 +444,17 @@
       ;; модули не загружаются до перезапуска AutoCAD
       ;; (регрессия 2026-09-22: no function definition TU-PARSE-INT-LIST).
       (setq *ae-reload-self* (vl-catch-all-apply 'load (list (strcat root "\\reload.lsp"))))
+      ;; Сверку версий печатает верхний уровень перечитанного reload.lsp.
+      ;; Здесь — только если перечитать не удалось: иначе о составе
+      ;; комплекта не сообщит никто (в сессии остаются старые определения).
       (if (vl-catch-all-error-p *ae-reload-self*)
-        (princ (strcat "\n[RELOAD] ВНИМАНИЕ: reload.lsp не перечитан с диска: "
-                       (vl-catch-all-error-message *ae-reload-self*)
-                       " - в сессии работают определения из памяти AutoCAD"))
+        (progn
+          (princ (strcat "\n[RELOAD] ВНИМАНИЕ: reload.lsp не перечитан с диска: "
+                         (vl-catch-all-error-message *ae-reload-self*)
+                         " - в сессии работают определения из памяти AutoCAD"))
+          (princ (strcat "\n" (ae-reload-version-line)))
+        )
       )
-      (princ (strcat "\n[RELOAD] сверка версий: reload.lsp "
-                     (itoa (if (vl-file-size (strcat root "\\reload.lsp"))
-                             (vl-file-size (strcat root "\\reload.lsp"))
-                             0))
-                     " байт | tests\\chkparens.lsp "
-                     (itoa (if (vl-file-size (strcat root "\\tests\\chkparens.lsp"))
-                             (vl-file-size (strcat root "\\tests\\chkparens.lsp"))
-                             0))
-                     " байт | загружен: " (if *ae-chk-ok* "да" "нет")
-                     " | chk-load-find: "
-                     (if (member (ae-reload-sym-type 'chk-load-find) '(SUBR USUBR))
-                       "есть" "нет")))
 
       (setq common-files *ae-reload-common-files*)
 
@@ -608,8 +602,40 @@
 )
 
 
+
+;; ------------------------------------------------------------
+;; Сверка версий комплекта. Печатается на ВЕРХНЕМ уровне, то есть при
+;; каждом чтении reload.lsp с диска (ручная загрузка и самообновление
+;; внутри RELOAD). Прежде строку печатало только тело c:RELOAD, а оно
+;; выполняется в редакции, загруженной ДО самообновления: если в сессии
+;; осталось старое c:RELOAD, строка молча пропадала (прогон #21).
+;; ------------------------------------------------------------
+(defun ae-reload-root ( / p)
+  (setq p (findfile "extraction.lsp"))
+  (if p (vl-filename-directory (vl-filename-directory p)))
+)
+
+(defun ae-reload-size-str (path / n)
+  (setq n (if path (vl-file-size path)))
+  (itoa (if n n 0))
+)
+
+(defun ae-reload-version-line ( / root)
+  (setq root (ae-reload-root))
+  (strcat "[RELOAD] сверка версий: reload.lsp "
+          (ae-reload-size-str (if root (strcat root "\\reload.lsp")))
+          " байт | tests\\chkparens.lsp "
+          (ae-reload-size-str (if root (strcat root "\\tests\\chkparens.lsp")))
+          " байт | загружен: " (if *ae-chk-ok* "да" "нет")
+          " | chk-load-find: "
+          (if (member (ae-reload-sym-type 'chk-load-find) '(SUBR USUBR))
+            "есть" "нет"))
+)
+
 (princ
   "\nRELOAD.LSP загружен. Команда: RELOAD"
 )
+
+(princ (strcat "\n" (ae-reload-version-line)))
 
 (princ)
