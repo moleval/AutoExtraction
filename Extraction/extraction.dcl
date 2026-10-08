@@ -61,7 +61,7 @@ extraction_dialog : dialog {
     // чекбоксы встают ровно над полем поиска слоёв
     : boxed_column {
       label = "";
-      width = 40;
+      width = 45;
       fixed_width = true;
       children_alignment = left;
       children_fixed_width = true;
@@ -104,7 +104,7 @@ extraction_dialog : dialog {
     // Колонка по ширине панели «Блоки» (рамка без заголовка — см. выше)
     : boxed_column {
       label = "";
-      width = 40;
+      width = 45;
       fixed_width = true;
       children_alignment = left;
       children_fixed_width = true;
@@ -138,7 +138,7 @@ extraction_dialog : dialog {
 
       label = "Слои";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       // Ширины НЕ задаются: каждый элемент заполняет ширину панели,
@@ -160,6 +160,13 @@ extraction_dialog : dialog {
       : text {
         key = "txt_layers_hint";
         label = "Если слои не выбраны — поиск по всем слоям";
+      }
+
+      // Компенсация высоты: в панели «Блоки» на этом месте поле ввода
+      // («Введите новое имя»), оно выше текста статуса на свою рамку.
+      // Без этого отступа кнопки слоёв стоят чуть выше кнопок блоков.
+      : spacer {
+        height = 0.25;
       }
 
       // ------------------------------------------------------
@@ -200,7 +207,7 @@ extraction_dialog : dialog {
 
       label = "Блоки";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       // Ширины НЕ задаются: каждый элемент заполняет ширину панели,
@@ -261,7 +268,7 @@ extraction_dialog : dialog {
 
       label = "Задачи";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       : radio_button {
@@ -302,7 +309,7 @@ extraction_dialog : dialog {
 
       key = "box_subsystem_layers";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       : toggle {
@@ -338,7 +345,7 @@ extraction_dialog : dialog {
 
       label = "Режим отчета";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       : radio_button {
@@ -362,7 +369,7 @@ extraction_dialog : dialog {
 
       label = "Вывод";
 
-      width = 40;
+      width = 45;
       fixed_width = true;
 
       : toggle {
