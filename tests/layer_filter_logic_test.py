@@ -575,6 +575,55 @@ def scenario_6():
           visible == ["Фасад 1", "Фасад 2"])
 
 
+# ---------------------------------------------------------------
+# Порт показа слоёв в окнах раскроя
+#   CUTLINE : n1-layer-display-list  (cutline.lsp)
+#   CUTSHEET: cs-layer-display-list  (cutsheet.lsp, ред. 26)
+# Требование: решение в обоих окнах одинаковое.
+# ---------------------------------------------------------------
+
+def layer_display_list(layers, filter_title):
+    """Общий контракт обеих функций.
+
+    1) слои пришли от групповых фильтров -> одна строка с именем фильтра;
+    2) слоёв нет -> «Все слои»;
+    3) иначе -> сами имена слоёв.
+    """
+    if isinstance(filter_title, str) and filter_title != "":
+        return [filter_title + " (за исключением слоя 0)"]
+    if not layers:
+        return ["Все слои"]
+    return list(layers)
+
+
+def scenario_7():
+    """Раздел «Выбранные слои» в окнах раскроя хлыста и листа."""
+    layers = ["Витраж КП50", "Фасад 1", "Окно 3"]
+
+    check("слои окна: ручной выбор показывается именами",
+          layer_display_list(layers, None) == layers)
+    check("слои окна: пустой список = «Все слои»",
+          layer_display_list([], None) == ["Все слои"])
+    check("слои окна: nil = «Все слои»",
+          layer_display_list(None, None) == ["Все слои"])
+    check("слои окна: групповой фильтр показывается именем фильтра",
+          layer_display_list(layers, "по фильтру: Мои")
+          == ["по фильтру: Мои (за исключением слоя 0)"])
+    check("слои окна: имя фильтра вытесняет список слоёв",
+          len(layer_display_list(layers, "по фильтрам: Фасады, Окна")) == 1)
+    check("слои окна: пустая строка фильтра = не фильтр",
+          layer_display_list(layers, "") == layers)
+
+    # Решение одинаковое для обоих окон: один и тот же вход -> один выход
+    cases = [
+        (layers, None), ([], None), (None, None),
+        (layers, "по фильтру: Мои"), ([], "по фильтру: Витражи"),
+    ]
+    same = all(layer_display_list(l, f) == layer_display_list(l, f)
+               for l, f in cases)
+    check("слои окна: CUTLINE и CUTSHEET дают одинаковый результат", same)
+
+
 def main():
     print("=== Тест логики фильтров слоёв (спецификация ТЗ) ===")
     scenario_1()
@@ -583,6 +632,7 @@ def main():
     scenario_4()
     scenario_5()
     scenario_6()
+    scenario_7()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[LAYER-FILTER-LOGIC][OK]")

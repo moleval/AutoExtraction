@@ -880,6 +880,39 @@ def check_defun_duplicates_in_file() -> list[str]:
     return errors
 
 
+def check_dialog_layers_section() -> list[str]:
+    """Раздел «Выбранные слои» в окнах раскроя (CUTLINE и CUTSHEET).
+
+    Список информационный и заполняется под vl-catch-all: если раздел
+    пропадёт из .dcl, заполнение молча ничего не покажет, а окно
+    откроется как ни в чём не бывало. Поэтому пара «.dcl + .lsp»
+    проверяется статически.
+    """
+    pairs = [
+        ("Extraction/cutline_filter.dcl", "Extraction/cutline.lsp",
+         "n1-layer-display-list"),
+        ("Extraction/cutsheet_filter.dcl", "Extraction/cutsheet.lsp",
+         "cs-layer-display-list"),
+    ]
+    errors: list[str] = []
+    for dcl_rel, lsp_rel, display_fn in pairs:
+        dcl, lsp = ROOT / dcl_rel, ROOT / lsp_rel
+        if not dcl.exists() or not lsp.exists():
+            continue
+        dcl_text, lsp_text = read_text(dcl), read_text(lsp)
+        if "Выбранные слои" not in dcl_text:
+            errors.append(f"{dcl_rel}: нет раздела «Выбранные слои»")
+        if 'key = "lst_layers"' not in dcl_text:
+            errors.append(f"{dcl_rel}: нет списка с ключом lst_layers")
+        if '(start_list "lst_layers")' not in lsp_text:
+            errors.append(f"{lsp_rel}: список слоёв окна не заполняется")
+        if f"(defun {display_fn}" not in lsp_text:
+            errors.append(f"{lsp_rel}: нет функции показа слоёв {display_fn}")
+        if f"({display_fn}" not in lsp_text.replace(f"(defun {display_fn}", ""):
+            errors.append(f"{lsp_rel}: функция {display_fn} объявлена, но не вызывается")
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -932,6 +965,7 @@ def main() -> int:
     errors += check_special_forms()
     errors += check_reload_version_line()
     errors += check_defun_duplicates_in_file()
+    errors += check_dialog_layers_section()
 
     if errors:
         print("ERRORS:")
@@ -945,7 +979,7 @@ def main() -> int:
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
-        f" / reload-version-line / defun-dup-in-file"
+        f" / reload-version-line / defun-dup-in-file / dialog-layers"
     )
     print("RESULT: PASS")
     return 0

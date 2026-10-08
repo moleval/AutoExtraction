@@ -68,6 +68,11 @@
 ;; размещения (проверок кандидат-прямоугольников). Именованный, изменяемый.
 (setq *cs-max-placement-attempts* 1000000)
 
+;; Эффективный список слоёв раскроя: то, по чему реально собрана выборка
+;; (после подстановки слоёв задачи из настроек). Показывается в окне
+;; в разделе «Выбранные слои» — как в окне раскроя хлыстов.
+(setq *cs-effective-layers* nil)
+
 ;; Состояние диалога
 (if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
 (if (not (boundp '*cs-tmp-sheet-w*))   (setq *cs-tmp-sheet-w* *CUTSHEET-DEFAULT-WIDTH*))
@@ -238,6 +243,9 @@
 (defun cs-build-filter-ss (layers / ss out i ent typ lay)
   (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
     (setq layers (ae-settings-task-layers 'CUTSHEET)))
+  ;; Для раздела «Выбранные слои»: показываем именно то, по чему
+  ;; собрана выборка, а не то, что пришло от вызывающего
+  (setq *cs-effective-layers* layers)
   (setq ss nil)
   (setq ss (su-take-preselection))
   (if (null ss)
@@ -398,6 +406,34 @@
       (setq i (1+ i))))
   cnt)
 
+;; ============================================================
+;; Отображение списка слоёв (зеркало CUTLINE: n1-layer-display-list)
+;; Слои выбирает диспетчер; окно раскроя только показывает их.
+;; ============================================================
+
+;; «по фильтру: Мои» / «по фильтрам: Фасады, Окна» либо nil.
+;; Непусто только когда слои пришли от групповых фильтров.
+(defun cs-filter-name-str ( / s)
+  (setq s nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq s (extraction-layer-filter-source-title))
+  )
+  s
+)
+
+(defun cs-layer-display-list (layers / fname)
+  (setq fname (cs-filter-name-str))
+  (cond
+    ((and fname (= (type fname) 'STR) (/= fname ""))
+     (list (strcat fname " (за исключением слоя 0)"))
+    )
+    ((or (null layers) (not (listp layers)) (= (length layers) 0))
+     (list "Все слои")
+    )
+    (T layers)
+  )
+)
+
 ;; ================= DCL =================
 (defun cs-safe-set-tile (key val) (vl-catch-all-apply 'set_tile (list key val)))
 (defun cs-safe-mode-tile (key mode) (vl-catch-all-apply 'mode_tile (list key mode)))
@@ -458,6 +494,17 @@
               (end_list)
               (set_tile "popup_dyn_type" "0")
               (cs-safe-mode-tile "popup_dyn_type" 1)
+
+              ;; «Выбранные слои»: только информация. Заполнение под
+              ;; перехватом — диагностика не должна ронять диалог.
+              (vl-catch-all-apply
+                '(lambda ()
+                   (start_list "lst_layers")
+                   (foreach l (cs-layer-display-list *cs-effective-layers*)
+                     (add_list l))
+                   (end_list))
+                nil)
+
               (if (<= polyCnt 0) (cs-safe-mode-tile "rb_poly" 1))
               (if (<= dynCnt 0) (cs-safe-mode-tile "rb_dyn" 1))
               (if (<= (+ polyCnt dynCnt) 0) (cs-safe-mode-tile "rb_all" 1))
@@ -1914,5 +1961,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 25: карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 26: раздел «Выбранные слои» в окне; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
