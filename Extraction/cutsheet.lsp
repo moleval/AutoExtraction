@@ -135,6 +135,69 @@
        nil))
     (T nil)))
 
+;; ============================================================
+;; БЛОКИ ЗАПОЛНЕНИЯ: размер «в свету» + припуск на раму
+;;
+;; У таких блоков параметры задают размер ПРОЁМА, а заготовку надо
+;; резать больше на припуск. Габарит блока (BoundingBox) для них не
+;; годится вовсе: он включает раму и даёт размер в разы больше.
+;;
+;; Признак блока заполнения — маски блоков задачи ЗАПОЛНЕНИЕ из
+;; settings.ini: один список на отчёт и на раскрой, разойтись не могут.
+;; Цепочка параметров и припуск — тоже как в ЗАПОЛНЕНИИ.
+;; ============================================================
+
+(setq *CUTSHEET-FILL-HEIGHT-KEYS* '("ВЫСОТА В СВЕТУ" "ВЫСОТА"))
+(setq *CUTSHEET-FILL-WIDTH-KEYS*  '("ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА"))
+
+;; Сколько блоков обработано как заполнение (для диагностики прогона)
+(setq *cs-fill-count* 0)
+
+;; Припуск на раму: настройка задачи ЗАПОЛНЕНИЕ, иначе 26
+(defun cs-fill-allowance ( / v)
+  (if (= (type ae-settings-frame-allowance) 'SUBR)
+    (progn
+      (setq v (ae-settings-frame-allowance))
+      (if (and (numberp v) (>= v 0)) v 26))
+    26)
+)
+
+;; Маски блоков заполнения. Пустой список = признак выключен:
+;; лучше не применять припуск вовсе, чем применить его ко всему подряд.
+(defun cs-fill-masks ( / m)
+  (setq m nil)
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq m (ae-settings-task-blocks 'ZAPOLNENIE)))
+  (if (and m (listp m)) m nil)
+)
+
+(defun cs-fill-block-p (ent masks)
+  (if (or (null masks) (null ent))
+    nil
+    (su-block-matches-name-masks-p ent masks))
+)
+
+;; Значение параметра: точное совпадение, затем вхождение подстроки.
+;; Подстрока нужна для имён вида «Высота в свету, мм».
+(defun cs-prop-value-like (props wanted / p)
+  (setq p (cs-prop-value props wanted))
+  (if p
+    p
+    (progn
+      (foreach x props
+        (if (and (null p) (= (type (car x)) 'STR)
+                 (vl-string-search (strcase wanted) (strcase (car x))))
+          (setq p (cs-value-to-number (cdr x)))))
+      (if (numberp p) p nil)))
+)
+
+(defun cs-fill-dimension (props keys / v)
+  (setq v nil)
+  (foreach k keys
+    (if (null v) (setq v (cs-prop-value-like props k))))
+  (if (and (numberp v) (> v 0.0)) v nil)
+)
+
 (defun cs-block-all-props (obj / dyn prop pname pval out)
   (setq out '())
   (setq dyn (vl-catch-all-apply 'vlax-invoke (list obj 'GetDynamicBlockProperties)))
@@ -317,7 +380,8 @@
           ;; записей должна совпадать с блоками
           (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent nil))))))
 
-(defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH area nominal source)
+(defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH
+                                 area nominal source fill allow mk)
   ;; V4: отказ всегда с причиной в *cs-reject-reason*.
   (setq ed (entget ent) layer (cdr (assoc 8 ed))
         obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent))
@@ -327,19 +391,46 @@
       (setq *cs-reject-reason* "ActiveX объекта недоступен") nil)
     (T
       (setq props (cs-block-all-props obj) typName (cs-get-dyn-type-name ent))
-      (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
-      (if (not (numberp pW)) (setq pW nil))
-      (if (not (numberp pH)) (setq pH nil))
-      (if (and pW pH (> pW 0.0) (> pH 0.0))
-        (setq w pW h pH source "Свойства")
+      (setq fill (cs-fill-block-p ent (cs-fill-masks)))
+      (if fill
+        ;; ЗАПОЛНЕНИЕ: только «в свету» + припуск. Отката на BoundingBox
+        ;; здесь нет намеренно — габарит с рамой дал бы молча неверный
+        ;; раскрой, лучше явный отказ с причиной.
         (progn
-          (setq wh (cs-bbox-w-h ent))
-          (if (and wh (numberp (car wh)) (numberp (cadr wh)) (> (car wh) 0.0) (> (cadr wh) 0.0))
-            (setq w (car wh) h (cadr wh) source "BoundingBox")
-            (setq w nil h nil source nil))))
+          (setq allow (cs-fill-allowance))
+          (setq pH (cs-fill-dimension props *CUTSHEET-FILL-HEIGHT-KEYS*))
+          (setq pW (cs-fill-dimension props *CUTSHEET-FILL-WIDTH-KEYS*))
+          (if (and pW pH)
+            (progn
+              (setq w (float (fix (+ pW allow)))
+                    h (float (fix (+ pH allow)))
+                    source "Заполнение (в свету + припуск)")
+              (setq *cs-fill-count* (1+ *cs-fill-count*))
+              ;; имя элемента — марка, если она есть
+              (setq mk (tu-entity-mark ent))
+              (if mk (setq typName mk)))
+            (setq w nil h nil source nil
+                  *cs-reject-reason*
+                  (if (null pH)
+                    "заполнение: не найдена высота (в свету)"
+                    "заполнение: не найдена ширина (в свету)"))))
+        (progn
+          (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
+          (if (not (numberp pW)) (setq pW nil))
+          (if (not (numberp pH)) (setq pH nil))
+          (if (and pW pH (> pW 0.0) (> pH 0.0))
+            (setq w pW h pH source "Свойства")
+            (progn
+              (setq wh (cs-bbox-w-h ent))
+              (if (and wh (numberp (car wh)) (numberp (cadr wh)) (> (car wh) 0.0) (> (cadr wh) 0.0))
+                (setq w (car wh) h (cadr wh) source "BoundingBox")
+                (setq w nil h nil source nil))))))
       (cond
         ((or (null w) (null h))
-          (setq *cs-reject-reason* "размеры не числовые (свойства и BoundingBox)") nil)
+          ;; причина от ветки заполнения точнее — не затираем её
+          (if (null *cs-reject-reason*)
+            (setq *cs-reject-reason* "размеры не числовые (свойства и BoundingBox)"))
+          nil)
         ((or (<= w 0.0) (<= h 0.0))
           (setq *cs-reject-reason* "стороны <= 0") nil)
         ((or (< w *CUTSHEET-MIN-PART-DIM*) (< h *CUTSHEET-MIN-PART-DIM*))
@@ -354,7 +445,7 @@
                 (tu-entity-mark ent)))))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
-  (setq out '() i 0 id 0 *cs-rejects* '())
+  (setq out '() i 0 id 0 *cs-rejects* '() *cs-fill-count* 0)
   (if ss
     (repeat (sslength ss)
       (setq ent (ssname ss i) typ (cdr (assoc 0 (entget ent))) rec nil)
@@ -1846,6 +1937,17 @@
   (setq records (cs-collect-records ss choice dynType))
   (pu-end "CUTSHEET:collect")
   (cs-print-rejects)
+  ;; Диагностика заполнения: видно, сколько деталей посчитано по проёму
+  ;; и с каким припуском. Маска «*» ловит ВСЕ блоки — предупреждаем.
+  (if (> *cs-fill-count* 0)
+    (progn
+      (princ (strcat "\n[CUTSHEET] Заполнение: " (itoa *cs-fill-count*)
+                     " блоков, размер в свету + припуск "
+                     (itoa (cs-fill-allowance)) " мм"))
+      (if (member "*" (cs-fill-masks))
+        (princ (strcat "\n[CUTSHEET][GUARD] Маска блоков ЗАПОЛНЕНИЯ = \"*\": "
+                       "припуск применён ко ВСЕМ подходящим блокам. "
+                       "Сузьте маску в Настройках, если это не нужно.")))))
   (tu-diag "FILTER" (strcat "принято деталей: " (itoa (length records))
                              ", исключено: " (itoa (apply (quote +) (mapcar (quote cdr) *cs-rejects*)))))
 
@@ -2026,5 +2128,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 28: марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 29: блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

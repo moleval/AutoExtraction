@@ -1033,6 +1033,56 @@ def check_mark_labels() -> list[str]:
     return errors
 
 
+def check_fill_allowance() -> list[str]:
+    """Блоки заполнения в раскрое листа: «в свету» + припуск.
+
+    Два инварианта, которые нельзя потерять:
+    1. припуск берётся из настроек задачи ЗАПОЛНЕНИЕ — один источник на
+       отчёт и на раскрой, иначе заготовка разойдётся с заказанной
+       панелью, и это заметят только на монтаже;
+    2. у блока заполнения НЕТ отката на BoundingBox: габарит включает
+       раму, молча неверный раскрой хуже явного отказа.
+    """
+    errors: list[str] = []
+
+    su = ROOT / "common/settings-utils.lsp"
+    if su.exists():
+        text = read_text(su)
+        if '"input.frame.allowance"' not in text:
+            errors.append("common/settings-utils.lsp: нет ключа input.frame.allowance")
+        if "(defun ae-settings-frame-allowance" not in text:
+            errors.append("common/settings-utils.lsp: нет аксессора ae-settings-frame-allowance")
+
+    zp = ROOT / "Extraction/zapolnenie.lsp"
+    if zp.exists():
+        text = read_text(zp)
+        if "(zapolnenie-frame-allowance)" not in text:
+            errors.append("Extraction/zapolnenie.lsp: припуск не берётся из настроек")
+
+    cs = ROOT / "Extraction/cutsheet.lsp"
+    if cs.exists():
+        text = read_text(cs)
+        for need, what in (
+            ("(defun cs-fill-masks", "нет признака блока заполнения (маски)"),
+            ("(defun cs-fill-block-p", "нет проверки блока на заполнение"),
+            ("(defun cs-fill-dimension", "нет цепочки размеров «в свету»"),
+            ("(defun cs-fill-allowance", "нет доступа к припуску"),
+            ("(cs-fill-block-p ent (cs-fill-masks))", "ветка заполнения не включена в сбор записи"),
+            ("ВЫСОТА В СВЕТУ", "нет приоритета размера «в свету»"),
+        ):
+            if need not in text:
+                errors.append(f"Extraction/cutsheet.lsp: {what}")
+        # в ветке заполнения не должно быть отката на габарит
+        start = text.find("(setq fill (cs-fill-block-p")
+        if start >= 0:
+            branch = text[start:start + 1400]
+            head = branch.split("(progn\n          (setq pW (cs-prop-value props")[0]
+            if "cs-bbox-w-h" in head:
+                errors.append("Extraction/cutsheet.lsp: ветка заполнения откатывается на "
+                              "BoundingBox — габарит включает раму, нужен явный отказ")
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -1088,6 +1138,7 @@ def main() -> int:
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
+    errors += check_fill_allowance()
 
     if errors:
         print("ERRORS:")
@@ -1102,7 +1153,7 @@ def main() -> int:
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
-        f" / mark-labels"
+        f" / mark-labels / fill-allowance"
     )
     print("RESULT: PASS")
     return 0
