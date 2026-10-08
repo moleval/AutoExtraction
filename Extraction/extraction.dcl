@@ -554,4 +554,10 @@ extraction_dialog : dialog {
       is_cancel = true;
     }
   }
+
+
+  // Отступ под кнопками — такой же, как над рамкой «Раскрой»
+  : spacer {
+    height = 0.1;
+  }
 }
