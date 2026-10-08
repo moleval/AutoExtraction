@@ -439,6 +439,142 @@ def scenario_5():
           layers_for_key("FACADES", tr) == [])
 
 
+# ---------------------------------------------------------------
+# Порт логики поиска слоя (Extraction/extraction.lsp, ред. 4)
+# extraction-layer-search-* — зеркало поиска блока в blockrename
+# ---------------------------------------------------------------
+
+SEARCH_HINT = "Поиск (по Enter):"
+
+
+def wcmatch(name, pattern):
+    """Подмножество wcmatch AutoLISP: * ? # @ (регистр уже приведён)."""
+    rx = []
+    for ch in pattern:
+        if ch == "*":
+            rx.append(".*")
+        elif ch == "?":
+            rx.append(".")
+        elif ch == "#":
+            rx.append("[0-9]")
+        elif ch == "@":
+            rx.append("[^\\W\\d_]")
+        else:
+            rx.append(re.escape(ch))
+    return re.fullmatch("".join(rx), name, re.UNICODE) is not None
+
+
+def search_value(tile_text):
+    """extraction-layer-search-value: подсказка вырезается из любой позиции."""
+    if not isinstance(tile_text, str):
+        return ""
+    if tile_text == SEARCH_HINT:
+        return ""
+    p = tile_text.find(SEARCH_HINT)
+    if p >= 0:
+        return tile_text[:p] + tile_text[p + len(SEARCH_HINT):]
+    return tile_text
+
+
+def search_has_mask(text):
+    return isinstance(text, str) and any(c in text for c in "*?#@")
+
+
+def search_normalize(text):
+    if not isinstance(text, str) or text == "":
+        return ""
+    return text if search_has_mask(text) else "*" + text + "*"
+
+
+def search_match(name, pattern):
+    if not isinstance(name, str) or not isinstance(pattern, str) or pattern == "":
+        return True
+    norm = search_normalize(pattern)
+    if norm == "":
+        return True
+    return wcmatch(name.upper(), norm.upper())
+
+
+def search_apply(layers, pattern):
+    if not isinstance(pattern, str) or pattern == "":
+        return layers
+    return [x for x in layers if search_match(x, pattern)]
+
+
+def status_text(base_hint, keys, base_count, found_count, pattern):
+    """extraction-layer-status-text."""
+    if not isinstance(pattern, str) or pattern == "" or base_count <= 0:
+        return base_hint
+    if keys:
+        return "Фильтр %s: %d | найдено %d" % (filter_list_str(keys), base_count, found_count)
+    return "Найдено слоев: %d из %d" % (found_count, base_count)
+
+
+def filter_list_str(keys):
+    names = {"MY": "Мои", "FACADES": "Фасады", "VITRAZH": "Витражи", "WINDOWS": "Окна"}
+    return ", ".join(names.get(k, k) for k in keys)
+
+
+def scenario_6():
+    """Поиск слоя: маска, композиция с фильтрами, строка состояния."""
+    layers = ["Витраж КП50", "витраж КП45", "Фасад 1", "Фасад 2",
+              "Окно 3", "Стройплэкс_01", "0", "DEFPOINTS"]
+
+    # 1. Пустой запрос ничего не меняет — поведение до правки сохраняется
+    check("поиск: пустой запрос список не меняет",
+          search_apply(layers, "") == layers)
+    check("поиск: подсказка в поле = пустой запрос",
+          search_value(SEARCH_HINT) == "")
+    check("поиск: подсказка вырезается из любой позиции",
+          search_value("витр" + SEARCH_HINT) == "витр")
+
+    # 2. Запрос без маски = поиск подстроки, регистр не важен
+    check("поиск: без маски оборачивается в *текст*",
+          search_normalize("витр") == "*витр*")
+    check("поиск «витр» находит оба регистра",
+          search_apply(layers, "витр") == ["Витраж КП50", "витраж КП45"])
+    check("поиск «КП50» находит по середине имени",
+          search_apply(layers, "КП50") == ["Витраж КП50"])
+
+    # 3. Запрос с маской берётся как есть
+    check("поиск: маска не оборачивается",
+          search_normalize("Фасад*") == "Фасад*")
+    check("поиск «Фасад*» = только начинающиеся с Фасад",
+          search_apply(layers, "Фасад*") == ["Фасад 1", "Фасад 2"])
+    check("поиск «Фасад ?» — один любой символ",
+          search_apply(layers, "Фасад ?") == ["Фасад 1", "Фасад 2"])
+    check("поиск «Окно #» — цифра",
+          search_apply(layers, "Окно #") == ["Окно 3"])
+    check("поиск без совпадений даёт пустой список",
+          search_apply(layers, "неттакого") == [])
+
+    # 4. Композиция с групповыми фильтрами: поиск только сужает
+    filtered = ["Витраж КП50", "витраж КП45", "Фасад 1", "Фасад 2"]
+    found = search_apply(filtered, "фасад")
+    check("поиск сужает результат фильтра, а не расширяет",
+          found == ["Фасад 1", "Фасад 2"] and set(found) <= set(filtered))
+    check("поиск не возвращает слои вне фильтра",
+          "Стройплэкс_01" not in search_apply(filtered, "строй"))
+
+    # 5. Строка состояния
+    base = "Если слои не выбраны — поиск по всем слоям"
+    check("статус: пустой запрос — прежний текст",
+          status_text(base, None, 8, 8, "") == base)
+    check("статус: поиск без фильтра",
+          status_text(base, None, 8, 2, "витр") == "Найдено слоев: 2 из 8")
+    check("статус: поиск с фильтром",
+          status_text(base, ["MY"], 4, 2, "фасад") == "Фильтр Мои: 4 | найдено 2")
+    check("статус: сообщение об отсутствии фильтра имеет приоритет",
+          status_text("Групповой фильтр отсутствует", ["MY"], 0, 0, "витр")
+          == "Групповой фильтр отсутствует")
+
+    # 6. Кнопки действуют на видимые (решение по UI): «Выбрать все» после
+    #    поиска даёт ровно найденное
+    visible = search_apply(layers, "фасад")
+    check("«Выбрать все» при активном поиске = только найденные",
+          visible == ["Фасад 1", "Фасад 2"])
+
+
 def main():
     print("=== Тест логики фильтров слоёв (спецификация ТЗ) ===")
     scenario_1()
@@ -446,6 +582,7 @@ def main():
     scenario_3()
     scenario_4()
     scenario_5()
+    scenario_6()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[LAYER-FILTER-LOGIC][OK]")

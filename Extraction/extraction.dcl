@@ -106,26 +106,24 @@ extraction_dialog : dialog {
       width = 40;
       fixed_width = true;
 
-      : row {
-
-        : button {
-          key = "btn_select_all";
-          label = "Выбрать все";
-        }
-
-        : button {
-          key = "btn_clear_all";
-          label = "Снять выделение";
-        }
+      // Поле поиска на всю ширину панели — тот же уровень, что и поиск
+      // блоков (подсказка видна, пока поле пусто)
+      : edit_box {
+        key = "edt_layer_search";
+        alignment = left;
+        width = 38;
+        fixed_width = true;
+        edit_width = 38;
       }
 
       : list_box {
 
         key = "lst_layers";
 
+        alignment = left;
         width = 40;
         fixed_width = true;
-        height = 14;
+        height = 13;
 
         multiple_select = true;
       }
@@ -133,6 +131,31 @@ extraction_dialog : dialog {
       : text {
         key = "txt_layers_hint";
         label = "Если слои не выбраны — поиск по всем слоям";
+      }
+
+      // ------------------------------------------------------
+      // КНОПКИ ВЫБРАТЬ ВСЕ + СНЯТЬ ВЫДЕЛЕНИЕ — ниже строки
+      // состояния, на уровне кнопок блоков (Копия/Вставить/Имя).
+      // Суммарная ширина 19+19 = 38 = ширина list_box
+      // ------------------------------------------------------
+
+      : row {
+        fixed_width = true;
+        children_fixed_width = true;
+        alignment = left;
+        : button {
+          key = "btn_select_all";
+          label = "Выбрать все";
+          width = 19;
+          fixed_width = true;
+        }
+
+        : button {
+          key = "btn_clear_all";
+          label = "Снять выделение";
+          width = 19;
+          fixed_width = true;
+        }
       }
     }
 

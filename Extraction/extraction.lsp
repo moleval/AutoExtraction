@@ -151,6 +151,14 @@
 (setq *EXTRACTION-SELECTED-LAYERS* nil)
 (setq *EXTRACTION-SELECTED-INDICES* nil)
 
+;; Поиск слоя. Поведение один в один с поиском блока (blockrename):
+;; подсказка-плейсхолдер видна, пока поле пусто; срабатывание по Enter;
+;; запрос без символов маски превращается в поиск подстроки.
+(if (not (boundp '*EXTRACTION-LAYER-SEARCH-HINT*))
+  (setq *EXTRACTION-LAYER-SEARCH-HINT* "Поиск (по Enter):")
+)
+(setq *EXTRACTION-LAYER-SEARCH-PATTERN* "")
+
 ;; Активные фильтры слоев — список ключей (MY FACADES VITRAZH WINDOWS)
 (setq *EXTRACTION-LAYER-FILTERS* nil)
 
@@ -604,6 +612,117 @@
 
 
 ;; ============================================================
+;; ПОИСК СЛОЯ
+;; Зеркало поиска блока: подсказка-плейсхолдер, маска wcmatch,
+;; срабатывание по Enter. Поиск СУЖАЕТ результат групповых фильтров,
+;; а не подменяет его, и не меняет правило «слои не выбраны — все слои».
+;; ============================================================
+
+;; Значение поля без подсказки (вырезается из любой позиции:
+;; текст, набранный ДО подсказки, сохраняется)
+(defun extraction-layer-search-value ( / v p)
+  (setq v (get_tile "edt_layer_search"))
+  (if (= (type v) 'STR)
+    (progn
+      (cond
+        ((= v *EXTRACTION-LAYER-SEARCH-HINT*)
+         (setq v ""))
+        ((setq p (vl-string-search *EXTRACTION-LAYER-SEARCH-HINT* v))
+         (setq v (strcat
+                   (substr v 1 p)
+                   (substr v (+ p (strlen *EXTRACTION-LAYER-SEARCH-HINT*) 1)))))
+      )
+      v)
+    "")
+)
+
+;; Символы маски — те же, что у поиска блока
+(defun extraction-layer-search-has-mask-p (text)
+  (and
+    (= (type text) 'STR)
+    (or
+      (vl-string-search "*" text)
+      (vl-string-search "?" text)
+      (vl-string-search "#" text)
+      (vl-string-search "@" text))
+  )
+)
+
+;; Запрос без маски = поиск подстроки
+(defun extraction-layer-search-normalize (text)
+  (if (or (/= (type text) 'STR) (= text ""))
+    ""
+    (if (extraction-layer-search-has-mask-p text)
+      text
+      (strcat "*" text "*"))
+  )
+)
+
+(defun extraction-layer-search-match-p (name pattern / normalized)
+  (if (or (/= (type name) 'STR) (/= (type pattern) 'STR) (= pattern ""))
+    T
+    (progn
+      (setq normalized (extraction-layer-search-normalize pattern))
+      (if (= normalized "")
+        T
+        (wcmatch (strcase name) (strcase normalized)))
+    )
+  )
+)
+
+;; Отбор по запросу. Пустой запрос список не меняет.
+(defun extraction-layer-search-apply (layers / pattern)
+  (setq pattern *EXTRACTION-LAYER-SEARCH-PATTERN*)
+  (if (or (/= (type pattern) 'STR) (= pattern "") (not (listp layers)))
+    layers
+    (vl-remove-if-not
+      '(lambda (x) (extraction-layer-search-match-p x pattern))
+      layers)
+  )
+)
+
+;; Строка состояния: фильтры + результат поиска. Сообщение об отсутствии
+;; группового фильтра имеет приоритет — поиск дописывается только тогда,
+;; когда базовый список непустой.
+(defun extraction-layer-status-text (base-hint keys base-count found-count)
+  (if (or (/= (type *EXTRACTION-LAYER-SEARCH-PATTERN*) 'STR)
+          (= *EXTRACTION-LAYER-SEARCH-PATTERN* "")
+          (<= base-count 0))
+    base-hint
+    (if keys
+      (strcat "Фильтр " (extraction-layer-filter-list-str keys)
+              ": " (itoa base-count) " | найдено " (itoa found-count))
+      (strcat "Найдено слоев: " (itoa found-count) " из " (itoa base-count)))
+  )
+)
+
+;; Обработчик поля поиска. Выбор начинается заново: при смене запроса
+;; выделение сбрасывается (решение по UI, как у поиска блока).
+(defun extraction-layer-search-changed ( / v tile)
+  (if *extraction-updating-ui*
+    nil
+    (progn
+      (setq v    (extraction-layer-search-value)
+            tile (get_tile "edt_layer_search"))
+      ;; нормализуем текст поля: подсказка срезана; пусто = снова подсказка
+      (if (/= v tile)
+        (progn
+          (setq *extraction-updating-ui* T)
+          (set_tile "edt_layer_search"
+            (if (= v "") *EXTRACTION-LAYER-SEARCH-HINT* v))
+          (setq *extraction-updating-ui* nil)
+        )
+      )
+      (setq *EXTRACTION-LAYER-SEARCH-PATTERN* v)
+      (setq *EXTRACTION-SELECTED-LAYERS* nil)
+      (extraction-rebuild-layer-list)
+    )
+  )
+  T
+)
+
+
+;; ============================================================
 ;; ОБНОВЛЕНИЕ АКТИВНОСТИ КНОПОК ВЫБОРА
 ;; Защищено флагом *extraction-updating-ui*
 ;; ============================================================
@@ -629,7 +748,7 @@
 ;; Защищено флагом *extraction-updating-ui*
 ;; ============================================================
 
-(defun extraction-rebuild-layer-list ( / keys layers hint msg)
+(defun extraction-rebuild-layer-list ( / keys layers hint msg base-count)
 
   (setq *extraction-updating-ui* T)
 
@@ -673,6 +792,14 @@
 
   (setq *EXTRACTION-VISIBLE-LAYERS*
     (extraction-unique-ci *EXTRACTION-VISIBLE-LAYERS*))
+
+  ;; Поиск слоя сужает результат фильтров (а не заменяет его)
+  (setq base-count (length *EXTRACTION-VISIBLE-LAYERS*))
+  (setq *EXTRACTION-VISIBLE-LAYERS*
+    (extraction-layer-search-apply *EXTRACTION-VISIBLE-LAYERS*))
+  (setq hint
+    (extraction-layer-status-text
+      hint keys base-count (length *EXTRACTION-VISIBLE-LAYERS*)))
 
   (extraction-safe-fill-list "lst_layers" *EXTRACTION-VISIBLE-LAYERS*)
   (set_tile "lst_layers" "")
@@ -1497,6 +1624,10 @@
 
               (setq *extraction-updating-ui* nil)
 
+              ;; Поле поиска слоя: новое открытие окна — запрос пустой
+              (setq *EXTRACTION-LAYER-SEARCH-PATTERN* "")
+              (set_tile "edt_layer_search" *EXTRACTION-LAYER-SEARCH-HINT*)
+
               ;; --- Заполнение списка слоев и восстановление выбора ---
               (extraction-rebuild-layer-list)
 
@@ -1523,6 +1654,7 @@
               (action_tile "btn_cutline"  "(extraction-cutline)")
               (action_tile "btn_cutsheet" "(extraction-cutsheet)")
 
+              (action_tile "edt_layer_search"    "(extraction-layer-search-changed)")
               (action_tile "btn_select_all"      "(extraction-select-all-layers)")
               (action_tile "btn_clear_all"       "(extraction-clear-all-layers)")
               (action_tile "chk_filter_my"       "(extraction-layer-filter-changed)")
@@ -1712,7 +1844,7 @@
 )
 
 
-(princ "\nEXTRACTION.LSP загружен (ред. 3: фильтры слоёв Мои/Фасады/Витражи/Окна по групповым фильтрам AutoCAD).")
+(princ "\nEXTRACTION.LSP загружен (ред. 4: поиск слоя в панели Слои; фильтры Мои/Фасады/Витражи/Окна по групповым фильтрам AutoCAD).")
 
 ;; ============================================================
 ;; ЗАГЛУШКИ
