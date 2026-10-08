@@ -56,44 +56,61 @@ extraction_dialog : dialog {
 
   : row {
 
-    // Фильтры слоёв: прижаты друг к другу у левого края
-    : row {
+    // Колонка по ширине панели «Слои»
+    : column {
+      width = 40;
       fixed_width = true;
+      children_alignment = left;
       children_fixed_width = true;
-      alignment = left;
 
-      : toggle {
-        key = "chk_filter_my";
-        label = "Мои";
-      }
+      // Фильтры слоёв: вплотную друг к другу
+      : row {
+        fixed_width = true;
+        children_fixed_width = true;
+        alignment = left;
 
-      : toggle {
-        key = "chk_filter_facades";
-        label = "Фасады";
-      }
+        : toggle {
+          key = "chk_filter_my";
+          label = "Мои";
+        }
 
-      : toggle {
-        key = "chk_filter_vitrazh";
-        label = "Витражи";
-      }
+        : toggle {
+          key = "chk_filter_facades";
+          label = "Фасады";
+        }
 
-      : toggle {
-        key = "chk_filter_windows";
-        label = "Окна";
+        : toggle {
+          key = "chk_filter_vitrazh";
+          label = "Витражи";
+        }
+
+        : toggle {
+          key = "chk_filter_windows";
+          label = "Окна";
+        }
       }
     }
 
+
+    // Тот же отступ между колонками, что у панелей ниже
     : spacer {
-      // Гибкий отступ прижимает «Анонимные блоки» к правому краю
-      width = 1;
-      fixed_width = false;
+      width = 2;
     }
 
-    : toggle {
-      key = "chk_filter_anonymous";
-      label = "Анонимные блоки";
-      alignment = right;
+
+    // Колонка по ширине панели «Блоки»
+    : column {
+      width = 40;
       fixed_width = true;
+      children_alignment = left;
+      children_fixed_width = true;
+
+      : toggle {
+        key = "chk_filter_anonymous";
+        label = "Анонимные блоки";
+        alignment = left;
+        fixed_width = true;
+      }
     }
   }
 
