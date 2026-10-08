@@ -48,15 +48,13 @@ extraction_dialog : dialog {
       fixed_width = false;
     }
 
-    : column {
+    // Рамка с пустым заголовком: её заголовок занимает столько же
+    // по высоте, сколько заголовок «Раскрой», поэтому ряды кнопок
+    // встают на один уровень без подбора отступа
+    : boxed_column {
+      label = "";
       fixed_width = true;
       children_fixed_width = true;
-
-      // Опустить кнопки на высоту заголовка рамки «Раскрой»,
-      // чтобы они встали вровень с кнопками раскроя
-      : spacer {
-        height = 1;
-      }
 
       : row {
         fixed_width = true;
@@ -76,12 +74,17 @@ extraction_dialog : dialog {
           width = 4;
         }
       }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
     }
   }
 
 
   : spacer {
-    height = 0.3;
+    height = 0.1;
   }
 
 
@@ -165,7 +168,7 @@ extraction_dialog : dialog {
 
 
   : spacer {
-    height = 0.2;
+    height = 0.1;
   }
 
 
@@ -299,7 +302,7 @@ extraction_dialog : dialog {
 
 
   : spacer {
-    height = 0.5;
+    height = 0.1;
   }
 
 
@@ -386,7 +389,7 @@ extraction_dialog : dialog {
 
 
   : spacer {
-    height = 0.5;
+    height = 0.1;
   }
 
 
@@ -456,7 +459,7 @@ extraction_dialog : dialog {
 
 
   : spacer {
-    height = 0.5;
+    height = 0.1;
   }
 
 
