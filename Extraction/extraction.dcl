@@ -263,6 +263,7 @@ extraction_dialog : dialog {
         key = "lst_layers";
 
         height = 13;
+        fixed_height = true;
 
         multiple_select = true;
       }
@@ -302,6 +303,11 @@ extraction_dialog : dialog {
           label = "Снять выделение";
         }
       }
+
+      // Зазор под кнопками — как под «Раскрой хлыста»
+      : spacer {
+        height = 0.1;
+      }
     }
 
 
@@ -338,6 +344,7 @@ extraction_dialog : dialog {
       : list_box {
         key = "lst_blocks";
         height = 13;
+        fixed_height = true;
         multiple_select = false;
       }
 
@@ -366,6 +373,11 @@ extraction_dialog : dialog {
           key = "btn_block_rename";
           label = "Имя";
         }
+      }
+
+      // Зазор под кнопками — как под «Раскрой хлыста»
+      : spacer {
+        height = 0.1;
       }
     }
   }
