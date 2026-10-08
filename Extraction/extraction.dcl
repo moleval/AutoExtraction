@@ -10,32 +10,72 @@ extraction_dialog : dialog {
 
 
   // ==========================================================
-  // ЗАГОЛОВОК
+  // ЗАГОЛОВОК: РАСКРОЙ + НАСТРОЙКИ
   // ==========================================================
 
   : row {
+
+    // Блок раскроя уже ширины окна: справа должно остаться место
+    // на «Настройки» и «?»
+    : boxed_column {
+
+      label = "Раскрой";
+
+      width = 74;
+      fixed_width = true;
+
+      : row {
+        : button {
+          key = "btn_cutline";
+          label = "Раскрой хлыста";
+        }
+
+        : button {
+          key = "btn_cutsheet";
+          label = "Раскрой листа";
+        }
+      }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
+    }
+
     : spacer {
-      // Flexible spacer keeps settings and help at the right edge.
+      // Гибкий отступ держит «Настройки» и «?» у правого края
       width = 1;
       fixed_width = false;
     }
 
-    : row {
+    : column {
       fixed_width = true;
       children_fixed_width = true;
-    : button {
-      key = "btn_settings";
-      label = "Настройки";
-      fixed_width = true;
-      width = 12;
-    }
 
-    : button {
-      key = "btn_help";
-      label = "?";
-      fixed_width = true;
-      width = 4;
-    }
+      // Опустить кнопки на высоту заголовка рамки «Раскрой»,
+      // чтобы они встали вровень с кнопками раскроя
+      : spacer {
+        height = 1;
+      }
+
+      : row {
+        fixed_width = true;
+        children_fixed_width = true;
+
+        : button {
+          key = "btn_settings";
+          label = "Настройки";
+          fixed_width = true;
+          width = 12;
+        }
+
+        : button {
+          key = "btn_help";
+          label = "?";
+          fixed_width = true;
+          width = 4;
+        }
+      }
     }
   }
 
@@ -411,38 +451,6 @@ extraction_dialog : dialog {
       : spacer {
         height = 0.1;
       }
-    }
-  }
-
-
-  : spacer {
-    height = 0.5;
-  }
-
-
-  // ==========================================================
-  // РАСКРОЙ
-  // ==========================================================
-
-  : boxed_column {
-
-    label = "Раскрой";
-
-    : row {
-      : button {
-        key = "btn_cutline";
-        label = "Раскрой хлыста";
-      }
-
-      : button {
-        key = "btn_cutsheet";
-        label = "Раскрой листа";
-      }
-    }
-
-    // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
-    : spacer {
-      height = 0.1;
     }
   }
 
