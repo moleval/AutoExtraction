@@ -258,6 +258,12 @@ extraction_dialog : dialog {
         key = "edt_layer_search";
       }
 
+      //  вант над списком: DCL добавл€ет такой же ѕќ—Ћ≈ списка,
+      // поэтому без этого отступа зазор снизу на 15 px больше
+      : spacer {
+        height = 0.1;
+      }
+
       : list_box {
 
         key = "lst_layers";
@@ -339,6 +345,12 @@ extraction_dialog : dialog {
       // (подсказка в поле видна, пока оно пусто)
       : edit_box {
         key = "edt_block_search";
+      }
+
+      //  вант над списком: DCL добавл€ет такой же ѕќ—Ћ≈ списка,
+      // поэтому без этого отступа зазор снизу на 15 px больше
+      : spacer {
+        height = 0.1;
       }
 
       : list_box {
