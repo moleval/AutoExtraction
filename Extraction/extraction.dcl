@@ -57,7 +57,10 @@ extraction_dialog : dialog {
   : row {
 
     // Колонка по ширине панели «Слои»
-    : column {
+    // Рамка без заголовка: тот же отступ, что у панели ниже, поэтому
+    // чекбоксы встают ровно над полем поиска слоёв
+    : boxed_column {
+      label = "";
       width = 40;
       fixed_width = true;
       children_alignment = left;
@@ -98,8 +101,9 @@ extraction_dialog : dialog {
     }
 
 
-    // Колонка по ширине панели «Блоки»
-    : column {
+    // Колонка по ширине панели «Блоки» (рамка без заголовка — см. выше)
+    : boxed_column {
+      label = "";
       width = 40;
       fixed_width = true;
       children_alignment = left;
@@ -137,23 +141,17 @@ extraction_dialog : dialog {
       width = 40;
       fixed_width = true;
 
-      // Поле поиска на всю ширину панели — тот же уровень, что и поиск
-      // блоков (подсказка видна, пока поле пусто)
+      // Ширины НЕ задаются: каждый элемент заполняет ширину панели,
+      // поэтому их левые и правые края совпадают по построению
+      // (подсказка в поле видна, пока оно пусто)
       : edit_box {
         key = "edt_layer_search";
-        alignment = left;
-        width = 38;
-        fixed_width = true;
-        edit_width = 38;
       }
 
       : list_box {
 
         key = "lst_layers";
 
-        alignment = left;
-        width = 40;
-        fixed_width = true;
         height = 13;
 
         multiple_select = true;
@@ -167,25 +165,19 @@ extraction_dialog : dialog {
       // ------------------------------------------------------
       // КНОПКИ ВЫБРАТЬ ВСЕ + СНЯТЬ ВЫДЕЛЕНИЕ — ниже строки
       // состояния, на уровне кнопок блоков (Копия/Вставить/Имя).
-      // Суммарная ширина 19+19 = 38 = ширина list_box
+      // Ряд заполняет ширину панели, кнопки делят её поровну:
+      // правый край ряда совпадает с правым краем поля поиска.
       // ------------------------------------------------------
 
       : row {
-        fixed_width = true;
-        children_fixed_width = true;
-        alignment = left;
         : button {
           key = "btn_select_all";
           label = "Выбрать все";
-          width = 19;
-          fixed_width = true;
         }
 
         : button {
           key = "btn_clear_all";
           label = "Снять выделение";
-          width = 19;
-          fixed_width = true;
         }
       }
     }
@@ -210,64 +202,44 @@ extraction_dialog : dialog {
 
       width = 40;
       fixed_width = true;
-      children_alignment = left;
-      children_fixed_width = true;
 
-      // Поле поиска на всю ширину панели (подсказка видна, пока поле пусто)
+      // Ширины НЕ задаются: каждый элемент заполняет ширину панели,
+      // поэтому их левые и правые края совпадают по построению
+      // (подсказка в поле видна, пока оно пусто)
       : edit_box {
         key = "edt_block_search";
-        alignment = left;
-        width = 38;
-        fixed_width = true;
-        edit_width = 38;
       }
 
       : list_box {
         key = "lst_blocks";
-        alignment = left;
-        width = 40;
-        fixed_width = true;
         height = 13;
         multiple_select = false;
       }
 
-      // Поле нового имени на всю ширину панели (подсказка видна, пока поле пусто)
       : edit_box {
         key = "edt_block_rename";
-        alignment = left;
-        width = 38;
-        fixed_width = true;
-        edit_width = 38;
       }
 
       // ------------------------------------------------------
       // КНОПКИ КОПИЯ + ВСТАВИТЬ + ИМЯ
-      // Суммарная ширина 12+13+13 = 38 = ширина list_box
+      // Ряд заполняет ширину панели, кнопки делят её поровну:
+      // правый край ряда совпадает с правым краем поля поиска.
       // ------------------------------------------------------
 
       : row {
-        fixed_width = true;
-        children_fixed_width = true;
-        alignment = left;
         : button {
           key = "btn_block_copy";
           label = "Копия";
-          width = 12;
-          fixed_width = true;
         }
 
         : button {
           key = "btn_block_insert";
           label = "Вставить";
-          width = 13;
-          fixed_width = true;
         }
 
         : button {
           key = "btn_block_rename";
           label = "Имя";
-          width = 13;
-          fixed_width = true;
         }
       }
     }
