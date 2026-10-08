@@ -1102,6 +1102,9 @@ def check_summary_marks() -> list[str]:
         if "(defun n1-piece-rows (" not in text:
             errors.append("Extraction/cutline.lsp: перечень изделий не разбивается по маркам — "
                           "вернётся обозначение «первая +N», которое читается как имя марки")
+        if "(+ curx (* mkH 0.35)) (+ y0 (* barHeight 0.5))" not in text:
+            errors.append("Extraction/cutline.lsp: марка на детали не на одной базовой линии "
+                          "с длиной — подписи встанут на разных уровнях")
         if "(tu-fit-chars colMW th)" not in text:
             errors.append("Extraction/cutline.lsp: предел длины марки задан числом, а не "
                           "шириной колонки — свёртка снова наедет на соседнюю колонку")
