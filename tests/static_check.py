@@ -13,6 +13,9 @@
   6. Защита диагностики загрузки в reload.lsp: перехват загрузки tests/chkparens.lsp,
      проверка результата самообновления, встроенный поиск формы (резерв CHKLOAD).
   7. Баланс и лексика файлов tests/*.lsp (chkparens.lsp автозагружает RELOAD).
+  8. Спецформы AutoLISP во всех .lsp (включая reload.lsp): (if a b c d),
+     нечётный setq, кривой список аргументов defun/lambda. Такой дефект даёт
+     «синтаксическая ошибка» при нулевом балансе скобок и валит весь файл.
 
 Кодировка:
   - .lsp / .dcl — Windows-1251 (ANSI), fallback: utf-8
@@ -105,6 +108,15 @@ def dcl_files():
 def test_lisp_files():
     if TEST_DIR.exists():
         yield from sorted(TEST_DIR.glob("*.lsp"))
+
+
+def all_lisp_files():
+    """Весь LISP проекта: модули, tests/*.lsp и корневой reload.lsp."""
+    yield from lisp_files()
+    yield from test_lisp_files()
+    root_lisp = ROOT / "reload.lsp"
+    if root_lisp.exists():
+        yield root_lisp
 
 
 # ----------------------------------------------------------------------
@@ -612,6 +624,203 @@ def check_lisp_lexical(files=None) -> list[str]:
     return errors
 
 # ----------------------------------------------------------------------
+# Спецформы: «синтаксическая ошибка» при нулевом балансе скобок
+# ----------------------------------------------------------------------
+
+# Разбор .lsp в s-выражения. Нужен потому, что баланс скобок НЕ ловит
+# смещённую закрывающую скобку: (if c (progn ...)) (setq ...) (princ ...)
+# при «уехавшей» скобке превращается в (if c b1 b2 b3 b4) — баланс нулевой,
+# а AutoLISP при вычислении defun отвечает «синтаксическая ошибка» и
+# бросает загрузку ВСЕГО файла. Так были потеряны cutsheet.lsp (ред. 25)
+# и tests/chkparens.lsp.
+
+class LispParseError(Exception):
+    pass
+
+
+def lisp_tokens(text: str):
+    """Токены .lsp: ( ) ' строка атом. Комментарии отбрасываются."""
+    i, line, out = 0, 1, []
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c in " \t\r":
+            i += 1
+            continue
+        if c == ";":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c in "()'":
+            out.append((c, c, line))
+            i += 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                if text[j] == "\n":
+                    line += 1
+                j += 1
+            out.append(("str", text[i + 1:j], line))
+            i = j + 1
+            continue
+        j = i
+        while j < n and text[j] not in " \t\r\n()';\"":
+            j += 1
+        out.append(("atom", text[i:j], line))
+        i = j
+    return out
+
+
+def lisp_parse(text: str):
+    """Список верхнеуровневых форм. Узел: (kind, value, line)."""
+    toks = lisp_tokens(text)
+    pos = 0
+
+    def read():
+        nonlocal pos
+        if pos >= len(toks):
+            raise LispParseError("неожиданный конец файла")
+        kind, val, line = toks[pos]
+        pos += 1
+        if kind == "(":
+            items = []
+            while True:
+                if pos >= len(toks):
+                    raise LispParseError(f"форма со строки {line} не закрыта")
+                if toks[pos][0] == ")":
+                    pos += 1
+                    return ("list", items, line)
+                items.append(read())
+        if kind == ")":
+            raise LispParseError(f"лишняя ')' в строке {line}")
+        if kind == "'":
+            return ("quote", [read()], line)
+        return (kind, val, line)
+
+    forms = []
+    while pos < len(toks):
+        forms.append(read())
+    return forms
+
+
+def _is_number(token: str) -> bool:
+    try:
+        float(token)
+        return True
+    except ValueError:
+        return False
+
+
+def _check_arglist(items, head: str, line: int, out: list[str]) -> None:
+    """Список аргументов defun/lambda: только символы, без дублей и одна '/'."""
+    seen: list[str] = []
+    slashes = 0
+    for a in items:
+        if a[0] != "atom":
+            out.append(f"строка {a[2]}: {head} — аргумент не символ")
+            continue
+        name = a[1]
+        if name == "/":
+            slashes += 1
+            continue
+        if _is_number(name):
+            out.append(f"строка {a[2]}: {head} — аргумент-число '{name}'")
+        if name.upper() in ("T", "NIL", "PI"):
+            out.append(f"строка {a[2]}: {head} — зарезервированный аргумент '{name}'")
+        if name.upper() in seen:
+            out.append(f"строка {a[2]}: {head} — дубль аргумента '{name}'")
+        seen.append(name.upper())
+    if slashes > 1:
+        out.append(f"строка {line}: {head} — '/' в списке аргументов {slashes} раза")
+
+
+def _walk_special_forms(node, out: list[str]) -> None:
+    if node[0] == "quote":
+        for child in node[1]:
+            _walk_special_forms(child, out)
+        return
+    if node[0] != "list":
+        return
+    items, line = node[1], node[2]
+    head = items[0][1].upper() if items and items[0][0] == "atom" else None
+    args = items[1:]
+
+    if head in ("DEFUN", "DEFUN-Q"):
+        if len(items) < 3 or items[2][0] != "list":
+            out.append(f"строка {line}: {head} — нет списка аргументов")
+        else:
+            _check_arglist(items[2][1], head, line, out)
+    elif head == "LAMBDA":
+        if len(items) < 2 or items[1][0] != "list":
+            out.append(f"строка {line}: LAMBDA — нет списка аргументов")
+        else:
+            _check_arglist(items[1][1], "LAMBDA", line, out)
+    elif head == "IF":
+        if not 2 <= len(args) <= 3:
+            out.append(f"строка {line}: IF — аргументов {len(args)}, допустимо 2 или 3 "
+                       f"(лишние операторы после ветви else = смещённая ')')")
+    elif head == "SETQ":
+        if not args or len(args) % 2 != 0:
+            out.append(f"строка {line}: SETQ — аргументов {len(args)}, нужно чётное число")
+        for k in range(0, len(args) - 1, 2):
+            target = args[k]
+            if target[0] != "atom":
+                out.append(f"строка {target[2]}: SETQ — цель присваивания не символ")
+            elif _is_number(target[1]) or target[1].upper() in ("T", "NIL", "PI"):
+                out.append(f"строка {target[2]}: SETQ — недопустимая цель '{target[1]}'")
+    elif head == "FOREACH":
+        if len(args) < 2:
+            out.append(f"строка {line}: FOREACH — аргументов {len(args)}, нужно не меньше 2")
+        elif args[0][0] != "atom":
+            out.append(f"строка {line}: FOREACH — переменная цикла не символ")
+    elif head == "COND":
+        for clause in args:
+            if clause[0] != "list":
+                out.append(f"строка {clause[2]}: COND — ветвь не список")
+    elif head == "WHILE":
+        if not args:
+            out.append(f"строка {line}: WHILE — нет условия")
+
+    for child in items:
+        _walk_special_forms(child, out)
+
+
+def check_special_forms(files=None) -> list[str]:
+    """Спецформы AutoLISP, которые валят загрузку при нулевом балансе скобок.
+
+    AutoLISP проверяет тело функции при вычислении defun: (if a b c d),
+    нечётный setq, кривой список аргументов defun/lambda дают
+    «синтаксическая ошибка» и обрывают загрузку всего файла, а счётчик
+    скобок при этом сходится. Именно так молчали chkparens.lsp и
+    cutsheet.lsp ред. 25 (прогоны RELOAD №9-№13).
+    """
+    errors: list[str] = []
+    for path in (files if files is not None else all_lisp_files()):
+        rel = path.relative_to(ROOT)
+        try:
+            forms = lisp_parse(read_text(path))
+        except LispParseError as exc:
+            errors.append(f"{rel}: разбор форм: {exc}")
+            continue
+        found: list[str] = []
+        for form in forms:
+            _walk_special_forms(form, found)
+        for msg in found:
+            errors.append(f"{rel}: {msg} — AutoLISP: «синтаксическая ошибка» при загрузке")
+    return errors
+
+
+# ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
 
@@ -651,6 +860,17 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(test_lisp_files()))
 
+    # reload.lsp в корне: грузится первым, его дефект лишает всей диагностики
+    root_lisp = ROOT / "reload.lsp"
+    if root_lisp.exists():
+        ok, msg = check_balance_lex(root_lisp)
+        if not ok:
+            errors.append(f"{root_lisp.relative_to(ROOT)}: {msg}")
+        errors += check_lisp_lexical([root_lisp])
+
+    # Спецформы по всем .lsp сразу (модули + tests + reload.lsp)
+    errors += check_special_forms()
+
     if errors:
         print("ERRORS:")
         for e in errors:
@@ -662,7 +882,7 @@ def main() -> int:
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
-        f" / lexical / tests-balance / tests-lexical"
+        f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
     )
     print("RESULT: PASS")
     return 0

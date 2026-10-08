@@ -1632,16 +1632,15 @@
                  (if (= (type ae-settings-output-layer) 'SUBR)
                    (ae-settings-apply-vla-layer
                      (ex-safe-value ins-result)
-                     (ae-settings-output-layer 'CUTSHEET))
-                 (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
-               )
+                     (ae-settings-output-layer 'CUTSHEET)))
+                 (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2))))
                (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
              ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
              (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
              (setq finalRefs (if r (sslength r) 0))
              (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
                             ", после вставки: " (itoa finalRefs)
-                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)"))))))
+                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)")))))
          (pu-end "CUTSHEET:wrap:insert")))
       ok)))
 
