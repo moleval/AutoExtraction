@@ -531,6 +531,12 @@ extraction_dialog : dialog {
 
     alignment = centered;
 
+    // Высота кнопок — как у кнопок внутри панелей («Копия» и другие).
+    // Без этого ряд последний в колонке диалога, забирает остаток
+    // высоты и растягивает кнопки.
+    fixed_height = true;
+    children_fixed_height = true;
+
     : button {
       key = "btn_save";
       label = "Сохранить";
