@@ -697,6 +697,19 @@
   (setq v (if (and (listp r) (> (length r) 10)) (nth 10 r) nil))
   (if (and v (= (type v) 'STR) (/= v "")) v nil))
 
+;; Количество по каждой марке внутри группы: (марка . количество).
+;; Раньше хранился только список марок без количеств, и в сводке
+;; печаталось «первая +N» — это читалось как часть названия марки.
+(defun cs-marks-add (lst mk / f)
+  (if (null mk)
+    lst
+    (progn
+      (setq f (assoc mk lst))
+      (if f
+        (subst (cons mk (1+ (cdr f))) f lst)
+        (append lst (list (cons mk 1))))))
+)
+
 (defun cs-aggregate (records / acc r key f out mk)
   (setq acc '())
   (foreach r records
@@ -705,13 +718,11 @@
     (if f
       (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r)
                              (1+ (nth 6 f)) (+ (nth 7 f) (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))) (+ (nth 8 f) (nth 6 r))
-                             ;; 10-й элемент — марки группы, без повторов
-                             (if (and mk (not (member mk (nth 9 f))))
-                               (append (nth 9 f) (list mk))
-                               (nth 9 f))) f acc))
+                             ;; 10-й элемент — (марка . количество) по группе
+                             (cs-marks-add (nth 9 f) mk)) f acc))
       (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1
                             (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)
-                            (if mk (list mk) '())) acc))))
+                            (cs-marks-add '() mk)) acc))))
   (setq out (vl-sort acc '(lambda (a b)
     (cond
       ((> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) T)
@@ -1339,7 +1350,7 @@
     (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
                   mkH mk *CUTSHEET-MARK-COLOR*)))
 
-(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g hasMarks colMark colCnt colArea)
+(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g hasMarks colMark colCnt colArea gMarks gCnt marked rowsList rw m)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
@@ -1429,18 +1440,35 @@
       (setq sizeStr (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec))) "x"
                             (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
       (setq sizeStr (strcat (cs-itoa-safe (nth 5 rec)) "x" (cs-itoa-safe (nth 4 rec)))))
-    (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
-    (if hasMarks
-      (cs-draw-text (list (+ left (* width colMark)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                    (tu-marks-brief (if (> (length rec) 9) (nth 9 rec) nil)
-                                    (tu-fit-chars (* (- colCnt colMark) width)
-                                                  (* *CUTSHEET-TEXT-H* 0.82)))
-                    *CUTSHEET-VALUE-COLOR*))
-    (cs-draw-text (list (+ left (* width colCnt)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                  (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
-    (cs-draw-text (list (+ left (* width colArea)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                  (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
-    (setq y (- y rowH))
+    ;; Одна строка на марку. Изделия без марки — отдельной строкой с
+    ;; прочерком, чтобы было видно и сколько их.
+    (setq gMarks (if (> (length rec) 9) (nth 9 rec) '()))
+    (setq gCnt (nth 6 rec) marked 0)
+    (foreach m gMarks (setq marked (+ marked (cdr m))))
+    (setq rowsList '())
+    (if (null gMarks)
+      (setq rowsList (list (cons "" gCnt)))
+      (progn
+        (foreach m gMarks (setq rowsList (append rowsList (list m))))
+        (if (> (- gCnt marked) 0)
+          (setq rowsList (append rowsList (list (cons "-" (- gCnt marked))))))))
+    (foreach rw rowsList
+      (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
+      (if hasMarks
+        (cs-draw-text (list (+ left (* width colMark)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                      (tu-marks-brief (list (car rw))
+                                      (tu-fit-chars (* (- colCnt colMark) width)
+                                                    (* *CUTSHEET-TEXT-H* 0.82)))
+                      *CUTSHEET-VALUE-COLOR*))
+      (cs-draw-text (list (+ left (* width colCnt)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    (itoa (cdr rw)) *CUTSHEET-VALUE-COLOR*)
+      ;; площадь строки — доля площади группы по количеству
+      (cs-draw-text (list (+ left (* width colArea)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    (cs-format-num (if (> gCnt 0)
+                                     (* (nth 8 rec) (/ (float (cdr rw)) (float gCnt)))
+                                     0.0) 2)
+                    *CUTSHEET-VALUE-COLOR*)
+      (setq y (- y rowH)))
     (setq i (1+ i)))
   
   ;; Этап 2: секция неразмещенных - агрегировано по габариту:
@@ -2169,5 +2197,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 33: марка не наезжает на соседнюю колонку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 34: сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

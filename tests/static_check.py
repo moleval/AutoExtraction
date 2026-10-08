@@ -1099,6 +1099,9 @@ def check_summary_marks() -> list[str]:
             errors.append("Extraction/cutline.lsp: нет выдачи марок по длине для перечня")
         if "tu-marks-brief" not in text:
             errors.append("Extraction/cutline.lsp: марки не выводятся в перечень изделий")
+        if "(defun n1-piece-rows" not in text:
+            errors.append("Extraction/cutline.lsp: перечень изделий не разбивается по маркам — "
+                          "вернётся обозначение «первая +N», которое читается как имя марки")
         if "(tu-fit-chars colMW th)" not in text:
             errors.append("Extraction/cutline.lsp: предел длины марки задан числом, а не "
                           "шириной колонки — свёртка снова наедет на соседнюю колонку")
@@ -1154,6 +1157,9 @@ def check_summary_marks() -> list[str]:
         if "tu-fit-chars" not in text:
             errors.append("Extraction/cutsheet.lsp: предел длины марки задан числом, а не "
                           "шириной колонки")
+        if "(defun cs-marks-add" not in text:
+            errors.append("Extraction/cutsheet.lsp: количество по каждой марке не считается — "
+                          "сводку нечем разбить на строки")
         m = re.search(r"setq colMark ([\d.]+) colCnt \(if hasMarks ([\d.]+) ([\d.]+)\)"
                       r" colArea \(if hasMarks ([\d.]+) ([\d.]+)\)", text)
         if not m:

@@ -383,6 +383,62 @@ def scenario_fit():
           3.1 < 3.6)
 
 
+# ---------------------------------------------------------------
+# Порт: перечень изделий — одна строка на марку
+#   ХЛЫСТ  n1-piece-rows, ЛИСТ  разбивка в cs-draw-summary
+# ---------------------------------------------------------------
+
+def piece_rows(length, total, marks):
+    """Строки перечня для одной длины: (длина, количество, марка)."""
+    seen = []
+    for m in marks:
+        found = [p for p in seen if p[0] == m]
+        if found:
+            seen[seen.index(found[0])] = (m, found[0][1] + 1)
+        else:
+            seen.append((m, 1))
+    nomark = total - len(marks)
+    if not seen:
+        return [(length, total, "")]
+    out = [(length, c, m) for m, c in seen]
+    if nomark > 0:
+        out.append((length, nomark, "-"))
+    return out
+
+
+def scenario_rows():
+    """Разбивка перечня по маркам: точные количества, ничего не теряется."""
+    # реальный случай с карты: 950 мм, 9 шт, три марки
+    marks = (["ТБ-1 Рг3ср"] * 6) + (["ТБ-1 Рг3м"] * 2) + ["ТБ-1 Рг3"]
+    rows = piece_rows(950, 9, marks)
+    check("хлыст: три марки дают три строки", len(rows) == 3)
+    check("хлыст: сумма по строкам равна количеству изделий",
+          sum(r[1] for r in rows) == 9)
+    check("хлыст: количество по первой марке верное",
+          rows[0] == (950, 6, "ТБ-1 Рг3ср"))
+    check("хлыст: порядок марок — как при измерении",
+          [r[2] for r in rows] == ["ТБ-1 Рг3ср", "ТБ-1 Рг3м", "ТБ-1 Рг3"])
+    check("хлыст: обозначения «+N» в строках больше нет",
+          all("+" not in r[2] for r in rows))
+
+    # часть изделий без марки — отдельная строка с прочерком
+    rows = piece_rows(1100, 5, ["М-1", "М-1", "М-2"])
+    check("без марки: добавлена отдельная строка", len(rows) == 3)
+    check("без марки: строка помечена прочерком", rows[-1] == (1100, 2, "-"))
+    check("без марки: сумма сходится", sum(r[1] for r in rows) == 5)
+
+    # марок нет вовсе — одна строка, как раньше
+    rows = piece_rows(600, 4, [])
+    check("без марок вовсе: одна строка как раньше", rows == [(600, 4, "")])
+
+    # площадь строки листа — доля площади группы по количеству
+    group_area, group_cnt = 3.6, 9
+    parts = [6, 2, 1]
+    areas = [group_area * (c / group_cnt) for c in parts]
+    check("лист: сумма площадей строк равна площади группы",
+          abs(sum(areas) - group_area) < 1e-9)
+
+
 def main():
     print("=== Тест подписи марок в картах раскроя ===")
     scenario_attr()
@@ -392,6 +448,7 @@ def main():
     scenario_brief()
     scenario_overlap()
     scenario_fit()
+    scenario_rows()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[MARK-LOGIC][OK]")

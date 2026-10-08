@@ -914,6 +914,34 @@
   (if f (cdr f) '())
 )
 
+;; Строки перечня изделий: одна на каждую марку.
+;; Было «первая марка +N» — читалось как часть названия («ТБ-1 Рг3ср +2»),
+;; хотя означало «есть ещё 2 другие марки». Теперь длина с несколькими
+;; марками даёт несколько строк с точным количеством по каждой, а изделия
+;; без марки идут отдельной строкой с прочерком.
+;; Решатель уже отработал — это только таблица, раскрой не меняется.
+(defun n1-piece-rows (pieces / out rec len cnt marks seen m f nomark)
+  (setq out '())
+  (foreach rec pieces
+    (setq len (car rec) cnt (cadr rec) marks (n1-marks-for len) seen '())
+    ;; количество по каждой марке, порядок — как при измерении
+    (foreach m marks
+      (setq f (assoc m seen))
+      (if f
+        (setq seen (subst (cons m (1+ (cdr f))) f seen))
+        (setq seen (append seen (list (cons m 1))))))
+    (setq nomark (- cnt (length marks)))
+    (if (null seen)
+      (setq out (append out (list (list len cnt ""))))
+      (progn
+        (foreach f seen
+          (setq out (append out (list (list len (cdr f) (car f))))))
+        (if (> nomark 0)
+          (setq out (append out (list (list len nomark "-")))))))
+  )
+  out
+)
+
 ;; Копия очереди на отрисовку: повторный вызов отрисовки не остаётся без марок
 (defun n1-marks-begin ()
   (setq *n1-marks-q* *n1-marks*))
@@ -1744,7 +1772,7 @@
     left top x1 xM x2 x3 y bottom hasMarks
     num-bars stock-total-mm stock-total-m
     total-cnt total-product-mm total-product-m kpd rec oversized-cnt
-    num-piece-rows)
+    num-piece-rows rows)
   (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
         rowH (* barHeight 0.6) pad (* barHeight 0.6))
   ;; Колонка «Марка» появляется, только если марки есть. Ширина таблицы
@@ -1753,6 +1781,7 @@
   (setq hasMarks nil)
   (foreach rec pieces
     (if (n1-marks-for (car rec)) (setq hasMarks T)))
+  ;; порядок важен: ширины колонок зависят от hasMarks, а строки от марок
   ;; Ширины подобраны по заголовкам: «Изделие, мм» и «Сумма, м.п.» по
   ;; 11 знаков, «Кол-во, шт» 10. Прежнее 2.6 для «Кол-во» было тесным —
   ;; заголовок не помещался. Марка стоит ближе к «Изделие».
@@ -1774,7 +1803,10 @@
               (* 100.0 (/ (float total-product-mm) (float stock-total-mm))) 0.0))
 
   (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
-  (setq num-piece-rows (length pieces))
+  ;; перечень разбивается по маркам: строк становится больше, высота
+  ;; таблицы пересчитывается ниже по их фактическому числу
+  (setq rows (n1-piece-rows pieces))
+  (setq num-piece-rows (length rows))
 
   (setq left (car insPt) top (cadr insPt))
 
@@ -1811,12 +1843,12 @@
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
 
   (setq y (- y rowH))
-  (foreach rec pieces
+  (foreach rec rows
     (n1-draw-text (list x1 y) th (itoa (fix (car rec)))
                   (n1-get-color color-map (car rec)))
     (if hasMarks
       (n1-draw-text (list xM y) th
-                    (tu-marks-brief (n1-marks-for (car rec))
+                    (tu-marks-brief (list (caddr rec))
                                     (tu-fit-chars colMW th))
                     *NEST-COLOR-VALUE*))
     (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
@@ -2841,5 +2873,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 22: марка ближе к изделию и не наезжает на колонку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 23: перечень изделий — строка на каждую марку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
