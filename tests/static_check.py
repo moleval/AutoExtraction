@@ -890,12 +890,12 @@ def check_dialog_layers_section() -> list[str]:
     """
     pairs = [
         ("Extraction/cutline_filter.dcl", "Extraction/cutline.lsp",
-         "n1-layer-display-list"),
+         "n1-layer-display-list", "n1-layers-header-text"),
         ("Extraction/cutsheet_filter.dcl", "Extraction/cutsheet.lsp",
-         "cs-layer-display-list"),
+         "cs-layer-display-list", "cs-layers-header-text"),
     ]
     errors: list[str] = []
-    for dcl_rel, lsp_rel, display_fn in pairs:
+    for dcl_rel, lsp_rel, display_fn, header_fn in pairs:
         dcl, lsp = ROOT / dcl_rel, ROOT / lsp_rel
         if not dcl.exists() or not lsp.exists():
             continue
@@ -910,6 +910,21 @@ def check_dialog_layers_section() -> list[str]:
             errors.append(f"{lsp_rel}: нет функции показа слоёв {display_fn}")
         if f"({display_fn}" not in lsp_text.replace(f"(defun {display_fn}", ""):
             errors.append(f"{lsp_rel}: функция {display_fn} объявлена, но не вызывается")
+
+        # Динамический заголовок рамки: DCL грузится из ВРЕМЕННОЙ копии файла,
+        # её надо удалять на каждом выходе — иначе копии копятся в %TEMP%
+        # молча. Выходов на один больше, чем unload_dialog: сбой load_dialog
+        # происходит до того, как диалог загружен.
+        if "tu-dcl-with-label" in lsp_text:
+            cleanups = lsp_text.count("(tu-dcl-cleanup")
+            unloads = lsp_text.count("unload_dialog")
+            if cleanups < unloads + 1:
+                errors.append(
+                    f"{lsp_rel}: временная копия .dcl удаляется не на всех выходах "
+                    f"(tu-dcl-cleanup {cleanups}, unload_dialog {unloads}, "
+                    f"нужно минимум {unloads + 1})")
+            if f"({header_fn}" not in lsp_text.replace(f"(defun {header_fn}", ""):
+                errors.append(f"{lsp_rel}: заголовок рамки не вычисляется ({header_fn})")
     return errors
 
 

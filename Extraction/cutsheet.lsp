@@ -434,6 +434,37 @@
   )
 )
 
+
+;; «Фильтр Витражи» / «Фильтры Фасады, Окна» либо nil
+(defun cs-filter-header-str ( / keys s)
+  (setq s nil)
+  (if (and (cs-filter-name-str)
+           (= (type extraction-layer-filter-list-str) 'SUBR)
+           (boundp '*EXTRACTION-LAYER-FILTERS*))
+    (progn
+      (setq keys *EXTRACTION-LAYER-FILTERS*)
+      (setq s (extraction-layer-filter-list-str keys))
+      (setq s
+        (if (= s "")
+          nil
+          (strcat (if (= (length keys) 1) "Фильтр " "Фильтры ") s)))
+    )
+  )
+  s
+)
+
+;; Заголовок рамки: «Выбранные слои (Фильтр Витражи: 31 слой)»
+;; либо «Выбранные слои (3 слоя)» / «Выбранные слои (все слои)»
+(defun cs-layers-header-text (layers / n f)
+  (setq n (if (listp layers) (length layers) 0))
+  (setq f (cs-filter-header-str))
+  (cond
+    (f (strcat "Выбранные слои (" f ": " (itoa n) " " (tu-layer-word n) ")"))
+    ((<= n 0) "Выбранные слои (все слои)")
+    (T (strcat "Выбранные слои (" (itoa n) " " (tu-layer-word n) ")"))
+  )
+)
+
 ;; ================= DCL =================
 (defun cs-safe-set-tile (key val) (vl-catch-all-apply 'set_tile (list key val)))
 (defun cs-safe-mode-tile (key mode) (vl-catch-all-apply 'mode_tile (list key mode)))
@@ -464,14 +495,22 @@
   )
 )
 
-(defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result)
-  (setq dcl-file (findfile "cutsheet_filter.dcl"))
+(defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result dcl-src)
+  (setq dcl-src (findfile "cutsheet_filter.dcl"))
+  ;; Заголовок рамки «Выбранные слои» статичен в DCL — подменяется
+  ;; во временной копии файла; при неудаче берётся исходный файл
+  (setq dcl-file
+    (if dcl-src
+      (tu-dcl-with-label dcl-src "label = \"Выбранные слои"
+        (cs-layers-header-text *cs-effective-layers*))
+      nil))
   (if (null dcl-file)
     (progn (princ "\n[CUTSHEET] Не найден cutsheet_filter.dcl.") nil)
     (progn
       (setq dcl-id (load_dialog dcl-file))
       (if (< dcl-id 0)
-        (progn (princ "\n[CUTSHEET] Ошибка load_dialog.") nil)
+        (progn (princ "\n[CUTSHEET] Ошибка load_dialog.")
+               (tu-dcl-cleanup dcl-file dcl-src) nil)
         (progn
           (setq *cs-tmp-choice* 'ALL
                 *cs-tmp-sheet-w* defaultW
@@ -482,7 +521,8 @@
                 *cs-tmp-acad* defaultAcad
                 *cs-tmp-dyn-type* "")
           (if (not (new_dialog "cutsheet_filter_dialog" dcl-id))
-            (progn (vl-catch-all-apply 'unload_dialog (list dcl-id)) nil)
+            (progn (vl-catch-all-apply 'unload_dialog (list dcl-id))
+                   (tu-dcl-cleanup dcl-file dcl-src) nil)
             (progn
               (cs-safe-set-tile "txt_poly_count" (strcat (itoa polyCnt) " шт."))
               (cs-safe-set-tile "txt_dyn_count" (strcat (itoa dynCnt) " шт."))
@@ -532,6 +572,7 @@
               (action_tile "btn_cancel" "(done_dialog 0)")
               (setq result (start_dialog))
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
               (if (= result 1)
                 (list *cs-tmp-choice* *cs-tmp-sheet-w* *cs-tmp-sheet-h* *cs-tmp-kerf*
                       *cs-tmp-rotate* *cs-tmp-xls* *cs-tmp-acad* *cs-tmp-dyn-type*)
@@ -1961,5 +2002,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 26: раздел «Выбранные слои» в окне; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 27: заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

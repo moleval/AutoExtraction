@@ -270,3 +270,87 @@
     (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
 
+
+;; ------------------------------------------------------------
+;; DCL: динамический заголовок рамки
+;; Заголовок кластера (boxed_column) в DCL статичен: у кластера нет
+;; ключа, set_tile на него не действует. Чтобы показать в заголовке
+;; счётчик, файл диалога копируется во временный с заменой строки
+;; label. Любая неудача — возвращается ИСХОДНЫЙ файл: окно откроется
+;; как раньше, просто с обычным заголовком.
+;; ------------------------------------------------------------
+
+;; В заголовке DCL недопустимы кавычка и обратный слэш
+(defun tu-dcl-safe-label (s / out i ch)
+  (setq out "" i 1)
+  (if (= (type s) 'STR)
+    (repeat (strlen s)
+      (setq ch (substr s i 1))
+      (if (and (/= ch "\"") (/= ch "\\"))
+        (setq out (strcat out ch))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Копия .dcl, в которой первая строка с подстрокой anchor заменена
+;; заголовком new-label. Возвращает путь к копии либо исходный путь.
+(defun tu-dcl-with-label (src anchor new-label / tmp fin fout line done res)
+  (setq new-label (tu-dcl-safe-label new-label))
+  (setq done nil tmp nil)
+  (if (and (= (type src) 'STR)
+           (= (type anchor) 'STR)
+           (/= new-label "")
+           (findfile src))
+    (progn
+      (setq tmp (vl-filename-mktemp "ae_dcl" nil ".dcl"))
+      (setq fin (open src "r"))
+      (setq fout (if fin (open tmp "w")))
+      (if (and fin fout)
+        (progn
+          (while (setq line (read-line fin))
+            (if (and (not done) (vl-string-search anchor line))
+              (progn
+                (write-line (strcat "    label = \"" new-label "\";") fout)
+                (setq done T)
+              )
+              (write-line line fout)
+            )
+          )
+          (close fin)
+          (close fout)
+        )
+        (progn
+          (if fin (close fin))
+          (if fout (close fout))
+        )
+      )
+    )
+  )
+  (setq res (if done tmp src))
+  (if (and tmp (not done)) (vl-catch-all-apply 'vl-file-delete (list tmp)))
+  res
+)
+
+;; Удалить временную копию (исходный файл не трогает)
+(defun tu-dcl-cleanup (path src)
+  (if (and (= (type path) 'STR) (= (type src) 'STR) (/= path src))
+    (vl-catch-all-apply 'vl-file-delete (list path))
+  )
+  nil
+)
+
+;; Склонение слова «слой»: 1 слой, 2 слоя, 5 слоев, 11 слоев
+(defun tu-layer-word (n / n10 n100)
+  (if (not (numberp n)) (setq n 0))
+  (setq n (fix (abs n)))
+  (setq n100 (rem n 100) n10 (rem n 10))
+  (cond
+    ((and (>= n100 11) (<= n100 14)) "слоев")
+    ((= n10 1) "слой")
+    ((and (>= n10 2) (<= n10 4)) "слоя")
+    (T "слоев")
+  )
+)

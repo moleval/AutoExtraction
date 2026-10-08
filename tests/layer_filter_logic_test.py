@@ -624,6 +624,110 @@ def scenario_7():
     check("слои окна: CUTLINE и CUTSHEET дают одинаковый результат", same)
 
 
+# ---------------------------------------------------------------
+# Порт заголовка рамки «Выбранные слои»
+#   tu-layer-word / cs-layers-header-text / n1-layers-header-text
+# Заголовок кластера в DCL статичен, поэтому он подставляется во
+# временную копию .dcl до load_dialog.
+# ---------------------------------------------------------------
+
+def layer_word(n):
+    """tu-layer-word: 1 слой, 2 слоя, 5 слоев, 11 слоев."""
+    if not isinstance(n, int):
+        n = 0
+    n = abs(int(n))
+    n100, n10 = n % 100, n % 10
+    if 11 <= n100 <= 14:
+        return "слоев"
+    if n10 == 1:
+        return "слой"
+    if 2 <= n10 <= 4:
+        return "слоя"
+    return "слоев"
+
+
+def filter_header_str(filter_keys):
+    """cs-filter-header-str: «Фильтр Витражи» / «Фильтры Фасады, Окна»."""
+    if not filter_keys:
+        return None
+    s = filter_list_str(filter_keys)
+    if s == "":
+        return None
+    return ("Фильтр " if len(filter_keys) == 1 else "Фильтры ") + s
+
+
+def layers_header_text(layers, filter_keys):
+    """cs-layers-header-text / n1-layers-header-text — общий контракт."""
+    n = len(layers) if layers else 0
+    f = filter_header_str(filter_keys)
+    if f:
+        return "Выбранные слои (%s: %d %s)" % (f, n, layer_word(n))
+    if n <= 0:
+        return "Выбранные слои (все слои)"
+    return "Выбранные слои (%d %s)" % (n, layer_word(n))
+
+
+def dcl_safe_label(s):
+    """tu-dcl-safe-label: кавычка и обратный слэш в заголовке недопустимы."""
+    return "".join(c for c in s if c not in '"\\')
+
+
+def dcl_substitute(lines, anchor, new_label):
+    """tu-dcl-with-label: заменяется ПЕРВАЯ строка с anchor."""
+    out, done = [], False
+    for line in lines:
+        if not done and anchor in line:
+            out.append('    label = "%s";' % dcl_safe_label(new_label))
+            done = True
+        else:
+            out.append(line)
+    return out, done
+
+
+def scenario_8():
+    """Заголовок рамки «Выбранные слои» в обоих окнах раскроя."""
+    # Склонение
+    for n, word in [(1, "слой"), (2, "слоя"), (4, "слоя"), (5, "слоев"),
+                    (11, "слоев"), (12, "слоев"), (14, "слоев"), (21, "слой"),
+                    (22, "слоя"), (31, "слой"), (100, "слоев"), (0, "слоев")]:
+        check("заголовок: %d -> %s" % (n, word), layer_word(n) == word)
+
+    # Примеры из задания пользователя
+    check("заголовок: пример «Фильтр Витражи: 31 слой»",
+          layers_header_text(["l%d" % i for i in range(31)], ["VITRAZH"])
+          == "Выбранные слои (Фильтр Витражи: 31 слой)")
+    check("заголовок: пример «3 слоя»",
+          layers_header_text(["a", "b", "c"], None)
+          == "Выбранные слои (3 слоя)")
+    check("заголовок: слоёв нет — «все слои»",
+          layers_header_text([], None) == "Выбранные слои (все слои)")
+    check("заголовок: несколько фильтров — «Фильтры»",
+          layers_header_text(["a", "b"], ["FACADES", "WINDOWS"])
+          == "Выбранные слои (Фильтры Фасады, Окна: 2 слоя)")
+
+    # Подстановка в DCL
+    dcl = ['  : boxed_column {', '    label = "Выбранные слои";',
+           '    : list_box {', '      key = "lst_layers";', '    }', '  }']
+    out, done = dcl_substitute(dcl, 'label = "Выбранные слои',
+                               "Выбранные слои (3 слоя)")
+    check("подстановка: заголовок заменён", done)
+    check("подстановка: строка заголовка верна",
+          out[1] == '    label = "Выбранные слои (3 слоя)";')
+    check("подстановка: остальные строки не тронуты",
+          out[0] == dcl[0] and out[2:] == dcl[2:])
+    out2, done2 = dcl_substitute(dcl, 'label = "Нет такого', "X")
+    check("подстановка: якоря нет — файл не меняется",
+          (not done2) and out2 == dcl)
+    check("подстановка: кавычки и слэш вырезаются",
+          dcl_safe_label('Слои ("тест"\\)') == "Слои (тест)")
+
+    # Окна дают одинаковый заголовок на одном входе
+    cases = [(["a"], None), ([], None), (["a", "b"], ["MY"])]
+    check("заголовок: CUTLINE и CUTSHEET совпадают",
+          all(layers_header_text(l, f) == layers_header_text(l, f)
+              for l, f in cases))
+
+
 def main():
     print("=== Тест логики фильтров слоёв (спецификация ТЗ) ===")
     scenario_1()
@@ -633,6 +737,7 @@ def main():
     scenario_5()
     scenario_6()
     scenario_7()
+    scenario_8()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[LAYER-FILTER-LOGIC][OK]")

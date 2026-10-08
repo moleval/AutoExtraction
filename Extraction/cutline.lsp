@@ -1100,6 +1100,36 @@
   )
 )
 
+;; «Фильтр Витражи» / «Фильтры Фасады, Окна» либо nil
+(defun n1-filter-header-str ( / keys s)
+  (setq s nil)
+  (if (and (n1-filter-name-str)
+           (= (type extraction-layer-filter-list-str) 'SUBR)
+           (boundp '*EXTRACTION-LAYER-FILTERS*))
+    (progn
+      (setq keys *EXTRACTION-LAYER-FILTERS*)
+      (setq s (extraction-layer-filter-list-str keys))
+      (setq s
+        (if (= s "")
+          nil
+          (strcat (if (= (length keys) 1) "Фильтр " "Фильтры ") s)))
+    )
+  )
+  s
+)
+
+;; Заголовок рамки: «Выбранные слои (Фильтр Витражи: 31 слой)»
+;; либо «Выбранные слои (3 слоя)» / «Выбранные слои (все слои)»
+(defun n1-layers-header-text (layers / n f)
+  (setq n (if (listp layers) (length layers) 0))
+  (setq f (n1-filter-header-str))
+  (cond
+    (f (strcat "Выбранные слои (" f ": " (itoa n) " " (tu-layer-word n) ")"))
+    ((<= n 0) "Выбранные слои (все слои)")
+    (T (strcat "Выбранные слои (" (itoa n) " " (tu-layer-word n) ")"))
+  )
+)
+
 ;; Безопасные обертки
 (defun n1-safe-set-tile (key value)
   (vl-catch-all-apply 'set_tile (list key value))
@@ -1215,9 +1245,17 @@
                           layers
                           default-xls default-acad
                           / dcl-file dcl-id result
-                            all-cnt base-layers tn)
+                            all-cnt base-layers tn dcl-src)
 
-  (setq dcl-file (findfile "cutline_filter.dcl"))
+  (setq dcl-src (findfile "cutline_filter.dcl"))
+
+  ;; Заголовок рамки «Выбранные слои» статичен в DCL — подменяется
+  ;; во временной копии файла; при неудаче берётся исходный файл
+  (setq dcl-file
+    (if dcl-src
+      (tu-dcl-with-label dcl-src "label = \"Выбранные слои"
+        (n1-layers-header-text (n1-layer-display-list layers)))
+      nil))
 
   (if (null dcl-file)
     (progn
@@ -1229,6 +1267,7 @@
       (if (< dcl-id 0)
         (progn
           (princ "\n[cutline] ошибка load_dialog")
+          (tu-dcl-cleanup dcl-file dcl-src)
           nil
         )
         (progn
@@ -1243,6 +1282,7 @@
             (progn
               (princ "\n[cutline] ошибка new_dialog")
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
               nil
             )
             (progn
@@ -1364,6 +1404,7 @@
               (setq result (start_dialog))
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
 
               (if (= result 1)
                 (list
@@ -2707,5 +2748,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 17: в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 18: заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
