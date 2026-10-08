@@ -1753,9 +1753,12 @@
   (setq hasMarks nil)
   (foreach rec pieces
     (if (n1-marks-for (car rec)) (setq hasMarks T)))
+  ;; Ширины подобраны по заголовкам: «Изделие, мм» и «Сумма, м.п.» по
+  ;; 11 знаков, «Кол-во, шт» 10. Прежнее 2.6 для «Кол-во» было тесным —
+  ;; заголовок не помещался. Марка стоит ближе к «Изделие».
   (if hasMarks
-    (setq col1W (* barHeight 3.6) colMW (* barHeight 3.4)
-          col2W (* barHeight 2.6) col3W (* barHeight 3.4))
+    (setq col1W (* barHeight 3.1) colMW (* barHeight 3.95)
+          col2W (* barHeight 2.85) col3W (* barHeight 3.1))
     (setq col1W (* barHeight 5.0) colMW 0.0
           col2W (* barHeight 3.5) col3W (* barHeight 4.5)))
   (setq tableW (+ col1W colMW col2W col3W (* pad 2)))
@@ -1813,7 +1816,8 @@
                   (n1-get-color color-map (car rec)))
     (if hasMarks
       (n1-draw-text (list xM y) th
-                    (tu-marks-brief (n1-marks-for (car rec)) 14)
+                    (tu-marks-brief (n1-marks-for (car rec))
+                                    (tu-fit-chars colMW th))
                     *NEST-COLOR-VALUE*))
     (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
     (n1-draw-text (list x3 y) th
@@ -2837,5 +2841,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 21: подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 22: марка ближе к изделию и не наезжает на колонку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

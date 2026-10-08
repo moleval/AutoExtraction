@@ -1099,6 +1099,9 @@ def check_summary_marks() -> list[str]:
             errors.append("Extraction/cutline.lsp: нет выдачи марок по длине для перечня")
         if "tu-marks-brief" not in text:
             errors.append("Extraction/cutline.lsp: марки не выводятся в перечень изделий")
+        if "(tu-fit-chars colMW th)" not in text:
+            errors.append("Extraction/cutline.lsp: предел длины марки задан числом, а не "
+                          "шириной колонки — свёртка снова наедет на соседнюю колонку")
         with_marks = re.search(
             r"col1W \(\* barHeight ([\d.]+)\) colMW \(\* barHeight ([\d.]+)\)\s*"
             r"col2W \(\* barHeight ([\d.]+)\) col3W \(\* barHeight ([\d.]+)\)", text, re.S)
@@ -1148,6 +1151,9 @@ def check_summary_marks() -> list[str]:
         text = read_text(cs)
         if "tu-marks-brief" not in text:
             errors.append("Extraction/cutsheet.lsp: марки не выводятся в перечень изделий")
+        if "tu-fit-chars" not in text:
+            errors.append("Extraction/cutsheet.lsp: предел длины марки задан числом, а не "
+                          "шириной колонки")
         m = re.search(r"setq colMark ([\d.]+) colCnt \(if hasMarks ([\d.]+) ([\d.]+)\)"
                       r" colArea \(if hasMarks ([\d.]+) ([\d.]+)\)", text)
         if not m:

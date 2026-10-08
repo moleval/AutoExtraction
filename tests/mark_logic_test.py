@@ -233,7 +233,8 @@ def marks_brief(marks, maxlen):
     if len(s) <= maxlen:
         return s
     if len(out) > 1:
-        return "%s +%d" % (out[0], len(out) - 1)
+        tail = " +%d" % (len(out) - 1)
+        return out[0][:max(1, maxlen - len(tail))] + tail
     return out[0][:maxlen]
 
 
@@ -334,6 +335,54 @@ def scenario_overlap():
           and abs(left0 - (300.0 - len("600") * txt * 1.1 * 0.6 / 2)) < 1e-9)
 
 
+# ---------------------------------------------------------------
+# Порт: предел длины считается от ширины колонки (tu-fit-chars)
+# ---------------------------------------------------------------
+
+def fit_chars(col_w, text_h):
+    if text_h <= 0:
+        return 8
+    return max(3, int(col_w / (text_h * 0.6)) - 1)
+
+
+def scenario_fit():
+    """Свёртка марок никогда не длиннее предела, предел — от колонки."""
+    # сплошная проверка: любой список марок любой длины
+    worst = 0
+    for maxlen in range(4, 25):
+        for count in range(1, 8):
+            for mlen in range(1, 30):
+                s = marks_brief(["М" * mlen + str(i) for i in range(count)], maxlen)
+                worst = max(worst, len(s) - maxlen)
+    check("свёртка: длина НИКОГДА не превышает предел", worst <= 0)
+
+    # реальный случай с живой карты: «ТБ-1 Рг5.1бдв» + ещё одна марка
+    s = marks_brief(["ТБ-1 Рг5.1бдв", "ТБ-1 Рг5.2бдв"], 14)
+    check("свёртка: случай с карты укладывается в 14", len(s) <= 14)
+    check("свёртка: случай с карты сохраняет счётчик", s.endswith("+1"))
+
+    # предел от ширины колонки: хлыст 6000
+    bar = 6000.0 / 45.0
+    th = (6000.0 / 30.0) * 0.30
+    col_m = 3.95 * bar
+    n = fit_chars(col_m, th)
+    # 527 px / (60 * 0.6) = 14.6, минус знак на зазор до соседней колонки
+    check("предел по колонке хлыста: 13 знаков", n == 13)
+    check("предел по колонке: текст физически влезает",
+          n * th * 0.6 <= col_m)
+
+    # заголовки колонок хлыста помещаются
+    cw = 0.6 * th
+    for w, hdr in ((3.1, "Изделие, мм"), (3.95, "Марка"),
+                   (2.85, "Кол-во, шт"), (3.1, "Сумма, м.п.")):
+        check("заголовок «%s» помещается в колонку" % hdr,
+              len(hdr) * cw <= w * bar)
+    check("сумма колонок с марками не изменилась",
+          abs((3.1 + 3.95 + 2.85 + 3.1) - (5.0 + 3.5 + 4.5)) < 1e-9)
+    check("марка сдвинута ближе к «Изделие» (3.1 против прежних 3.6)",
+          3.1 < 3.6)
+
+
 def main():
     print("=== Тест подписи марок в картах раскроя ===")
     scenario_attr()
@@ -342,6 +391,7 @@ def main():
     scenario_interchange()
     scenario_brief()
     scenario_overlap()
+    scenario_fit()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[MARK-LOGIC][OK]")

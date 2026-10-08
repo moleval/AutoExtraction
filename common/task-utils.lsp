@@ -394,7 +394,7 @@
 
 ;; Краткая строка марок для колонки таблицы. Длинный список не
 ;; растягивает колонку: вместо перечисления даётся «первая +N».
-(defun tu-marks-brief (marks maxlen / out s n)
+(defun tu-marks-brief (marks maxlen / out s n tail)
   (setq out '())
   (if (listp marks)
     (foreach m marks
@@ -410,8 +410,25 @@
         (progn
           (setq n (1- (length out)))
           (if (> n 0)
-            (strcat (car out) " +" (itoa n))
+            ;; ВАЖНО: хвост « +N» входит в предел. Без обрезки первой
+            ;; марки свёртка выходила ДЛИННЕЕ колонки и наезжала на
+            ;; соседнюю — «ТБ-1 Рг5.1бдв +1» рядом с «2» читалось «+12».
+            (progn
+              (setq tail (strcat " +" (itoa n)))
+              (strcat (substr (car out) 1 (max 1 (- maxlen (strlen tail))))
+                      tail))
             (substr (car out) 1 maxlen))))))
+)
+
+;; Сколько символов влезает в колонку шириной colW при высоте текста
+;; textH. Ширина знака в шрифтах карты около 0.6 высоты; один знак
+;; оставляем на зазор до соседней колонки.
+(defun tu-fit-chars (colW textH / n)
+  (if (or (not (numberp colW)) (not (numberp textH)) (<= textH 0.0))
+    8
+    (progn
+      (setq n (1- (fix (/ colW (* textH 0.6)))))
+      (if (< n 3) 3 n)))
 )
 
 ;; Марка объекта: только у вставок блоков, у прочих типов nil

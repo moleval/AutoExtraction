@@ -1432,7 +1432,9 @@
     (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
     (if hasMarks
       (cs-draw-text (list (+ left (* width colMark)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                    (tu-marks-brief (if (> (length rec) 9) (nth 9 rec) nil) 16)
+                    (tu-marks-brief (if (> (length rec) 9) (nth 9 rec) nil)
+                                    (tu-fit-chars (* (- colCnt colMark) width)
+                                                  (* *CUTSHEET-TEXT-H* 0.82)))
                     *CUTSHEET-VALUE-COLOR*))
     (cs-draw-text (list (+ left (* width colCnt)) y) (* *CUTSHEET-TEXT-H* 0.82)
                   (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
@@ -2167,5 +2169,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 32: подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 33: марка не наезжает на соседнюю колонку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
