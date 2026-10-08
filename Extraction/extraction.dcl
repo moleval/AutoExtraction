@@ -54,7 +54,7 @@ extraction_dialog : dialog {
   : row {
 
   : spacer {
-    width = 0.6;
+    width = 0.3;
     fixed_width = true;
   }
 
@@ -589,7 +589,7 @@ extraction_dialog : dialog {
   }
 
   : spacer {
-    width = 0.6;
+    width = 0.3;
     fixed_width = true;
   }
 
