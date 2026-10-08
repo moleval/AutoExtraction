@@ -47,6 +47,12 @@ settings_dialog : dialog {
       edit_width = 62;
     }
 
+    : edit_box {
+      key = "edt_frame_allowance";
+      label = "Заполнение: припуск на раму, мм:";
+      edit_width = 62;
+    }
+
     : text {
       label = "* — любое количество символов; ? — один символ; маски объединяются по ИЛИ.";
     }

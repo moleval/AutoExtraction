@@ -97,6 +97,10 @@
     )
   )
 
+  ;; Припуск на раму — только у ЗАПОЛНЕНИЯ, у прочих задач поле пустое
+  (ae-settings-ui-set "edt_frame_allowance"
+    (if (eq task 'ZAPOLNENIE) (itoa (ae-settings-frame-allowance)) ""))
+
   (if (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))
     (ae-settings-ui-set "edt_table_layer"
       (ae-settings-output task "output.table.layer" "CURRENT"))
@@ -127,6 +131,7 @@
   (mode_tile "edt_poly_layers" (if (eq task 'CLADDING) 0 1))
   (mode_tile "edt_block_layers" (if (eq task 'CLADDING) 0 1))
   (mode_tile "edt_block_names" (if (eq task 'CLADDING) 0 1))
+  (mode_tile "edt_frame_allowance" (if (eq task 'ZAPOLNENIE) 0 1))
   (mode_tile "edt_table_layer"
     (if (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE)) 0 1))
   (mode_tile "edt_block_template" (if (member task '(CUTLINE CUTSHEET)) 0 1))
@@ -211,6 +216,20 @@
      (setq values (ae-settings-split-list (get_tile "edt_blocks")))
      (if (null values) (setq ok nil)
        (ae-settings-set-list section "input.block" values))
+     ;; Припуск: целое неотрицательное. Мусор или минус — отказ
+     ;; сохранения, иначе заготовка окажется меньше проёма.
+     (if (eq task 'ZAPOLNENIE)
+       (progn
+         (setq values (ae-settings-trim (get_tile "edt_frame_allowance")))
+         (if (and (= (type values) 'STR)
+                  (/= values "")
+                  (= values (itoa (atoi values)))
+                  (>= (atoi values) 0))
+           (ae-settings-set section "input.frame.allowance" values)
+           (progn
+             (setq ok nil)
+             (alert "[AutoExtraction][SETTINGS][VALIDATION] Припуск на раму: нужно целое число не меньше нуля."))))
+     )
      (if (member task '(FASONKA SUBSYSTEM VITRAZH ZAPOLNENIE))
        (ae-settings-set section "output.table.layer"
          (ae-settings-trim (get_tile "edt_table_layer")))
