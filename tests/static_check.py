@@ -928,6 +928,43 @@ def check_dialog_layers_section() -> list[str]:
     return errors
 
 
+def check_dcl_gap_prototypes() -> list[str]:
+    """Отступы окна диспетчера задаются ТОЛЬКО прототипами.
+
+    В DCL нет переменных, поэтому единым источником служат прототипы
+    тайлов (ae_gap_v / ae_gap_h / ae_margin), объявленные один раз и
+    подставляемые в окно ссылкой. Если кто-то вернёт в тело окна сырой
+    «: spacer { height = ...; }», раскладка снова начнёт разъезжаться по
+    месту, а менять её придётся в двух десятках мест.
+    """
+    path = ROOT / "Extraction/extraction.dcl"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    errors: list[str] = []
+
+    protos = {"ae_gap_v": "height", "ae_gap_h": "width", "ae_margin": "width"}
+    for name, dim in protos.items():
+        decl = re.search(r"^" + name + r"\s*:\s*spacer\s*\{(.*?)\}", text, re.S | re.M)
+        if not decl:
+            errors.append(f"extraction.dcl: нет прототипа отступа {name}")
+            continue
+        if not re.search(dim + r"\s*=\s*[\d.]+\s*;", decl.group(1)):
+            errors.append(f"extraction.dcl: прототип {name} не задаёт {dim}")
+        refs = len(re.findall(r"^\s*" + name + r";\s*$", text, re.M))
+        if refs == 0:
+            errors.append(f"extraction.dcl: прототип {name} объявлен, но не используется")
+
+    marker = "extraction_dialog : dialog {"
+    if marker in text:
+        body = text[text.index(marker):]
+        raw = len(re.findall(r":\s*spacer\s*\{", body))
+        if raw:
+            errors.append(f"extraction.dcl: в теле окна {raw} сырых отступов «: spacer {{…}}» — "
+                          "отступы задаются только прототипами ae_gap_v / ae_gap_h / ae_margin")
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -981,6 +1018,7 @@ def main() -> int:
     errors += check_reload_version_line()
     errors += check_defun_duplicates_in_file()
     errors += check_dialog_layers_section()
+    errors += check_dcl_gap_prototypes()
 
     if errors:
         print("ERRORS:")
@@ -994,7 +1032,7 @@ def main() -> int:
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
-        f" / reload-version-line / defun-dup-in-file / dialog-layers"
+        f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
     )
     print("RESULT: PASS")
     return 0
