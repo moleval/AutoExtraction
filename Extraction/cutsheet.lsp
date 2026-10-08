@@ -305,7 +305,7 @@
 (defun cs-layer-ok-p (layer layers)
   (if (or (null layers) (= (length layers) 0)) T (su-layer-match-any layer layers)))
 
-(defun cs-build-filter-ss (layers / ss out i ent typ lay)
+(defun cs-build-filter-ss (layers / ss out i ent typ lay masks filtered)
   (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
     (setq layers (ae-settings-task-layers 'CUTSHEET)))
   ;; Для раздела «Выбранные слои»: показываем именно то, по чему
@@ -325,11 +325,21 @@
       (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers) (not (su-map-entity-p ent)))
         (ssadd ent out))
       (setq i (1+ i))))
+  ;; ВНИМАНИЕ: su-filter-ss-by-block-name-masks возвращает nil, если под
+  ;; маску не подошёл НИ ОДИН объект. Без этой проверки следующий
+  ;; (sslength out) падал с «неверный тип аргумента: lselsetp nil» —
+  ;; задача обрывалась вместо понятного сообщения.
   (if (= (type ae-settings-task-blocks) 'SUBR)
-    (setq out
-      (su-filter-ss-by-block-name-masks
-        out (ae-settings-task-blocks 'CUTSHEET))))
-  (if (> (sslength out) 0) out nil))
+    (progn
+      (setq masks (ae-settings-task-blocks 'CUTSHEET))
+      (setq filtered (su-filter-ss-by-block-name-masks out masks))
+      (if (null filtered)
+        (progn
+          (princ "\n[CUTSHEET][GUARD] Под маску блоков задачи не подошёл ни один объект.")
+          (princ "\n  Проверьте Настройки -> Раскрой листа -> Блоки (маски через ;).")
+          (setq out nil))
+        (setq out filtered))))
+  (if (and out (> (sslength out) 0)) out nil))
 
 ;; ================= ЗАПИСЬ ЧАСТЕЙ =================
 ;; ================= ВАЛИДАЦИЯ ГЕОМЕТРИИ (V4) =================
@@ -2128,5 +2138,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 29: блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 30: блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

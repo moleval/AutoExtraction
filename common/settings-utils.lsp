@@ -255,7 +255,11 @@
 
   (ae-settings-ensure-list "task.ZAPOLNENIE" "input.layer"
     '("Заполнение" "Стекло" "Обозначение ст-т"))
-  (ae-settings-ensure-list "task.ZAPOLNENIE" "input.block" '("*"))
+  ;; Блоки заполнения: умолчание ловит «Заполнение», «Стекло», «Сэндвич»
+  ;; в любом регистре и с любым окончанием. Этот же список служит
+  ;; признаком блока заполнения в раскрое листа (припуск на раму).
+  (ae-settings-ensure-list "task.ZAPOLNENIE" "input.block"
+    '("*аполнение*" "*текл*" "*эндвич*"))
   ;; Припуск на раму, мм. Прибавляется к размеру «в свету» и даёт размер
   ;; заготовки. Используют ЗАПОЛНЕНИЕ (отчёт) и CUTSHEET (раскрой листа).
   (ae-settings-ensure-value "task.ZAPOLNENIE" "input.frame.allowance" "26")
@@ -416,7 +420,7 @@
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'VITRAZH "output.table.layer" "CURRENT")))
     ((= section "task.ZAPOLNENIE")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("Заполнение" "Стекло" "Обозначение ст-т")))
-     (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*")))
+     (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*аполнение*" "*текл*" "*эндвич*")))
      (ae-settings-write-entry f "input.frame.allowance"
        (itoa (ae-settings-frame-allowance)))
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'ZAPOLNENIE "output.table.layer" "CURRENT")))
