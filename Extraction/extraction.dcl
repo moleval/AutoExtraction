@@ -249,67 +249,7 @@ extraction_dialog : dialog {
 
 
   // ==========================================================
-  // СРЕДНИЙ РЯД: РЕЖИМ ОТЧЕТА | ВЫВОД
-  // ==========================================================
-
-  : row {
-
-    : boxed_radio_column {
-
-      label = "Режим отчета";
-
-      width = 40;
-      fixed_width = true;
-
-      : radio_button {
-        key = "rb_detail";
-        label = "Подробный";
-      }
-
-      : radio_button {
-        key = "rb_summary";
-        label = "Краткий";
-      }
-    }
-
-
-    : spacer {
-      width = 2;
-    }
-
-
-    : boxed_column {
-
-      label = "Вывод";
-
-      width = 40;
-      fixed_width = true;
-
-      : toggle {
-        key = "chk_xls";
-        label = ".xls";
-      }
-
-      : toggle {
-        key = "chk_txt";
-        label = ".txt";
-      }
-
-      : toggle {
-        key = "chk_acad";
-        label = "AutoCAD";
-      }
-    }
-  }
-
-
-  : spacer {
-    height = 0.5;
-  }
-
-
-  // ==========================================================
-  // НИЖНИЙ РЯД: ЗАДАЧИ | СЛОИ ПОДСИСТЕМЫ
+  // СРЕДНИЙ РЯД: ЗАДАЧИ | СЛОИ ПОДСИСТЕМЫ
   // ==========================================================
 
   : row {
@@ -375,6 +315,66 @@ extraction_dialog : dialog {
       : toggle {
         key = "chk_subsystem_3";
         label = "Подсистема оцинкованная";
+      }
+    }
+  }
+
+
+  : spacer {
+    height = 0.5;
+  }
+
+
+  // ==========================================================
+  // НИЖНИЙ РЯД: РЕЖИМ ОТЧЕТА | ВЫВОД
+  // ==========================================================
+
+  : row {
+
+    : boxed_radio_column {
+
+      label = "Режим отчета";
+
+      width = 40;
+      fixed_width = true;
+
+      : radio_button {
+        key = "rb_detail";
+        label = "Подробный";
+      }
+
+      : radio_button {
+        key = "rb_summary";
+        label = "Краткий";
+      }
+    }
+
+
+    : spacer {
+      width = 2;
+    }
+
+
+    : boxed_column {
+
+      label = "Вывод";
+
+      width = 40;
+      fixed_width = true;
+
+      : toggle {
+        key = "chk_xls";
+        label = ".xls";
+      }
+
+      : toggle {
+        key = "chk_txt";
+        label = ".txt";
+      }
+
+      : toggle {
+        key = "chk_acad";
+        label = "AutoCAD";
       }
     }
   }
