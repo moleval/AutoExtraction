@@ -45,6 +45,8 @@
 (setq *CUTSHEET-KPD-COLOR* 1)
 (setq *CUTSHEET-WASTE-COLOR* 8)
 (setq *CUTSHEET-PART-TEXT-COLOR* 2)
+;; Марка элемента (атрибут МАРКА динамического блока) в углу детали
+(setq *CUTSHEET-MARK-COLOR* 7)
 (setq *CUTSHEET-TEXT-COLOR* 7)
 (setq *CUTSHEET-FRAME-LAYER* "Невидимые")
 (setq *CUTSHEET-FRAME-PAD-LEFT* 200.0)
@@ -311,7 +313,9 @@
         (T
           (setq type (if arc "Полилиния (дуги)" "Полилиния"))
           (setq nominal (strcat (cs-itoa-safe (car wh)) "x" (cs-itoa-safe (cadr wh))))
-          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent))))))
+          ;; 11-й элемент — марка; у полилинии её нет, но арность
+          ;; записей должна совпадать с блоками
+          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent nil))))))
 
 (defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH area nominal source)
   ;; V4: отказ всегда с причиной в *cs-reject-reason*.
@@ -345,7 +349,9 @@
         (T
           (setq area (/ (* w h) 1000000.0))
           (setq nominal (strcat (cs-itoa-safe w) "x" (cs-itoa-safe h)))
-          (list id "DYN" layer typName w h area nominal source ent))))))
+          ;; 11-й элемент — марка из атрибута блока (nil, если нет)
+          (list id "DYN" layer typName w h area nominal source ent
+                (tu-entity-mark ent)))))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
   (setq out '() i 0 id 0 *cs-rejects* '())
@@ -584,6 +590,11 @@
 
 (defun cs-part-label (r)
   (strcat (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r))))
+
+;; Марка детали либо nil. Длина записи проверяется: старые записи короче.
+(defun cs-part-mark (r / v)
+  (setq v (if (and (listp r) (> (length r) 10)) (nth 10 r) nil))
+  (if (and v (= (type v) 'STR) (/= v "")) v nil))
 
 (defun cs-aggregate (records / acc r key f out)
   (setq acc '())
@@ -1179,7 +1190,7 @@
                 (cs-itoa-safe sheetW) *CUTSHEET-VALUE-COLOR*))
 
 ;; ОТРИСОВКА ИЗДЕЛИЯ: Заливка SOLID + Обводка + Подпись
-(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col)
+(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col mk mkH)
   (setq r (car pl)
         x (+ x0 (cadr pl))
         y (+ y0 (caddr pl))
@@ -1195,7 +1206,18 @@
   (if (> (* w h) *CUTSHEET-MIN-TEXT-AREA*)
     (cs-draw-text-center (list (+ x (* w 0.5)) (+ y (* h 0.53)))
                          (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
-                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*)))
+                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
+  ;; 4. Марка элемента — в левом нижнем углу детали. Рисуется только
+  ;; если реально помещается: подпись не должна вылезать за деталь.
+  (setq mk (cs-part-mark r))
+  (if mk
+    (progn
+      (setq mkH (min (* *CUTSHEET-TEXT-H* 0.55) (* 0.085 (min w h))))
+      (if (and (> mkH 1.0)
+               (> w (* (strlen mk) mkH 0.8))
+               (> h (* mkH 3.0)))
+        (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
+                      mkH mk *CUTSHEET-MARK-COLOR*)))))
 
 (defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
@@ -2002,5 +2024,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 27: заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 28: марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)

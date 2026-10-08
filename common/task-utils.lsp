@@ -354,3 +354,55 @@
     (T "слоев")
   )
 )
+
+
+;; ------------------------------------------------------------
+;; МАРКА ЭЛЕМЕНТА (атрибут вставки блока)
+;; Тег сравнивается без учёта регистра и пробелов по краям.
+;; Любая ошибка ActiveX гасится: отсутствие марки — это nil, а не сбой
+;; задачи. Карта раскроя не должна падать из-за подписи.
+;; ------------------------------------------------------------
+
+;; Имя атрибута с маркой. Меняется здесь, если в чертежах другой тег.
+(if (not (boundp '*AE-MARK-ATTR*))
+  (setq *AE-MARK-ATTR* "МАРКА")
+)
+
+;; Значение атрибута блока по тегу либо nil
+(defun tu-block-attr (obj tag / attrs a tagname value result)
+  (setq result nil)
+  (setq attrs (vl-catch-all-apply 'vlax-invoke (list obj 'GetAttributes)))
+  (if (or (vl-catch-all-error-p attrs) (not (listp attrs)))
+    nil
+    (progn
+      (foreach a attrs
+        (if (null result)
+          (progn
+            (setq tagname (vl-catch-all-apply 'vla-get-TagString (list a)))
+            (if (and (not (vl-catch-all-error-p tagname))
+                     (= (type tagname) 'STR)
+                     (= (strcase (vl-string-trim " \t" tagname)) (strcase tag)))
+              (progn
+                (setq value (vl-catch-all-apply 'vla-get-TextString (list a)))
+                (if (and (not (vl-catch-all-error-p value))
+                         (= (type value) 'STR))
+                  (setq value (vl-string-trim " \t" value))
+                  (setq value nil))
+                (if (and value (/= value "")) (setq result value)))))))
+      result))
+)
+
+;; Марка объекта: только у вставок блоков, у прочих типов nil
+(defun tu-entity-mark (ent / ed obj v)
+  (setq v nil)
+  (if (and ent (= (type ent) 'ENAME))
+    (progn
+      (setq ed (vl-catch-all-apply 'entget (list ent)))
+      (if (and (not (vl-catch-all-error-p ed))
+               (= (cdr (assoc 0 ed)) "INSERT"))
+        (progn
+          (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+          (if (not (vl-catch-all-error-p obj))
+            (setq v (tu-block-attr obj *AE-MARK-ATTR*)))))))
+  v
+)
