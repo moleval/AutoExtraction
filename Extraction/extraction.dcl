@@ -14,11 +14,6 @@ extraction_dialog : dialog {
   // ==========================================================
 
   : row {
-    : text {
-      label = "Настройка задачи";
-      alignment = left;
-    }
-
     : spacer {
       // Flexible spacer keeps settings and help at the right edge.
       width = 1;
@@ -92,6 +87,11 @@ extraction_dialog : dialog {
           label = "Окна";
         }
       }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
     }
 
 
@@ -114,6 +114,11 @@ extraction_dialog : dialog {
         label = "Анонимные блоки";
         alignment = left;
         fixed_width = true;
+      }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
       }
     }
   }
@@ -166,7 +171,7 @@ extraction_dialog : dialog {
       // («Введите новое имя»), оно выше текста статуса на свою рамку.
       // Без этого отступа кнопки слоёв стоят чуть выше кнопок блоков.
       : spacer {
-        height = 0.25;
+        height = 0.1;
       }
 
       // ------------------------------------------------------
@@ -295,6 +300,11 @@ extraction_dialog : dialog {
         key = "rb_task_zapolnenie";
         label = "Заполнение";
       }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
     }
 
 
@@ -325,6 +335,11 @@ extraction_dialog : dialog {
       : toggle {
         key = "chk_subsystem_3";
         label = "Подсистема оцинкованная";
+      }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
       }
     }
   }
@@ -357,6 +372,11 @@ extraction_dialog : dialog {
         key = "rb_summary";
         label = "Краткий";
       }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
     }
 
 
@@ -386,6 +406,11 @@ extraction_dialog : dialog {
         key = "chk_acad";
         label = "AutoCAD";
       }
+
+      // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+      : spacer {
+        height = 0.1;
+      }
     }
   }
 
@@ -399,18 +424,25 @@ extraction_dialog : dialog {
   // РАСКРОЙ
   // ==========================================================
 
-  : boxed_row {
+  : boxed_column {
 
     label = "Раскрой";
 
-    : button {
-      key = "btn_cutline";
-      label = "Раскрой хлыста";
+    : row {
+      : button {
+        key = "btn_cutline";
+        label = "Раскрой хлыста";
+      }
+
+      : button {
+        key = "btn_cutsheet";
+        label = "Раскрой листа";
+      }
     }
 
-    : button {
-      key = "btn_cutsheet";
-      label = "Раскрой листа";
+    // Нижний отступ как у панели «Блоки» под кнопкой «Копия»
+    : spacer {
+      height = 0.1;
     }
   }
 
