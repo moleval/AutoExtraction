@@ -55,31 +55,45 @@ extraction_dialog : dialog {
   // ==========================================================
 
   : row {
-    alignment = left;
 
-    : toggle {
-      key = "chk_filter_my";
-      label = "Мои";
+    // Фильтры слоёв: прижаты друг к другу у левого края
+    : row {
+      fixed_width = true;
+      children_fixed_width = true;
+      alignment = left;
+
+      : toggle {
+        key = "chk_filter_my";
+        label = "Мои";
+      }
+
+      : toggle {
+        key = "chk_filter_facades";
+        label = "Фасады";
+      }
+
+      : toggle {
+        key = "chk_filter_vitrazh";
+        label = "Витражи";
+      }
+
+      : toggle {
+        key = "chk_filter_windows";
+        label = "Окна";
+      }
     }
 
-    : toggle {
-      key = "chk_filter_facades";
-      label = "Фасады";
-    }
-
-    : toggle {
-      key = "chk_filter_vitrazh";
-      label = "Витражи";
-    }
-
-    : toggle {
-      key = "chk_filter_windows";
-      label = "Окна";
+    : spacer {
+      // Гибкий отступ прижимает «Анонимные блоки» к правому краю
+      width = 1;
+      fixed_width = false;
     }
 
     : toggle {
       key = "chk_filter_anonymous";
       label = "Анонимные блоки";
+      alignment = right;
+      fixed_width = true;
     }
   }
 
