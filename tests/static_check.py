@@ -1083,6 +1083,56 @@ def check_fill_allowance() -> list[str]:
     return errors
 
 
+def check_summary_marks() -> list[str]:
+    """Колонка «Марка» в перечне изделий не меняет геометрию отчётов.
+
+    Главный инвариант: сумма ширин колонок с маркой равна сумме без
+    марки. Иначе таблица раскроя хлыстов поедет по ширине, а её
+    положение на карте согласовано с остальной раскладкой.
+    """
+    errors: list[str] = []
+
+    cl = ROOT / "Extraction/cutline.lsp"
+    if cl.exists():
+        text = read_text(cl)
+        if "(defun n1-marks-for" not in text:
+            errors.append("Extraction/cutline.lsp: нет выдачи марок по длине для перечня")
+        if "tu-marks-brief" not in text:
+            errors.append("Extraction/cutline.lsp: марки не выводятся в перечень изделий")
+        with_marks = re.search(
+            r"col1W \(\* barHeight ([\d.]+)\) colMW \(\* barHeight ([\d.]+)\)\s*"
+            r"col2W \(\* barHeight ([\d.]+)\) col3W \(\* barHeight ([\d.]+)\)", text, re.S)
+        without = re.search(
+            r"col1W \(\* barHeight ([\d.]+)\) colMW 0\.0\s*"
+            r"col2W \(\* barHeight ([\d.]+)\) col3W \(\* barHeight ([\d.]+)\)", text, re.S)
+        if not with_marks or not without:
+            errors.append("Extraction/cutline.lsp: не разобраны ширины колонок перечня")
+        else:
+            a = sum(float(x) for x in with_marks.groups())
+            b = sum(float(x) for x in without.groups())
+            if abs(a - b) > 1e-9:
+                errors.append(f"Extraction/cutline.lsp: ширина таблицы меняется от колонки "
+                              f"«Марка» ({a} против {b}) — геометрия отчёта поедет")
+
+    cs = ROOT / "Extraction/cutsheet.lsp"
+    if cs.exists():
+        text = read_text(cs)
+        if "tu-marks-brief" not in text:
+            errors.append("Extraction/cutsheet.lsp: марки не выводятся в перечень изделий")
+        m = re.search(r"setq colMark ([\d.]+) colCnt \(if hasMarks ([\d.]+) ([\d.]+)\)"
+                      r" colArea \(if hasMarks ([\d.]+) ([\d.]+)\)", text)
+        if not m:
+            errors.append("Extraction/cutsheet.lsp: не разобраны позиции колонок сводки")
+        else:
+            mark, cnt_m, cnt_n, area_m, area_n = (float(x) for x in m.groups())
+            if not (0.0 < mark < cnt_m < area_m < 1.0):
+                errors.append("Extraction/cutsheet.lsp: колонки сводки с маркой идут не по порядку")
+            if not (cnt_n < cnt_m and area_n < area_m):
+                errors.append("Extraction/cutsheet.lsp: колонки без марки должны быть левее, "
+                              "иначе место под «Марку» не освобождается")
+    return errors
+
+
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
@@ -1139,6 +1189,7 @@ def main() -> int:
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
     errors += check_fill_allowance()
+    errors += check_summary_marks()
 
     if errors:
         print("ERRORS:")
@@ -1153,7 +1204,7 @@ def main() -> int:
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
-        f" / mark-labels / fill-allowance"
+        f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")
     return 0

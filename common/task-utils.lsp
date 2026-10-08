@@ -392,6 +392,28 @@
       result))
 )
 
+;; Краткая строка марок для колонки таблицы. Длинный список не
+;; растягивает колонку: вместо перечисления даётся «первая +N».
+(defun tu-marks-brief (marks maxlen / out s n)
+  (setq out '())
+  (if (listp marks)
+    (foreach m marks
+      (if (and (= (type m) 'STR) (/= m "") (not (member m out)))
+        (setq out (append out (list m))))))
+  (if (null out)
+    ""
+    (progn
+      (setq s "")
+      (foreach m out (setq s (if (= s "") m (strcat s ", " m))))
+      (if (<= (strlen s) maxlen)
+        s
+        (progn
+          (setq n (1- (length out)))
+          (if (> n 0)
+            (strcat (car out) " +" (itoa n))
+            (substr (car out) 1 maxlen))))))
+)
+
 ;; Марка объекта: только у вставок блоков, у прочих типов nil
 (defun tu-entity-mark (ent / ed obj v)
   (setq v nil)

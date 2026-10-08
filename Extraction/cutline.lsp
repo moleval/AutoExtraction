@@ -907,6 +907,13 @@
         (setq *n1-marks* (cons (cons k (list mk)) *n1-marks*)))))
   mk)
 
+;; Марки деталей данной длины — для перечня изделий. Берутся из
+;; мастер-списка, который при отрисовке не расходуется.
+(defun n1-marks-for (len / f)
+  (setq f (assoc (n1-mark-key len) *n1-marks*))
+  (if f (cdr f) '())
+)
+
 ;; Копия очереди на отрисовку: повторный вызов отрисовки не остаётся без марок
 (defun n1-marks-begin ()
   (setq *n1-marks-q* *n1-marks*))
@@ -1726,15 +1733,25 @@
 ;; Сводная таблица раскроя
 ;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
-    barHeight th rowH pad col1W col2W col3W tableW tableH
-    left top x1 x2 x3 y bottom
+    barHeight th rowH pad col1W colMW col2W col3W tableW tableH
+    left top x1 xM x2 x3 y bottom hasMarks
     num-bars stock-total-mm stock-total-m
     total-cnt total-product-mm total-product-m kpd rec oversized-cnt
     num-piece-rows)
   (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
-        rowH (* barHeight 0.6) pad (* barHeight 0.6)
-        col1W (* barHeight 5.0) col2W (* barHeight 3.5) col3W (* barHeight 4.5))
-  (setq tableW (+ col1W col2W col3W (* pad 2)))
+        rowH (* barHeight 0.6) pad (* barHeight 0.6))
+  ;; Колонка «Марка» появляется, только если марки есть. Ширина таблицы
+  ;; при этом НЕ меняется: сумма колонок та же (13.0 долей barHeight),
+  ;; просто перераспределена.
+  (setq hasMarks nil)
+  (foreach rec pieces
+    (if (n1-marks-for (car rec)) (setq hasMarks T)))
+  (if hasMarks
+    (setq col1W (* barHeight 3.6) colMW (* barHeight 3.4)
+          col2W (* barHeight 2.6) col3W (* barHeight 3.4))
+    (setq col1W (* barHeight 5.0) colMW 0.0
+          col2W (* barHeight 3.5) col3W (* barHeight 4.5)))
+  (setq tableW (+ col1W colMW col2W col3W (* pad 2)))
   (setq num-bars (length bars) stock-total-mm (* num-bars stock)
         stock-total-m (/ stock-total-mm 1000.0))
   (setq total-cnt 0 total-product-mm 0.0)
@@ -1755,7 +1772,10 @@
                   (* (+ 9.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
 
   (setq bottom (- top tableH))
-  (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
+  (setq x1 (+ left pad)
+        xM (+ left pad col1W)
+        x2 (+ left pad col1W colMW)
+        x3 (+ left pad col1W colMW col2W))
 
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
@@ -1775,6 +1795,8 @@
 
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Изделие, мм" *NEST-COLOR-HEADER*)
+  (if hasMarks
+    (n1-draw-text (list xM y) th "Марка" *NEST-COLOR-HEADER*))
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
 
@@ -1782,6 +1804,10 @@
   (foreach rec pieces
     (n1-draw-text (list x1 y) th (itoa (fix (car rec)))
                   (n1-get-color color-map (car rec)))
+    (if hasMarks
+      (n1-draw-text (list xM y) th
+                    (tu-marks-brief (n1-marks-for (car rec)) 14)
+                    *NEST-COLOR-VALUE*))
     (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
     (n1-draw-text (list x3 y) th
                   (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-VALUE*)
@@ -2804,5 +2830,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 19: марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 20: марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)
