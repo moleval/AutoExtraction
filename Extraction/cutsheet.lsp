@@ -386,11 +386,11 @@
         (T
           (setq type (if arc "ѕолилини€ (дуги)" "ѕолилини€"))
           (setq nominal (strcat (cs-itoa-safe (car wh)) "x" (cs-itoa-safe (cadr wh))))
-          ;; 11-й элемент Ч марка; у полилинии еЄ нет, но арность
-          ;; записей должна совпадать с блоками
-          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent nil))))))
+          ;; 11-й элемент Ч марка (у полилинии еЄ нет), 12-й Ч тип дл€ отчЄтов;
+          ;; арность записей должна совпадать с блоками
+          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent nil type))))))
 
-(defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH
+(defun cs-block-record (ent id / obj ed layer props typName visName wh w h pW pH
                                  area nominal source fill allow mk)
   ;; V4: отказ всегда с причиной в *cs-reject-reason*.
   (setq ed (entget ent) layer (cdr (assoc 8 ed))
@@ -401,6 +401,8 @@
       (setq *cs-reject-reason* "ActiveX объекта недоступен") nil)
     (T
       (setq props (cs-block-all-props obj) typName (cs-get-dyn-type-name ent))
+      ;; “ип дл€ отчЄтов: до подмены маркой у блоков «јѕќЋЌ≈Ќ»я (см. ниже).
+      (setq visName typName)
       (setq fill (cs-fill-block-p ent (cs-fill-masks)))
       (if fill
         ;; «јѕќЋЌ≈Ќ»≈: только Ђв светуї + припуск. ќтката на BoundingBox
@@ -450,9 +452,10 @@
         (T
           (setq area (/ (* w h) 1000000.0))
           (setq nominal (strcat (cs-itoa-safe w) "x" (cs-itoa-safe h)))
-          ;; 11-й элемент Ч марка из атрибута блока (nil, если нет)
+          ;; 11-й элемент Ч марка из атрибута блока (nil, если нет),
+          ;; 12-й Ч тип дл€ отчЄтов: видимость блока без подмены маркой
           (list id "DYN" layer typName w h area nominal source ent
-                (tu-entity-mark ent)))))))
+                (tu-entity-mark ent) visName))))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
   (setq out '() i 0 id 0 *cs-rejects* '() *cs-fill-count* 0)
@@ -697,6 +700,16 @@
   (setq v (if (and (listp r) (> (length r) 10)) (nth 10 r) nil))
   (if (and v (= (type v) 'STR) (/= v "")) v nil))
 
+;; “ип дл€ отчЄтов Ч состо€ние видимости блока. ¬ (nth 3) у блоков «јѕќЋЌ≈Ќ»я
+;; марка: cs-block-record подмен€ет тип маркой, и без отдельного пол€ колонки
+;; Ђ“ипї и Ђћаркаї в XLS и CSV печатали одно и то же.
+(defun cs-part-type (r)
+  (if (and (listp r) (> (length r) 11) (nth 11 r)) (nth 11 r) (nth 3 r)))
+
+;; “о же дл€ записи группы: тип дл€ отчЄтов лежит 11-м элементом (cs-aggregate).
+(defun cs-group-type (g)
+  (if (and (listp g) (> (length g) 10) (nth 10 g)) (nth 10 g) (nth 3 g)))
+
 ;;  оличество по каждой марке внутри группы: (марка . количество).
 ;; –аньше хранилс€ только список марок без количеств, и в сводке
 ;; печаталось Ђперва€ +Nї Ч это читалось как часть названи€ марки.
@@ -732,10 +745,12 @@
       (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r)
                              (1+ (nth 6 f)) (+ (nth 7 f) (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))) (+ (nth 8 f) (nth 6 r))
                              ;; 10-й элемент Ч (марка . количество) по группе
-                             (cs-marks-add (nth 9 f) mk)) f acc))
+                             (cs-marks-add (nth 9 f) mk)
+                             ;; 11-й элемент Ч тип дл€ отчЄтов (видимость)
+                             (cs-part-type r)) f acc))
       (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1
                             (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)
-                            (cs-marks-add '() mk)) acc))))
+                            (cs-marks-add '() mk) (cs-part-type r)) acc))))
   (setq out (vl-sort acc '(lambda (a b)
     (cond
       ((> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) T)
@@ -1633,7 +1648,7 @@
         (setq n (1+ n))
         (foreach p (cadr sh)
           (setq r (car p) mk (cs-part-mark r))
-          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (cs-part-type r) ";" (cs-part-label r) ";"
                               (if hasMarks (strcat (if mk mk "") ";") "")
                               (cs-format-num (nth 1 p) 1) ";" (cs-format-num (nth 2 p) 1) ";"
                               (if (= (nth 5 p) 1) "90" "0") ";" (cs-format-num (nth 6 r) 4)) f)))
@@ -1643,7 +1658,7 @@
           (write-line "Ќ≈–ј«ћ≈ў≈ЌЌџ≈ ƒ≈“јЋ»" f)
           (foreach r oversized
             (setq mk (cs-part-mark r))
-            (write-line (strcat (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+            (write-line (strcat (itoa (car r)) ";" (cs-part-type r) ";" (cs-part-label r) ";"
                                 (if hasMarks (strcat (if mk mk "") ";") "")
                                 (cs-format-num (nth 6 r) 4)) f))))
       (close f)
@@ -1756,7 +1771,7 @@
         (foreach rw rowsList
           (eu-row-begin f "")
           (eu-cell f "D" "String" (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))) "")
-          (eu-cell f "D" "String" (nth 3 rec) "")
+          (eu-cell f "D" "String" (cs-group-type rec) "")
           (if hasMarks (eu-cell f "D" "String" (if (car rw) (car rw) "") ""))
           (eu-cell f "D" "Number" (itoa (cdr rw)) "")
           (eu-cell f "N" "Number" (cs-xls-num (if (> gCnt 0)
@@ -1791,7 +1806,7 @@
           (eu-row-begin f "")
           (eu-cell f "D" "Number" (itoa n) "")
           (eu-cell f "D" "Number" (itoa (car r)) "")
-          (eu-cell f "D" "String" (nth 3 r) "")
+          (eu-cell f "D" "String" (cs-part-type r) "")
           (eu-cell f "D" "String" (cs-part-label r) "")
           (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
           (eu-cell f "N" "Number" (cs-xls-num (nth 1 p) 1) "")
@@ -1812,7 +1827,7 @@
             (setq mk (cs-part-mark r))
             (eu-row-begin f "")
             (eu-cell f "D" "Number" (itoa (car r)) "")
-            (eu-cell f "D" "String" (nth 3 r) "")
+            (eu-cell f "D" "String" (cs-part-type r) "")
             (eu-cell f "D" "String" (cs-part-label r) "")
             (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
             (eu-cell f "N" "Number" (cs-xls-num (nth 6 r) 4) "")
@@ -2247,5 +2262,5 @@
   (princ))
 (defun c:–ј— –ќ…Ћ»—“ј () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 35: марка в XLS и CSV; сводка Ч строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнени€ Ч размер в свету + припуск; марка элемента в углу детали; заголовок Ђ¬ыбранные слоиї со счЄтчиком; карта в блок берЄт только свои объекты; скан и состав блока с защитой; фильтры слоЄв; U2, ѕ1-ѕ3, V5).  оманды: CUTSHEET, –ј— –ќ…Ћ»—“ј")
+(princ "\nCUTSHEET.LSP загружен (ред. 36: в отчЄтах Ђ“ипї Ч видимость блока, марка отдельно; марка в XLS и CSV; сводка Ч строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнени€ Ч размер в свету + припуск; марка элемента в углу детали; заголовок Ђ¬ыбранные слоиї со счЄтчиком; карта в блок берЄт только свои объекты; скан и состав блока с защитой; фильтры слоЄв; U2, ѕ1-ѕ3, V5).  оманды: CUTSHEET, –ј— –ќ…Ћ»—“ј")
 (princ)

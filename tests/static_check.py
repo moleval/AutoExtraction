@@ -1184,6 +1184,17 @@ XLS_MARKS_MUST = {
          'разбивки группы на строки по маркам в XLS листа'),
         ('(if hasMarks (strcat (if mk mk "") ";") "")',
          'колонки марки в CSV листа'),
+        ('(setq visName typName)',
+         'сохранения типа до подмены маркой: у блоков ЗАПОЛНЕНИЯ '
+         'cs-block-record пишет в тип марку'),
+        ('(tu-entity-mark ent) visName)',
+         '12-го элемента записи блока — типа для отчётов'),
+        ('area nominal T ent nil type)',
+         '12-го элемента записи полилинии: арность записей должна совпадать'),
+        ('(defun cs-part-type (r)',
+         'доступа cs-part-type: без него «Тип» в отчёте печатает марку'),
+        ('(defun cs-group-type (g)',
+         'доступа cs-group-type: тип группы для отчёта'),
     ],
     "Extraction/cutline.lsp": [
         ('kpd all-pieces /',
@@ -1249,16 +1260,28 @@ XLS_MARKS_SCOPED = {
         "cs-write-xls": [('"Марка"', 2), ("(if hasMarks (eu-column", 1),
                          ("(foreach rw rowsList", 1), ("(cs-part-mark r)", 2),
                          ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
-                          2)],
+                          2), ("(cs-part-type r)", 2), ("(cs-group-type rec)", 1)],
         "cs-write-csv": [('"№ листа;№ детали;Тип;Размер;Марка;', 1),
-                         ("(cs-part-mark r)", 2),
+                         ("(cs-part-mark r)", 2), ("(cs-part-type r)", 2),
                          ('(if hasMarks (strcat (if mk mk "") ";") "")', 2)],
+        "cs-aggregate": [("(cs-part-type r)", 2)],
     },
     "Extraction/cutline.lsp": {
         "n1-write-xls": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
                          ("(caddr rw)", 1)],
         "n1-write-csv": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
                          ('(vl-string-translate ";" ","', 1)],
+    },
+}
+
+# Чего в писателях быть не должно. У блоков ЗАПОЛНЕНИЯ cs-block-record
+# подменяет тип маркой, поэтому (nth 3) в отчёте печатает марку ещё раз -
+# колонки «Тип» и «Марка» совпадают строка в строку. Тип берётся только
+# через cs-part-type / cs-group-type.
+XLS_MARKS_NOT = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": ["(nth 3 r)", "(nth 3 rec)"],
+        "cs-write-csv": ["(nth 3 r)"],
     },
 }
 
@@ -1295,6 +1318,9 @@ def check_xls_marks_guard() -> list[str]:
     содержали, и таблица чертежа расходилась с файлом того же прогона по
     составу строк. Колонка добавлена во все листы и в CSV; она появляется
     только при наличии марок, поэтому прогон без марок даёт прежний файл.
+
+    Отдельно закреплён тип: у блоков ЗАПОЛНЕНИЯ cs-block-record подменяет
+    тип маркой, и прямое (nth 3) в писателе печатало марку во второй раз.
     """
     errors: list[str] = []
     for rel, needles in XLS_MARKS_MUST.items():
@@ -1316,6 +1342,16 @@ def check_xls_marks_guard() -> list[str]:
                     errors.append(
                         f"{rel}: выгрузка марок: в {fn} нет {needle} "
                         f"(найдено {got}, нужно {need})")
+        for fn, banned in XLS_MARKS_NOT.get(rel, {}).items():
+            body = _defun_body(text, fn)
+            if body is None:
+                continue
+            for needle in banned:
+                if needle in body:
+                    errors.append(
+                        f"{rel}: выгрузка марок: в {fn} тип берётся напрямую "
+                        f"через {needle} — колонки «Тип» и «Марка» продублируют "
+                        f"марку (нужен cs-part-type / cs-group-type)")
         for fn, (params, locals_) in XLS_MARKS_LOCALS.get(rel, {}).items():
             got = _defun_args(text, fn)
             if got is None:
