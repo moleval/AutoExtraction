@@ -31,6 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 LISP_DIRS = [ROOT / "Extraction", ROOT / "common"]
 DCL_DIRS  = [ROOT / "Extraction"]
+# Plugins\ - сторонние модули (раздел плагинов RELOAD). Проверяются на
+# баланс, лексику, спецформы и пересечение имён defun с проектом; проектные
+# группы (mains, dcl-keys, wrap-guard) на них не распространяются.
+PLUGIN_DIR = ROOT / "Plugins"
 # tests/*.lsp в основные группы не входят (там свои defun и свои правила),
 # но баланс и лексика проверяются отдельно: chkparens.lsp автозагружает RELOAD.
 TEST_DIR = ROOT / "tests"
@@ -99,6 +103,12 @@ def lisp_files():
             yield from sorted(d.glob("*.lsp"))
 
 
+def plugin_lisp_files():
+    """Сторонние модули из Plugins\ (могут отсутствовать - это не ошибка)."""
+    if PLUGIN_DIR.exists():
+        yield from sorted(PLUGIN_DIR.glob("*.lsp"))
+
+
 def dcl_files():
     for d in DCL_DIRS:
         if d.exists():
@@ -111,9 +121,10 @@ def test_lisp_files():
 
 
 def all_lisp_files():
-    """Весь LISP проекта: модули, tests/*.lsp и корневой reload.lsp."""
+    """Весь LISP проекта: модули, tests/*.lsp, Plugins/*.lsp и reload.lsp."""
     yield from lisp_files()
     yield from test_lisp_files()
+    yield from plugin_lisp_files()
     root_lisp = ROOT / "reload.lsp"
     if root_lisp.exists():
         yield root_lisp
@@ -254,7 +265,7 @@ def check_duplicates() -> list[str]:
     errors: list[str] = []
     seen: dict[str, tuple[str, int]] = {}
 
-    for path in lisp_files():
+    for path in list(lisp_files()) + list(plugin_lisp_files()):
         rel = str(path.relative_to(ROOT))
         for name, line in find_defuns(path):
             lname = name.lower()
@@ -571,6 +582,64 @@ def check_reload_chkload_guard() -> list[str]:
     for needle, what in RELOAD_CHKLOAD_FORBIDDEN:
         if needle in text:
             errors.append(f"{path.relative_to(ROOT)}: диагностика загрузки: {what}")
+    return errors
+
+
+RELOAD_PLUGINS_MUST = [
+    ("(setq *ae-reload-plugin-files*",
+     "списка плагинов *ae-reload-plugin-files* на верхнем уровне"),
+    ("(vl-file-directory-p plugins-dir)",
+     "проверки папки Plugins\\ - без неё отсутствующий плагин даёт «НЕ НАЙДЕН»"),
+    ("(if (> plugin-cnt 0)",
+     "условия секции PLUGINS: пустой список обязан пропускаться молча"),
+    ("(setq plugin-cnt (length plugin-files))",
+     "подсчёта плагинов - без него итог «из N модулей» расходится с фактом"),
+    ("(setq revpaths (cons (strcat plugins-dir f) revpaths))",
+     "учёта плагинов в маркере редакции"),
+    ("(length extraction-files) plugin-cnt)",
+     "знаменателя «из N модулей» с плагинами"),
+]
+
+PLUGIN_LOCALS = ("plugins-dir", "plugin-files", "plugin-cnt")
+
+
+def check_reload_plugins_guard() -> list[str]:
+    """RELOAD: раздел плагинов молча не работает и не течёт в глобальные."""
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in RELOAD_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: раздел плагинов: нет {what}")
+
+    # Переменные секции обязаны быть локальными для c:RELOAD: иначе они
+    # становятся глобальными и переживают прогон (класс дефекта, который
+    # уже давал ложные итоги).
+    try:
+        forms = lisp_parse(text)
+    except LispParseError as exc:
+        return errors + [f"{rel}: раздел плагинов: разбор форм - {exc}"]
+    locals_found = None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, args = node[1][0], node[1][1], node[1][2]
+        if (head[0] == "atom" and head[1].lower() == "defun"
+                and name[0] == "atom" and name[1].lower() == "c:reload"
+                and args[0] == "list"):
+            locals_found = [a[1].lower() for a in args[1][1:] if a[0] == "atom"]
+            break
+    if locals_found is None:
+        errors.append(f"{rel}: раздел плагинов: не найдена форма (defun c:RELOAD ...)")
+    else:
+        for var in PLUGIN_LOCALS:
+            if var not in locals_found:
+                errors.append(
+                    f"{rel}: раздел плагинов: '{var}' не в списке локальных "
+                    f"переменных c:RELOAD (утечёт в глобальные)")
     return errors
 
 
@@ -1206,6 +1275,7 @@ def main() -> int:
     errors += check_cutline_wrap_guard()
     errors += check_cutsheet_wrap_guard()
     errors += check_reload_chkload_guard()
+    errors += check_reload_plugins_guard()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -1216,6 +1286,16 @@ def main() -> int:
         if not ok:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(test_lisp_files()))
+
+    # Plugins\*.lsp: сторонние модули грузятся тем же RELOAD, поэтому
+    # баланс и лексика проверяются наравне с модулями проекта
+    plugins_count = 0
+    for path in plugin_lisp_files():
+        plugins_count += 1
+        ok, msg = check_balance_lex(path)
+        if not ok:
+            errors.append(f"{path.relative_to(ROOT)}: {msg}")
+    errors += check_lisp_lexical(list(plugin_lisp_files()))
 
     # reload.lsp в корне: грузится первым, его дефект лишает всей диагностики
     root_lisp = ROOT / "reload.lsp"
@@ -1244,10 +1324,12 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
+        f"plugins={plugins_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
+        f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")

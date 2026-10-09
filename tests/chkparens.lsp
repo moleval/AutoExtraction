@@ -149,8 +149,12 @@
     (princ "\n[CHK] не найден корень проекта (extraction.lsp).")
     (progn
       (setq total 0)
+      ;; Plugins\ - сторонние модули (раздел плагинов RELOAD).
+      ;; ≈сли папки нет, vl-directory-files вернЄт nil - проверка
+      ;; ниже просто пропустит каталог.
       (foreach d (list (strcat root "\\common\\")
-                       (strcat root "\\Extraction\\"))
+                       (strcat root "\\Extraction\\")
+                       (strcat root "\\Plugins\\"))
         (setq files (vl-directory-files d "*.lsp" 1))
         (if files
           (foreach f files
