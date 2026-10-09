@@ -1184,9 +1184,12 @@ XLS_MARKS_MUST = {
          'разбивки группы на строки по маркам в XLS листа'),
         ('(if hasMarks (strcat (if mk mk "") ";") "")',
          'колонки марки в CSV листа'),
-        ('(setq visName typName)',
-         'сохранения типа до подмены маркой: у блоков ЗАПОЛНЕНИЯ '
-         'cs-block-record пишет в тип марку'),
+        ('(setq visName (cs-get-visibility-safe obj))',
+         'типа для отчётов из состояния видимости: cs-get-dyn-type-name '
+         'возвращает имя блока, а не видимость'),
+        ('(if (or (null visName) (= visName "")) (setq visName "-"))',
+         'прочерка вместо пустой видимости: с nil cs-part-type откатится '
+         'на (nth 3), то есть на марку'),
         ('(tu-entity-mark ent) visName)',
          '12-го элемента записи блока — типа для отчётов'),
         ('area nominal T ent nil type)',
@@ -1265,6 +1268,7 @@ XLS_MARKS_SCOPED = {
                          ("(cs-part-mark r)", 2), ("(cs-part-type r)", 2),
                          ('(if hasMarks (strcat (if mk mk "") ";") "")', 2)],
         "cs-aggregate": [("(cs-part-type r)", 2)],
+        "cs-block-record": [("(setq visName (cs-get-visibility-safe obj))", 1)],
     },
     "Extraction/cutline.lsp": {
         "n1-write-xls": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
@@ -1277,11 +1281,15 @@ XLS_MARKS_SCOPED = {
 # Чего в писателях быть не должно. У блоков ЗАПОЛНЕНИЯ cs-block-record
 # подменяет тип маркой, поэтому (nth 3) в отчёте печатает марку ещё раз -
 # колонки «Тип» и «Марка» совпадают строка в строку. Тип берётся только
-# через cs-part-type / cs-group-type.
+# через cs-part-type / cs-group-type. В cs-block-record поле visName
+# заполняется состоянием видимости: typName - это имя блока, с ним
+# колонка «Тип» показывала имя блока вместо видимости.
 XLS_MARKS_NOT = {
     "Extraction/cutsheet.lsp": {
         "cs-write-xls": ["(nth 3 r)", "(nth 3 rec)"],
         "cs-write-csv": ["(nth 3 r)"],
+        "cs-block-record": ["(setq visName typName)",
+                            "(setq visName (cs-get-dyn-type-name"],
     },
 }
 
