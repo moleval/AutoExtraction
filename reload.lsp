@@ -71,6 +71,17 @@
   )
 )
 
+;; Каталоги РАЗРАБОТКИ плагинов. Если файл плагина найден в одном из
+;; этих каталогов, RELOAD грузит его ОТТУДА, а не из Plugins\ - правки
+;; в рабочем репозитории плагина подхватываются без копирования.
+;; В таком случае копия в Plugins\ не нужна и в git не кладётся.
+;; Пути меняются здесь, без правок кода; список может быть пустым.
+(setq *ae-reload-plugin-dev-dirs*
+  '(
+    "D:\\PlotFrameToPDF"
+  )
+)
+
 ;; ------------------------------------------------------------
 ;; Автоподгрузка проверки скобок (дешево: только defun'ы,
 ;; без сканирования). Если файла нет - молча пропускаем.
@@ -117,6 +128,25 @@
         (close ff)))
     (if found (setq cnt (1+ cnt))))
   cnt)
+
+;; ------------------------------------------------------------
+;; Путь к плагину в каталоге разработки, если файл там есть.
+;; Первый найденный каталог выигрывает; nil - файла нет ни в одном.
+;; ------------------------------------------------------------
+(defun ae-reload-plugin-dev-path (name / d p hit)
+  (setq hit nil)
+  (foreach d *ae-reload-plugin-dev-dirs*
+    (if (null hit)
+      (progn
+        (setq p (strcat d "\\" name))
+        (if (findfile p)
+          (setq hit p))
+      )
+    )
+  )
+  hit
+)
+
 
 ;; ============================================================
 ;; ВСТРОЕННЫЙ ПОИСК ФОРМЫ СО СБОЕМ ЗАГРУЗКИ (резерв CHKLOAD)
@@ -273,7 +303,7 @@
 )
 
 (defun ae-reload-load-file
-       (fullpath / result)
+       (fullpath note / result)
 
   ;; ------------------------------------------------------------
   ;; Загрузка одного LSP-файла с перехватом ошибки
@@ -334,6 +364,10 @@
             (strcat
               "\nЗагружен: "
               fullpath
+              (if note
+                (strcat "  [" note "]")
+                ""
+              )
             )
           )
           T
@@ -353,8 +387,10 @@
            common-files
            extraction-files
            plugins-dir
-           plugin-files
+           plugin-items
            plugin-cnt
+           dev-path
+           it
            ok
            errors
            missing
@@ -536,19 +572,36 @@
 
 
       ;; --------------------------------------------------------
-      ;; PLUGINS (сторонние модули из Plugins\)
+      ;; PLUGINS (сторонние модули)
       ;; --------------------------------------------------------
-      ;; Молча пропускаем, если папки нет или список пуст: ни строки
-      ;; "НЕ НАЙДЕН", ни влияния на итоговые счётчики. Но если папка
-      ;; есть, а заявленного файла в ней нет - это честно попадает
-      ;; в missing (иначе потеря плагина была бы невидимой).
-      (setq plugin-files
-        (if (vl-file-directory-p plugins-dir)
-          *ae-reload-plugin-files*
-          nil
+      ;; Плагин ищется сначала в каталогах разработки
+      ;; (*ae-reload-plugin-dev-dirs*), затем в Plugins\ проекта.
+      ;; Молча пропускаем то, чего нет нигде и для чего нет папки
+      ;; Plugins\: ни строки "НЕ НАЙДЕН", ни влияния на счётчики.
+      ;; Но если папка Plugins\ есть, а заявленного файла в ней нет -
+      ;; это честно попадает в missing (иначе потеря была бы невидимой).
+      (setq plugin-items '())
+      (foreach f *ae-reload-plugin-files*
+
+        (setq dev-path (ae-reload-plugin-dev-path f))
+        (setq fullpath
+          (if dev-path
+            dev-path
+            (strcat plugins-dir f)
+          )
+        )
+
+        (if (or dev-path (vl-file-directory-p plugins-dir))
+          (setq plugin-items
+            (cons
+              (cons fullpath (if dev-path "разработка" nil))
+              plugin-items
+            )
+          )
         )
       )
-      (setq plugin-cnt (length plugin-files))
+      (setq plugin-items (reverse plugin-items))
+      (setq plugin-cnt (length plugin-items))
 
       (if (> plugin-cnt 0)
         (progn
@@ -560,13 +613,11 @@
             "\n--- PLUGINS ---"
           )
 
-          (foreach f plugin-files
+          (foreach it plugin-items
 
-            (setq fullpath
-              (strcat plugins-dir f)
-            )
+            (setq fullpath (car it))
 
-            (if (ae-reload-load-file fullpath)
+            (if (ae-reload-load-file fullpath (cdr it))
               (setq ok (1+ ok))
               (if (findfile fullpath)
                 (setq errors (1+ errors))
@@ -592,8 +643,8 @@
         (setq revpaths (cons (strcat common f) revpaths)))
       (foreach f extraction-files
         (setq revpaths (cons (strcat extraction-dir f) revpaths)))
-      (foreach f plugin-files
-        (setq revpaths (cons (strcat plugins-dir f) revpaths)))
+      (foreach it plugin-items
+        (setq revpaths (cons (car it) revpaths)))
       (setq revcnt (ae-reload-rev-count revpaths))
 
       (princ

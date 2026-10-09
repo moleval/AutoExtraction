@@ -588,19 +588,27 @@ def check_reload_chkload_guard() -> list[str]:
 RELOAD_PLUGINS_MUST = [
     ("(setq *ae-reload-plugin-files*",
      "списка плагинов *ae-reload-plugin-files* на верхнем уровне"),
+    ("(setq *ae-reload-plugin-dev-dirs*",
+     "списка каталогов разработки *ae-reload-plugin-dev-dirs*"),
+    ("(defun ae-reload-plugin-dev-path (",
+     "резолвера ae-reload-plugin-dev-path (плагин в разработке грузится из своего каталога)"),
+    ("(ae-reload-plugin-dev-path f)",
+     "вызова резолвера при сборке путей плагинов"),
     ("(vl-file-directory-p plugins-dir)",
      "проверки папки Plugins\\ - без неё отсутствующий плагин даёт «НЕ НАЙДЕН»"),
+    ("(if dev-path \"разработка\" nil)",
+     "пометки источника в логе: без неё не видно, разработка это или Plugins\\"),
     ("(if (> plugin-cnt 0)",
      "условия секции PLUGINS: пустой список обязан пропускаться молча"),
-    ("(setq plugin-cnt (length plugin-files))",
+    ("(setq plugin-cnt (length plugin-items))",
      "подсчёта плагинов - без него итог «из N модулей» расходится с фактом"),
-    ("(setq revpaths (cons (strcat plugins-dir f) revpaths))",
+    ("(setq revpaths (cons (car it) revpaths))",
      "учёта плагинов в маркере редакции"),
     ("(length extraction-files) plugin-cnt)",
      "знаменателя «из N модулей» с плагинами"),
 ]
 
-PLUGIN_LOCALS = ("plugins-dir", "plugin-files", "plugin-cnt")
+PLUGIN_LOCALS = ("plugins-dir", "plugin-items", "plugin-cnt", "dev-path", "it")
 
 
 def check_reload_plugins_guard() -> list[str]:
