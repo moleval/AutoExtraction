@@ -534,7 +534,7 @@
           (strcat common f)
         )
 
-        (if (ae-reload-load-file fullpath)
+        (if (ae-reload-load-file fullpath nil)
           (setq ok (1+ ok))
           (if (findfile fullpath)
             (setq errors (1+ errors))
@@ -565,7 +565,7 @@
           (strcat extraction-dir f)
         )
 
-        (if (ae-reload-load-file fullpath)
+        (if (ae-reload-load-file fullpath nil)
           (setq ok (1+ ok))
           (if (findfile fullpath)
             (setq errors (1+ errors))
