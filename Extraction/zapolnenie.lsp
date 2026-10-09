@@ -26,7 +26,19 @@
 (vl-load-com)
 
 ;; ---------- КОНСТАНТЫ ----------
+;; Припуск на раму по умолчанию. Рабочее значение берётся из настроек
+;; (task.ZAPOLNENIE / input.frame.allowance), эта константа — запасной
+;; вариант, если модуль настроек не загружен.
 (setq *ZAPOLNENIE-FRAME-ALLOWANCE* 26)
+
+;; Действующий припуск: настройка, иначе константа выше
+(defun zapolnenie-frame-allowance ( / v)
+  (if (= (type ae-settings-frame-allowance) 'SUBR)
+    (progn
+      (setq v (ae-settings-frame-allowance))
+      (if (and (numberp v) (>= v 0)) v *ZAPOLNENIE-FRAME-ALLOWANCE*))
+    *ZAPOLNENIE-FRAME-ALLOWANCE*)
+)
 (setq *ZAPOLNENIE-SHEET-SIZE* "3210x2250")
 (setq *ZAPOLNENIE-ROTATE* "вращать")
 
@@ -132,7 +144,7 @@
   result)
 
 ;; ---------- РАЗМЕРЫ С ПРИПУСКОМ ----------
-(defun zapolnenie-compute-dims (obj / raw-h raw-w h w)
+(defun zapolnenie-compute-dims (obj / raw-h raw-w h w allow)
   (setq raw-h (zapolnenie-get-dimension obj *ZAPOLNENIE-HEIGHT-KEYWORDS*))
   (setq raw-w (zapolnenie-get-dimension obj *ZAPOLNENIE-WIDTH-KEYWORDS*))
 
@@ -148,8 +160,9 @@
      nil)
 
     (T
-     (setq h (fix (+ raw-h *ZAPOLNENIE-FRAME-ALLOWANCE*)))
-     (setq w (fix (+ raw-w *ZAPOLNENIE-FRAME-ALLOWANCE*)))
+     (setq allow (zapolnenie-frame-allowance))
+     (setq h (fix (+ raw-h allow)))
+     (setq w (fix (+ raw-w allow)))
      (list h w))))
 
 (defun zapolnenie-get-attr (obj tag / attrs a tagname value result)
@@ -1084,5 +1097,5 @@
 
 (defun c:ЗАПОЛНЕНИЕ () (c:zapolnenie))
 
-(princ "\nZAPOLNENIE.LSP загружен (ред. 29: колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ")
+(princ "\nZAPOLNENIE.LSP загружен (ред. 30: припуск на раму из настроек; колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ")
 (princ)

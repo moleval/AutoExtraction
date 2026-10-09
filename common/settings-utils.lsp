@@ -255,7 +255,14 @@
 
   (ae-settings-ensure-list "task.ZAPOLNENIE" "input.layer"
     '("Заполнение" "Стекло" "Обозначение ст-т"))
-  (ae-settings-ensure-list "task.ZAPOLNENIE" "input.block" '("*"))
+  ;; Блоки заполнения: умолчание ловит «Заполнение», «Стекло», «Сэндвич»
+  ;; в любом регистре и с любым окончанием. Этот же список служит
+  ;; признаком блока заполнения в раскрое листа (припуск на раму).
+  (ae-settings-ensure-list "task.ZAPOLNENIE" "input.block"
+    '("*аполнение*" "*текл*" "*эндвич*"))
+  ;; Припуск на раму, мм. Прибавляется к размеру «в свету» и даёт размер
+  ;; заготовки. Используют ЗАПОЛНЕНИЕ (отчёт) и CUTSHEET (раскрой листа).
+  (ae-settings-ensure-value "task.ZAPOLNENIE" "input.frame.allowance" "26")
   (ae-settings-ensure-value "task.ZAPOLNENIE" "output.table.layer" "CURRENT")
 
   (ae-settings-ensure-list "task.CUTLINE" "input.layer" '("*"))
@@ -293,6 +300,15 @@
     (T
      (ae-settings-list section "input.layer" '("*")))
   )
+)
+
+;; Припуск на раму, мм: размер «в свету» + припуск = размер заготовки.
+;; Единый источник для ЗАПОЛНЕНИЯ и раскроя листа. Отрицательное или
+;; нечисловое значение заменяется умолчанием — припуск не может быть
+;; меньше нуля, иначе заготовка окажется меньше проёма.
+(defun ae-settings-frame-allowance ( / v)
+  (setq v (ae-settings-int "task.ZAPOLNENIE" "input.frame.allowance" 26))
+  (if (and (numberp v) (>= v 0)) v 26)
 )
 
 (defun ae-settings-task-blocks (task / section tsk)
@@ -404,7 +420,9 @@
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'VITRAZH "output.table.layer" "CURRENT")))
     ((= section "task.ZAPOLNENIE")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("Заполнение" "Стекло" "Обозначение ст-т")))
-     (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*")))
+     (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*аполнение*" "*текл*" "*эндвич*")))
+     (ae-settings-write-entry f "input.frame.allowance"
+       (itoa (ae-settings-frame-allowance)))
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'ZAPOLNENIE "output.table.layer" "CURRENT")))
     ((= section "task.CUTLINE")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("*")))

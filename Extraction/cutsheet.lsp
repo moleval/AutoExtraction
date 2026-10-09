@@ -45,6 +45,8 @@
 (setq *CUTSHEET-KPD-COLOR* 1)
 (setq *CUTSHEET-WASTE-COLOR* 8)
 (setq *CUTSHEET-PART-TEXT-COLOR* 2)
+;; Марка элемента (атрибут МАРКА динамического блока) в углу детали
+(setq *CUTSHEET-MARK-COLOR* 7)
 (setq *CUTSHEET-TEXT-COLOR* 7)
 (setq *CUTSHEET-FRAME-LAYER* "Невидимые")
 (setq *CUTSHEET-FRAME-PAD-LEFT* 200.0)
@@ -67,6 +69,11 @@
 ;; Этап 2 (V6): страж итераций MaxRects - верхняя граница числа попыток
 ;; размещения (проверок кандидат-прямоугольников). Именованный, изменяемый.
 (setq *cs-max-placement-attempts* 1000000)
+
+;; Эффективный список слоёв раскроя: то, по чему реально собрана выборка
+;; (после подстановки слоёв задачи из настроек). Показывается в окне
+;; в разделе «Выбранные слои» — как в окне раскроя хлыстов.
+(setq *cs-effective-layers* nil)
 
 ;; Состояние диалога
 (if (not (boundp '*cs-tmp-choice*))    (setq *cs-tmp-choice* 'ALL))
@@ -127,6 +134,69 @@
          (if (vl-catch-all-error-p x) nil x))
        nil))
     (T nil)))
+
+;; ============================================================
+;; БЛОКИ ЗАПОЛНЕНИЯ: размер «в свету» + припуск на раму
+;;
+;; У таких блоков параметры задают размер ПРОЁМА, а заготовку надо
+;; резать больше на припуск. Габарит блока (BoundingBox) для них не
+;; годится вовсе: он включает раму и даёт размер в разы больше.
+;;
+;; Признак блока заполнения — маски блоков задачи ЗАПОЛНЕНИЕ из
+;; settings.ini: один список на отчёт и на раскрой, разойтись не могут.
+;; Цепочка параметров и припуск — тоже как в ЗАПОЛНЕНИИ.
+;; ============================================================
+
+(setq *CUTSHEET-FILL-HEIGHT-KEYS* '("ВЫСОТА В СВЕТУ" "ВЫСОТА"))
+(setq *CUTSHEET-FILL-WIDTH-KEYS*  '("ШИРИНА В СВЕТУ" "ШИРИНА" "ДЛИНА"))
+
+;; Сколько блоков обработано как заполнение (для диагностики прогона)
+(setq *cs-fill-count* 0)
+
+;; Припуск на раму: настройка задачи ЗАПОЛНЕНИЕ, иначе 26
+(defun cs-fill-allowance ( / v)
+  (if (= (type ae-settings-frame-allowance) 'SUBR)
+    (progn
+      (setq v (ae-settings-frame-allowance))
+      (if (and (numberp v) (>= v 0)) v 26))
+    26)
+)
+
+;; Маски блоков заполнения. Пустой список = признак выключен:
+;; лучше не применять припуск вовсе, чем применить его ко всему подряд.
+(defun cs-fill-masks ( / m)
+  (setq m nil)
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq m (ae-settings-task-blocks 'ZAPOLNENIE)))
+  (if (and m (listp m)) m nil)
+)
+
+(defun cs-fill-block-p (ent masks)
+  (if (or (null masks) (null ent))
+    nil
+    (su-block-matches-name-masks-p ent masks))
+)
+
+;; Значение параметра: точное совпадение, затем вхождение подстроки.
+;; Подстрока нужна для имён вида «Высота в свету, мм».
+(defun cs-prop-value-like (props wanted / p)
+  (setq p (cs-prop-value props wanted))
+  (if p
+    p
+    (progn
+      (foreach x props
+        (if (and (null p) (= (type (car x)) 'STR)
+                 (vl-string-search (strcase wanted) (strcase (car x))))
+          (setq p (cs-value-to-number (cdr x)))))
+      (if (numberp p) p nil)))
+)
+
+(defun cs-fill-dimension (props keys / v)
+  (setq v nil)
+  (foreach k keys
+    (if (null v) (setq v (cs-prop-value-like props k))))
+  (if (and (numberp v) (> v 0.0)) v nil)
+)
 
 (defun cs-block-all-props (obj / dyn prop pname pval out)
   (setq out '())
@@ -235,9 +305,12 @@
 (defun cs-layer-ok-p (layer layers)
   (if (or (null layers) (= (length layers) 0)) T (su-layer-match-any layer layers)))
 
-(defun cs-build-filter-ss (layers / ss out i ent typ lay)
+(defun cs-build-filter-ss (layers / ss out i ent typ lay masks filtered)
   (if (and (null layers) (= (type ae-settings-task-layers) 'SUBR))
     (setq layers (ae-settings-task-layers 'CUTSHEET)))
+  ;; Для раздела «Выбранные слои»: показываем именно то, по чему
+  ;; собрана выборка, а не то, что пришло от вызывающего
+  (setq *cs-effective-layers* layers)
   (setq ss nil)
   (setq ss (su-take-preselection))
   (if (null ss)
@@ -252,11 +325,21 @@
       (if (and (or (= typ "LWPOLYLINE") (= typ "INSERT")) (cs-layer-ok-p lay layers) (not (su-map-entity-p ent)))
         (ssadd ent out))
       (setq i (1+ i))))
+  ;; ВНИМАНИЕ: su-filter-ss-by-block-name-masks возвращает nil, если под
+  ;; маску не подошёл НИ ОДИН объект. Без этой проверки следующий
+  ;; (sslength out) падал с «неверный тип аргумента: lselsetp nil» —
+  ;; задача обрывалась вместо понятного сообщения.
   (if (= (type ae-settings-task-blocks) 'SUBR)
-    (setq out
-      (su-filter-ss-by-block-name-masks
-        out (ae-settings-task-blocks 'CUTSHEET))))
-  (if (> (sslength out) 0) out nil))
+    (progn
+      (setq masks (ae-settings-task-blocks 'CUTSHEET))
+      (setq filtered (su-filter-ss-by-block-name-masks out masks))
+      (if (null filtered)
+        (progn
+          (princ "\n[CUTSHEET][GUARD] Под маску блоков задачи не подошёл ни один объект.")
+          (princ "\n  Проверьте Настройки -> Раскрой листа -> Блоки (маски через ;).")
+          (setq out nil))
+        (setq out filtered))))
+  (if (and out (> (sslength out) 0)) out nil))
 
 ;; ================= ЗАПИСЬ ЧАСТЕЙ =================
 ;; ================= ВАЛИДАЦИЯ ГЕОМЕТРИИ (V4) =================
@@ -303,9 +386,12 @@
         (T
           (setq type (if arc "Полилиния (дуги)" "Полилиния"))
           (setq nominal (strcat (cs-itoa-safe (car wh)) "x" (cs-itoa-safe (cadr wh))))
-          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent))))))
+          ;; 11-й элемент — марка; у полилинии её нет, но арность
+          ;; записей должна совпадать с блоками
+          (list id "POLY" layer type (car wh) (cadr wh) area nominal T ent nil))))))
 
-(defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH area nominal source)
+(defun cs-block-record (ent id / obj ed layer props typName wh w h pW pH
+                                 area nominal source fill allow mk)
   ;; V4: отказ всегда с причиной в *cs-reject-reason*.
   (setq ed (entget ent) layer (cdr (assoc 8 ed))
         obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent))
@@ -315,19 +401,46 @@
       (setq *cs-reject-reason* "ActiveX объекта недоступен") nil)
     (T
       (setq props (cs-block-all-props obj) typName (cs-get-dyn-type-name ent))
-      (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
-      (if (not (numberp pW)) (setq pW nil))
-      (if (not (numberp pH)) (setq pH nil))
-      (if (and pW pH (> pW 0.0) (> pH 0.0))
-        (setq w pW h pH source "Свойства")
+      (setq fill (cs-fill-block-p ent (cs-fill-masks)))
+      (if fill
+        ;; ЗАПОЛНЕНИЕ: только «в свету» + припуск. Отката на BoundingBox
+        ;; здесь нет намеренно — габарит с рамой дал бы молча неверный
+        ;; раскрой, лучше явный отказ с причиной.
         (progn
-          (setq wh (cs-bbox-w-h ent))
-          (if (and wh (numberp (car wh)) (numberp (cadr wh)) (> (car wh) 0.0) (> (cadr wh) 0.0))
-            (setq w (car wh) h (cadr wh) source "BoundingBox")
-            (setq w nil h nil source nil))))
+          (setq allow (cs-fill-allowance))
+          (setq pH (cs-fill-dimension props *CUTSHEET-FILL-HEIGHT-KEYS*))
+          (setq pW (cs-fill-dimension props *CUTSHEET-FILL-WIDTH-KEYS*))
+          (if (and pW pH)
+            (progn
+              (setq w (float (fix (+ pW allow)))
+                    h (float (fix (+ pH allow)))
+                    source "Заполнение (в свету + припуск)")
+              (setq *cs-fill-count* (1+ *cs-fill-count*))
+              ;; имя элемента — марка, если она есть
+              (setq mk (tu-entity-mark ent))
+              (if mk (setq typName mk)))
+            (setq w nil h nil source nil
+                  *cs-reject-reason*
+                  (if (null pH)
+                    "заполнение: не найдена высота (в свету)"
+                    "заполнение: не найдена ширина (в свету)"))))
+        (progn
+          (setq pW (cs-prop-value props "Ширина") pH (cs-prop-value props "Высота"))
+          (if (not (numberp pW)) (setq pW nil))
+          (if (not (numberp pH)) (setq pH nil))
+          (if (and pW pH (> pW 0.0) (> pH 0.0))
+            (setq w pW h pH source "Свойства")
+            (progn
+              (setq wh (cs-bbox-w-h ent))
+              (if (and wh (numberp (car wh)) (numberp (cadr wh)) (> (car wh) 0.0) (> (cadr wh) 0.0))
+                (setq w (car wh) h (cadr wh) source "BoundingBox")
+                (setq w nil h nil source nil))))))
       (cond
         ((or (null w) (null h))
-          (setq *cs-reject-reason* "размеры не числовые (свойства и BoundingBox)") nil)
+          ;; причина от ветки заполнения точнее — не затираем её
+          (if (null *cs-reject-reason*)
+            (setq *cs-reject-reason* "размеры не числовые (свойства и BoundingBox)"))
+          nil)
         ((or (<= w 0.0) (<= h 0.0))
           (setq *cs-reject-reason* "стороны <= 0") nil)
         ((or (< w *CUTSHEET-MIN-PART-DIM*) (< h *CUTSHEET-MIN-PART-DIM*))
@@ -337,10 +450,12 @@
         (T
           (setq area (/ (* w h) 1000000.0))
           (setq nominal (strcat (cs-itoa-safe w) "x" (cs-itoa-safe h)))
-          (list id "DYN" layer typName w h area nominal source ent))))))
+          ;; 11-й элемент — марка из атрибута блока (nil, если нет)
+          (list id "DYN" layer typName w h area nominal source ent
+                (tu-entity-mark ent)))))))
 
 (defun cs-collect-records (ss choice dynType / i ent typ rec out id)
-  (setq out '() i 0 id 0 *cs-rejects* '())
+  (setq out '() i 0 id 0 *cs-rejects* '() *cs-fill-count* 0)
   (if ss
     (repeat (sslength ss)
       (setq ent (ssname ss i) typ (cdr (assoc 0 (entget ent))) rec nil)
@@ -398,6 +513,65 @@
       (setq i (1+ i))))
   cnt)
 
+;; ============================================================
+;; Отображение списка слоёв (зеркало CUTLINE: n1-layer-display-list)
+;; Слои выбирает диспетчер; окно раскроя только показывает их.
+;; ============================================================
+
+;; «по фильтру: Мои» / «по фильтрам: Фасады, Окна» либо nil.
+;; Непусто только когда слои пришли от групповых фильтров.
+(defun cs-filter-name-str ( / s)
+  (setq s nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq s (extraction-layer-filter-source-title))
+  )
+  s
+)
+
+(defun cs-layer-display-list (layers / fname)
+  (setq fname (cs-filter-name-str))
+  (cond
+    ((and fname (= (type fname) 'STR) (/= fname ""))
+     (list (strcat fname " (за исключением слоя 0)"))
+    )
+    ((or (null layers) (not (listp layers)) (= (length layers) 0))
+     (list "Все слои")
+    )
+    (T layers)
+  )
+)
+
+
+;; «Фильтр Витражи» / «Фильтры Фасады, Окна» либо nil
+(defun cs-filter-header-str ( / keys s)
+  (setq s nil)
+  (if (and (cs-filter-name-str)
+           (= (type extraction-layer-filter-list-str) 'SUBR)
+           (boundp '*EXTRACTION-LAYER-FILTERS*))
+    (progn
+      (setq keys *EXTRACTION-LAYER-FILTERS*)
+      (setq s (extraction-layer-filter-list-str keys))
+      (setq s
+        (if (= s "")
+          nil
+          (strcat (if (= (length keys) 1) "Фильтр " "Фильтры ") s)))
+    )
+  )
+  s
+)
+
+;; Заголовок рамки: «Выбранные слои (Фильтр Витражи: 31 слой)»
+;; либо «Выбранные слои (3 слоя)» / «Выбранные слои (все слои)»
+(defun cs-layers-header-text (layers / n f)
+  (setq n (if (listp layers) (length layers) 0))
+  (setq f (cs-filter-header-str))
+  (cond
+    (f (strcat "Выбранные слои (" f ": " (itoa n) " " (tu-layer-word n) ")"))
+    ((<= n 0) "Выбранные слои (все слои)")
+    (T (strcat "Выбранные слои (" (itoa n) " " (tu-layer-word n) ")"))
+  )
+)
+
 ;; ================= DCL =================
 (defun cs-safe-set-tile (key val) (vl-catch-all-apply 'set_tile (list key val)))
 (defun cs-safe-mode-tile (key mode) (vl-catch-all-apply 'mode_tile (list key mode)))
@@ -428,14 +602,22 @@
   )
 )
 
-(defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result)
-  (setq dcl-file (findfile "cutsheet_filter.dcl"))
+(defun cs-dialog (polyCnt dynCnt dynTypes ss defaultW defaultH defaultKerf defaultRotate defaultXls defaultAcad / dcl-file dcl-id result dcl-src)
+  (setq dcl-src (findfile "cutsheet_filter.dcl"))
+  ;; Заголовок рамки «Выбранные слои» статичен в DCL — подменяется
+  ;; во временной копии файла; при неудаче берётся исходный файл
+  (setq dcl-file
+    (if dcl-src
+      (tu-dcl-with-label dcl-src "label = \"Выбранные слои"
+        (cs-layers-header-text *cs-effective-layers*))
+      nil))
   (if (null dcl-file)
     (progn (princ "\n[CUTSHEET] Не найден cutsheet_filter.dcl.") nil)
     (progn
       (setq dcl-id (load_dialog dcl-file))
       (if (< dcl-id 0)
-        (progn (princ "\n[CUTSHEET] Ошибка load_dialog.") nil)
+        (progn (princ "\n[CUTSHEET] Ошибка load_dialog.")
+               (tu-dcl-cleanup dcl-file dcl-src) nil)
         (progn
           (setq *cs-tmp-choice* 'ALL
                 *cs-tmp-sheet-w* defaultW
@@ -446,7 +628,8 @@
                 *cs-tmp-acad* defaultAcad
                 *cs-tmp-dyn-type* "")
           (if (not (new_dialog "cutsheet_filter_dialog" dcl-id))
-            (progn (vl-catch-all-apply 'unload_dialog (list dcl-id)) nil)
+            (progn (vl-catch-all-apply 'unload_dialog (list dcl-id))
+                   (tu-dcl-cleanup dcl-file dcl-src) nil)
             (progn
               (cs-safe-set-tile "txt_poly_count" (strcat (itoa polyCnt) " шт."))
               (cs-safe-set-tile "txt_dyn_count" (strcat (itoa dynCnt) " шт."))
@@ -458,6 +641,17 @@
               (end_list)
               (set_tile "popup_dyn_type" "0")
               (cs-safe-mode-tile "popup_dyn_type" 1)
+
+              ;; «Выбранные слои»: только информация. Заполнение под
+              ;; перехватом — диагностика не должна ронять диалог.
+              (vl-catch-all-apply
+                '(lambda ()
+                   (start_list "lst_layers")
+                   (foreach l (cs-layer-display-list *cs-effective-layers*)
+                     (add_list l))
+                   (end_list))
+                nil)
+
               (if (<= polyCnt 0) (cs-safe-mode-tile "rb_poly" 1))
               (if (<= dynCnt 0) (cs-safe-mode-tile "rb_dyn" 1))
               (if (<= (+ polyCnt dynCnt) 0) (cs-safe-mode-tile "rb_all" 1))
@@ -485,6 +679,7 @@
               (action_tile "btn_cancel" "(done_dialog 0)")
               (setq result (start_dialog))
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
               (if (= result 1)
                 (list *cs-tmp-choice* *cs-tmp-sheet-w* *cs-tmp-sheet-h* *cs-tmp-kerf*
                       *cs-tmp-rotate* *cs-tmp-xls* *cs-tmp-acad* *cs-tmp-dyn-type*)
@@ -497,15 +692,37 @@
 (defun cs-part-label (r)
   (strcat (cs-itoa-safe (nth 4 r)) "x" (cs-itoa-safe (nth 5 r))))
 
-(defun cs-aggregate (records / acc r key f out)
+;; Марка детали либо nil. Длина записи проверяется: старые записи короче.
+(defun cs-part-mark (r / v)
+  (setq v (if (and (listp r) (> (length r) 10)) (nth 10 r) nil))
+  (if (and v (= (type v) 'STR) (/= v "")) v nil))
+
+;; Количество по каждой марке внутри группы: (марка . количество).
+;; Раньше хранился только список марок без количеств, и в сводке
+;; печаталось «первая +N» — это читалось как часть названия марки.
+(defun cs-marks-add (lst mk / f)
+  (if (null mk)
+    lst
+    (progn
+      (setq f (assoc mk lst))
+      (if f
+        (subst (cons mk (1+ (cdr f))) f lst)
+        (append lst (list (cons mk 1))))))
+)
+
+(defun cs-aggregate (records / acc r key f out mk)
   (setq acc '())
   (foreach r records
     (setq key (cs-part-key r) f (assoc key acc))
+    (setq mk (cs-part-mark r))
     (if f
       (setq acc (subst (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r)
-                             (1+ (nth 6 f)) (+ (nth 7 f) (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))) (+ (nth 8 f) (nth 6 r))) f acc))
+                             (1+ (nth 6 f)) (+ (nth 7 f) (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))) (+ (nth 8 f) (nth 6 r))
+                             ;; 10-й элемент — (марка . количество) по группе
+                             (cs-marks-add (nth 9 f) mk)) f acc))
       (setq acc (cons (list key (nth 1 r) (nth 2 r) (nth 3 r) (nth 4 r) (nth 5 r) 1
-                            (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)) acc))))
+                            (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0)) (nth 6 r)
+                            (cs-marks-add '() mk)) acc))))
   (setq out (vl-sort acc '(lambda (a b)
     (cond
       ((> (* (nth 4 a) (nth 5 a)) (* (nth 4 b) (nth 5 b))) T)
@@ -731,6 +948,222 @@
 (defun cs-total-actual-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (nth 6 r)))) a)
 (defun cs-total-bbox-area-records (records / a r) (setq a 0.0) (foreach r records (setq a (+ a (* (nth 4 r) (nth 5 r) (/ 1.0 1000000.0))))) a)
 
+;; ============================================================
+;; УЧЁТ ОБЪЕКТОВ КАРТЫ (ред. 25)
+;; Набор для упаковки в блок — ТОЛЬКО объекты, созданные отрисовкой.
+;; Обход базы (entnext) для этого не годится: он затягивает посторонние
+;; объекты чертежа (ATTRIB/SEQEND динамических блоков), CopyObjects на таком
+;; составе падает с «Недопустимый объект-владелец», а оригиналы деталей
+;; могли быть удалены как «оригиналы карты».
+;; ============================================================
+
+(if (not (boundp '*cs-created*))
+  (setq *cs-created* nil)
+)
+(if (not (boundp '*cs-created-miss*))
+  (setq *cs-created-miss* 0)
+)
+
+;; Всё, что печатается, приводится к строке: диагностика не имеет права
+;; упасть на чужом типе значения (например, на имени объекта вместо строки).
+(defun cs-safe-str (x)
+  (if (= (type x) 'STR) x (vl-princ-to-string x))
+)
+
+(defun cs-type-key (typ / s)
+  (setq s (cs-safe-str typ))
+  (strcase s)
+)
+
+;; Создать объект и запомнить его в *cs-created*.
+;; Тип проверяется: entlast обязан вернуть именно созданный объект.
+(defun cs-mk (dxf / want before res e)
+  (setq want (cs-type-key (cdr (assoc 0 dxf))))
+  (setq before (entlast))
+  (setq res (entmake dxf))
+  (if res
+    (progn
+      (setq e (entlast))
+      (if (and e (not (eq e before))
+               (= (cs-type-key (cdr (assoc 0 (entget e)))) want))
+        (setq *cs-created* (cons e *cs-created*))
+        (setq *cs-created-miss* (1+ *cs-created-miss*))
+      )
+    )
+  )
+  res
+)
+
+;; Набор карты: только созданные отрисовкой объекты (и ещё живые)
+(defun cs-ss-from-created (/ ss ent)
+  (setq ss (ssadd))
+  (foreach ent *cs-created*
+    (if (entget ent) (ssadd ent ss))
+  )
+  ss
+)
+
+(defun cs-ss-type-tally (ss / i ent typ rec out)
+  (setq out '() i 0)
+  (if ss
+    (repeat (sslength ss)
+      (setq ent (ssname ss i))
+      (setq typ (cs-type-key (cdr (assoc 0 (entget ent)))))
+      (setq rec (assoc typ out))
+      (if rec
+        (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+        (setq out (append out (list (cons typ 1))))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Состав одной строкой: "LINE 12, LWPOLYLINE 40, TEXT 33"
+(defun cs-tally-str (tally / s rec)
+  (setq s "")
+  (foreach rec tally
+    (setq s (strcat s (if (= s "") "" ", ")
+                    (car rec) " " (itoa (cdr rec)))))
+  s
+)
+
+(defun cs-tally-sort (tally)
+  (vl-sort (mapcar '(lambda (x) (cons (car x) (cdr x))) tally)
+    '(lambda (a b) (< (car a) (car b))))
+)
+
+(defun cs-tally-equal-p (a b)
+  (equal (cs-tally-sort a) (cs-tally-sort b))
+)
+
+;; Типы, которые ActiveX не копирует в определение блока по отдельности:
+;; их владелец — INSERT/POLYLINE, чужой владелец отвергается с ошибкой
+;; «Недопустимый объект-владелец» (именно она валила упаковку карты).
+(defun cs-copyable-p (ent / k)
+  (setq k (if (entget ent) (cs-type-key (cdr (assoc 0 (entget ent)))) "?"))
+  (not (member k '("ATTRIB" "SEQEND" "VERTEX" "BLOCK" "ENDBLK")))
+)
+
+;; Тип объекта внутри блока: тем же способом, что и у набора карты
+;; (DXF-код 0 через ename); ObjectName — только запасной путь.
+(defun cs-object-type-key (obj / e typ)
+  (setq typ nil)
+  (setq e (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+  (if (not (vl-catch-all-error-p e))
+    (setq typ (cs-type-key (cdr (assoc 0 (entget e)))))
+  )
+  (if (or (null typ) (= typ ""))
+    (setq typ (cs-type-key (vl-catch-all-apply 'vla-get-ObjectName (list obj))))
+  )
+  (if (or (null typ) (= typ "")) "?" typ)
+)
+
+;; Состав определения блока (ActiveX-обход): (ВСЕГО ТИП . КОЛИЧЕСТВО ...)
+(defun cs-block-type-tally (blockName / acad doc blocks blk obj n out typ rec)
+  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
+  (if (vl-catch-all-error-p acad)
+    nil
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
+      (if (vl-catch-all-error-p doc)
+        nil
+        (progn
+          (setq blocks (vl-catch-all-apply 'vla-get-Blocks (list doc)))
+          (setq blk
+            (if (vl-catch-all-error-p blocks)
+              nil
+              (vl-catch-all-apply 'vla-Item (list blocks blockName))))
+          (if (vl-catch-all-error-p blk)
+            nil
+            (progn
+              (setq n 0 out '())
+              (vlax-for obj blk
+                (setq n (1+ n))
+                (setq typ (cs-object-type-key obj))
+                (setq rec (assoc typ out))
+                (if rec
+                  (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+                  (setq out (append out (list (cons typ 1))))
+                )
+              )
+              (cons n out)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Имя владельца объекта: слой/пространство/определение блока — диагностика.
+;; Код 330 возвращает то handle-строку, то имя объекта (зависит от контекста),
+;; поэтому обрабатываются оба случая. Только чтение, все вызовы под защитой.
+(defun cs-owner-name (ent / d h oe od name)
+  (setq name nil)
+  (setq d (vl-catch-all-apply 'entget (list ent)))
+  (if (not (vl-catch-all-error-p d))
+    (progn
+      (setq h (cdr (assoc 330 d)))
+      (cond
+        ((= (type h) 'ENAME) (setq oe h))
+        ((= (type h) 'STR)
+         (setq oe (vl-catch-all-apply 'handent (list h)))
+         (if (vl-catch-all-error-p oe) (setq oe nil)))
+      )
+      (if oe
+        (progn
+          (setq od (vl-catch-all-apply 'entget (list oe)))
+          (if (not (vl-catch-all-error-p od))
+            (setq name (cdr (assoc 2 od)))
+          )
+        )
+      )
+    )
+  )
+  (cond
+    ((= (type name) 'STR) name)
+    ((= (type h) 'ENAME) (strcat "имя объекта " (cs-safe-str h)))
+    ((= (type h) 'STR) (strcat "handle " h))
+    (T "?")
+  )
+)
+
+;; Диагностика: что обход базы затянул бы в блок помимо карты.
+;; Только чтение и НИКОГДА не возвращает ошибку наружу: при сбое печатается
+;; причина, раскрой продолжается (диагностика не роняет работу).
+(defun cs-scan-foreign-entities (from-ent ssNew / ent n typ layer owner)
+  (setq n 0)
+  (setq ent (vl-catch-all-apply 'entnext
+              (if from-ent (list from-ent) '())))
+  (while (and ent (not (vl-catch-all-error-p ent)))
+    (if (not (ssmemb ent ssNew)) ; ssmemb: встроенная проверка, линейный поиск недопустим
+      (progn
+        (setq typ   (cs-safe-str (cs-type-key (cdr (assoc 0 (entget ent))))))
+        (setq layer (cs-safe-str (cdr (assoc 8 (entget ent)))))
+        (setq owner (vl-catch-all-apply 'cs-owner-name (list ent)))
+        (if (vl-catch-all-error-p owner)
+          (setq owner (strcat "ошибка определения: "
+                              (cs-safe-str (vl-catch-all-error-message owner)))))
+        (setq n (1+ n))
+        (if (<= n 10)
+          (princ (strcat "\n[CUTSHEET][SCAN] посторонний объект в цепочке БД: "
+                         typ " (слой " layer ", владелец " (cs-safe-str owner) ")")))
+      )
+    )
+    (setq ent (vl-catch-all-apply 'entnext (list ent)))
+  )
+  (if (and ent (vl-catch-all-error-p ent))
+    (princ (strcat "\n[CUTSHEET][SCAN] Обход прерван: "
+                   (cs-safe-str (vl-catch-all-error-message ent)))))
+  (if (> n 0)
+    (princ (strcat "\n[CUTSHEET][SCAN] Посторонних объектов в цепочке БД: "
+                   (itoa n) " — в блок карты не берутся."))
+    (princ "\n[CUTSHEET][SCAN] Посторонних объектов в цепочке БД нет."))
+  n
+)
+
 ;; ================= ГРАФИКА =================
 (defun cs-ensure-italic-style (/ result)
   (if (tblsearch "STYLE" "Раскрой Italic") T
@@ -753,13 +1186,13 @@
       (if result (tblsearch "STYLE" "Основной стиль (надписи без наклона)") nil))))
 
 (defun cs-draw-line (p1 p2 color)
-  (entmake (list '(0 . "LINE") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "LINE") '(100 . "AcDbEntity")
                  (cons 62 color)
                  (cons 10 (list (car p1) (cadr p1) 0.0))
                  (cons 11 (list (car p2) (cadr p2) 0.0)))))
 
 (defun cs-draw-rect (p1 p2 color)
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
                  (cons 62 color) '(100 . "AcDbPolyline")
                  '(90 . 4) '(70 . 1)
                  (cons 10 (list (car p1) (cadr p1)))
@@ -788,9 +1221,9 @@
   (if (> aci 90) (setq aci 90))
   (if (< aci 0) (setq aci 0))
   
-  ;; Создаем SOLID БЕЗ кода 62
+  ;; Создаем SOLID БЕЗ кода 62 (через cs-mk — объект попадает в *cs-created*)
   (setq res
-    (entmake
+    (cs-mk
       (list
         '(0 . "SOLID")
         '(100 . "AcDbEntity")
@@ -831,21 +1264,21 @@
 
 (defun cs-draw-text (pt h txt color / style)
   (setq style (cs-text-style "Раскрой Italic"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-bold (pt h txt color / style)
   (setq style (cs-text-style "Основной стиль (надписи без наклона)"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 txt) '(50 . 0.0))))
 
 (defun cs-draw-text-center (pt h txt color / style)
   (setq style (cs-text-style "Раскрой Italic"))
-  (entmake (list '(0 . "TEXT") '(100 . "AcDbEntity")
+  (cs-mk (list '(0 . "TEXT") '(100 . "AcDbEntity")
                  (cons 62 color) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
@@ -875,7 +1308,8 @@
                 (cs-itoa-safe sheetW) *CUTSHEET-VALUE-COLOR*))
 
 ;; ОТРИСОВКА ИЗДЕЛИЯ: Заливка SOLID + Обводка + Подпись
-(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col)
+(defun cs-draw-placement (pl x0 y0 colorMap / r x y w h rot col mk mkH
+                                               drawMk sizeH sizeY)
   (setq r (car pl)
         x (+ x0 (cadr pl))
         y (+ y0 (caddr pl))
@@ -888,12 +1322,35 @@
   ;; 2. Обводка (поверх заливки)
   (cs-draw-rect (list x y) (list (+ x w) (+ y h)) *CUTSHEET-OUTLINE-COLOR*)
   ;; 3. Подпись
+  ;; 3-4. Подпись габарита и марка. Марка считается ПЕРВОЙ: от неё
+  ;; зависит, куда встанет габарит, иначе на приплюснутых деталях
+  ;; подписи наползают друг на друга.
+  (setq mk (cs-part-mark r))
+  (setq mkH (if mk (min (* *CUTSHEET-TEXT-H* 0.55) (* 0.085 (min w h))) 0.0))
+  ;; порог читаемости: мельче четверти основной высоты текста подпись
+  ;; на карте уже не читается — лучше не рисовать совсем
+  (setq drawMk (and mk
+                    (> mkH (* *CUTSHEET-TEXT-H* 0.25))
+                    (> w (* (strlen mk) mkH 0.8))
+                    (> h (* mkH 3.0))))
+  (setq sizeH (min *CUTSHEET-TEXT-H* (* 0.12 (min w h))))
+  ;; базовая линия габарита: обычное место, но не ниже строки марки
+  (setq sizeY (if drawMk
+                (max (* h 0.53) (+ (* mkH 1.5) (* sizeH 0.5)))
+                (* h 0.53)))
+  ;; если из-за марки габарит вылезает за деталь — снимаем МАРКУ,
+  ;; размер детали важнее её обозначения
+  (if (and drawMk (> (+ sizeY sizeH) h))
+    (setq drawMk nil sizeY (* h 0.53)))
   (if (> (* w h) *CUTSHEET-MIN-TEXT-AREA*)
-    (cs-draw-text-center (list (+ x (* w 0.5)) (+ y (* h 0.53)))
-                         (min *CUTSHEET-TEXT-H* (* 0.12 (min w h)))
-                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*)))
+    (cs-draw-text-center (list (+ x (* w 0.5)) (+ y sizeY))
+                         sizeH
+                         (cs-part-label r) *CUTSHEET-PART-TEXT-COLOR*))
+  (if drawMk
+    (cs-draw-text (list (+ x (* mkH 0.5)) (+ y (* mkH 0.5)))
+                  mkH mk *CUTSHEET-MARK-COLOR*)))
 
-(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g)
+(defun cs-draw-summary (groups sheets oversized sheetW sheetH rotateFlag insPt kerf / left top width rowH rows y totalCnt actualArea bboxArea sheetArea kpdFact kpdBox waste colorMap maxLabelLen col i sortedGroups sizeStr skipGroups g hasMarks colMark colCnt colArea gMarks gCnt marked rowsList rw m)
   (setq left (car insPt) top (cadr insPt) rowH 160.0 totalCnt 0 actualArea 0.0 bboxArea 0.0
         sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0)))
   (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
@@ -901,6 +1358,12 @@
   (setq kpdFact (if (> sheetArea 0.0) (* 100.0 (/ actualArea sheetArea)) 0.0)
         kpdBox (if (> sheetArea 0.0) (* 100.0 (/ bboxArea sheetArea)) 0.0)
         waste (max 0.0 (- sheetArea actualArea)))
+  ;; Колонка «Марка» появляется, только если марки есть хотя бы у одной
+  ;; группы. Ширина таблицы не меняется: колонки сдвигаются.
+  (setq hasMarks nil)
+  (foreach rec groups
+    (if (and (> (length rec) 9) (nth 9 rec)) (setq hasMarks T)))
+  (setq colMark 0.30 colCnt (if hasMarks 0.62 0.45) colArea (if hasMarks 0.80 0.70))
   (setq rows (length groups) maxLabelLen 10)
   (foreach rec groups (setq col (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))))
     (if (> (strlen col) maxLabelLen) (setq maxLabelLen (strlen col))))
@@ -947,8 +1410,10 @@
   (cs-draw-text-bold (list (+ left 50.0) y) *CUTSHEET-TEXT-H* "ИЗДЕЛИЯ (ВхШ)" *CUTSHEET-TITLE-COLOR*)
   (setq y (- y rowH))
   (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) "Размер" *CUTSHEET-HEADER-COLOR*)
-  (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82) "Кол-во" *CUTSHEET-HEADER-COLOR*)
-  (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82) "Площадь" *CUTSHEET-HEADER-COLOR*)
+  (if hasMarks
+    (cs-draw-text (list (+ left (* width colMark)) y) (* *CUTSHEET-TEXT-H* 0.82) "Марка" *CUTSHEET-HEADER-COLOR*))
+  (cs-draw-text (list (+ left (* width colCnt)) y) (* *CUTSHEET-TEXT-H* 0.82) "Кол-во" *CUTSHEET-HEADER-COLOR*)
+  (cs-draw-text (list (+ left (* width colArea)) y) (* *CUTSHEET-TEXT-H* 0.82) "Площадь" *CUTSHEET-HEADER-COLOR*)
   (setq y (- y rowH))
   
   (if rotateFlag
@@ -975,12 +1440,35 @@
       (setq sizeStr (strcat (cs-itoa-safe (min (nth 4 rec) (nth 5 rec))) "x"
                             (cs-itoa-safe (max (nth 4 rec) (nth 5 rec)))))
       (setq sizeStr (strcat (cs-itoa-safe (nth 5 rec)) "x" (cs-itoa-safe (nth 4 rec)))))
-    (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
-    (cs-draw-text (list (+ left (* width 0.45)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                  (itoa (nth 6 rec)) *CUTSHEET-VALUE-COLOR*)
-    (cs-draw-text (list (+ left (* width 0.7)) y) (* *CUTSHEET-TEXT-H* 0.82)
-                  (cs-format-num (nth 8 rec) 2) *CUTSHEET-VALUE-COLOR*)
-    (setq y (- y rowH))
+    ;; Одна строка на марку. Изделия без марки — отдельной строкой с
+    ;; прочерком, чтобы было видно и сколько их.
+    (setq gMarks (if (> (length rec) 9) (nth 9 rec) '()))
+    (setq gCnt (nth 6 rec) marked 0)
+    (foreach m gMarks (setq marked (+ marked (cdr m))))
+    (setq rowsList '())
+    (if (null gMarks)
+      (setq rowsList (list (cons "" gCnt)))
+      (progn
+        (foreach m gMarks (setq rowsList (append rowsList (list m))))
+        (if (> (- gCnt marked) 0)
+          (setq rowsList (append rowsList (list (cons "-" (- gCnt marked))))))))
+    (foreach rw rowsList
+      (cs-draw-text (list (+ left 50.0) y) (* *CUTSHEET-TEXT-H* 0.82) sizeStr col)
+      (if hasMarks
+        (cs-draw-text (list (+ left (* width colMark)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                      (tu-marks-brief (list (car rw))
+                                      (tu-fit-chars (* (- colCnt colMark) width)
+                                                    (* *CUTSHEET-TEXT-H* 0.82)))
+                      *CUTSHEET-VALUE-COLOR*))
+      (cs-draw-text (list (+ left (* width colCnt)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    (itoa (cdr rw)) *CUTSHEET-VALUE-COLOR*)
+      ;; площадь строки — доля площади группы по количеству
+      (cs-draw-text (list (+ left (* width colArea)) y) (* *CUTSHEET-TEXT-H* 0.82)
+                    (cs-format-num (if (> gCnt 0)
+                                     (* (nth 8 rec) (/ (float (cdr rw)) (float gCnt)))
+                                     0.0) 2)
+                    *CUTSHEET-VALUE-COLOR*)
+      (setq y (- y rowH)))
     (setq i (1+ i)))
   
   ;; Этап 2: секция неразмещенных - агрегировано по габариту:
@@ -1082,8 +1570,8 @@
         y1 (- (cadr (car bbox)) *CUTSHEET-FRAME-PAD-BOTTOM*)
         x2 (+ (car (cadr bbox)) *CUTSHEET-FRAME-PAD-RIGHT*)
         y2 (+ (cadr (cadr bbox)) *CUTSHEET-FRAME-PAD-TOP*))
-  (entmake (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
-                 (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline")
+  (cs-mk (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity")
+               (cons 8 *CUTSHEET-FRAME-LAYER*) '(100 . "AcDbPolyline")
                  '(90 . 4) '(70 . 1)
                  (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
                  (cons 10 (list x2 y2)) (cons 10 (list x1 y2))))
@@ -1307,7 +1795,8 @@
   ;; U3: единый генератор - см. common/task-utils.lsp
   (tu-unique-block-name base))
 
-(defun cs-wrap-to-block (blockName basePt ss / ok r oldRefs si e retained ins-result finalRefs insertPt3 acad doc ms result)
+(defun cs-wrap-to-block (blockName basePt ss / ok r oldRefs si e retained ins-result finalRefs insertPt3 acad doc ms result
+                         objList skipped tmpStr blkTally expTally tallyOk)
   ;; П2.3: упаковка набора в блок через ActiveX (замер 5.2: vl-cmdf "_.-BLOCK"
   ;; = 93% стоимости wrap - 1140 мс на 743 примитива). CopyObjects копирует
   ;; набор в определение блока (базовая точка = basePt), оригиналы стираем,
@@ -1327,19 +1816,39 @@
       (pu-begin "CUTSHEET:wrap:block")
       (setq result
         (vl-catch-all-apply
-          '(lambda ( / blocks blkDef arr i)
+          '(lambda ( / blocks blkDef arr i o k)
              (setq blocks (vla-get-Blocks doc)
                    blkDef (vla-Add blocks
                                   (vlax-3d-point (list (car basePt) (cadr basePt) 0.0))
                                   blockName))
-             (setq arr (vlax-make-safearray vlax-vbObject
-                         (cons 0 (1- (sslength ss))))
-                   i 0)
+             ;; Ред. 25: CopyObjects нельзя отдавать ATTRIB/SEQEND/VERTEX —
+             ;; у них владелец INSERT/POLYLINE, и ActiveX отвечает
+             ;; «Недопустимый объект-владелец», роняя всю упаковку.
+             (setq objList '() skipped '() i 0)
              (repeat (sslength ss)
-               (vlax-safearray-put-element arr i (vlax-ename->vla-object (ssname ss i)))
-               (setq i (1+ i)))
-             (vla-CopyObjects doc arr blkDef)
-             T)))
+               (setq e (ssname ss i) i (1+ i))
+               (setq k (if (entget e)
+                         (cs-type-key (cdr (assoc 0 (entget e))))
+                         "?"))
+               (if (cs-copyable-p e)
+                 (progn
+                   (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+                   (if (or (vl-catch-all-error-p o) (null o))
+                     (setq skipped (cons k skipped))
+                     (setq objList (cons o objList))))
+                 (setq skipped (cons k skipped))))
+             (setq objList (reverse objList) skipped (reverse skipped))
+             (if (null objList)
+               nil
+               (progn
+                 (setq arr (vlax-make-safearray vlax-vbObject
+                             (cons 0 (1- (length objList))))
+                       i 0)
+                 (foreach o objList
+                   (vlax-safearray-put-element arr i o)
+                   (setq i (1+ i)))
+                 (vla-CopyObjects doc arr blkDef)
+                 T))))) ; progn, if, lambda, vl-catch-all-apply, setq
       (pu-end "CUTSHEET:wrap:block")
       (cond
         ((vl-catch-all-error-p result)
@@ -1352,32 +1861,58 @@
          (pu-begin "CUTSHEET:wrap:insert")
          (setq ok T)
          (princ (strcat "\n[wrap] Блок создан: да, ссылок: " (itoa oldRefs)))
-         ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
-         (setq si 0 retained 0)
-         (repeat (sslength ss)
-           (setq e (ssname ss si))
-           (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
-           (setq si (1+ si)))
-         (if (> retained 0)
-           (princ (strcat "\n[wrap] Удалено оригиналов после копии в блок: " (itoa retained))))
-         ;; Вставляем ровно один INSERT обратно в базовую точку
-         (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
-         (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
-         (if (ex-safe-ok-p ins-result)
+         (if skipped
            (progn
-             (if (= (type ae-settings-output-layer) 'SUBR)
-               (ae-settings-apply-vla-layer
-                 (ex-safe-value ins-result)
-                 (ae-settings-output-layer 'CUTSHEET)))
-             (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2)))
-           )
-           (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
-         ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
-         (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
-         (setq finalRefs (if r (sslength r) 0))
-         (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
-                        ", после вставки: " (itoa finalRefs)
-                        (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)")))
+             (setq tmpStr "")
+             (foreach k skipped
+               (setq tmpStr (strcat tmpStr (if (= tmpStr "") "" ", ") (cs-safe-str k))))
+             (princ (strcat "\n[CUTSHEET][GUARD] в наборе карты несовместимые с блоком объекты, "
+                            "они не копировались: " tmpStr))))
+         ;; Ред. 25: контроль состава — в определении блока должно лежать ровно
+         ;; то, что нарисовала карта. При несовпадении оригиналы НЕ удаляем и
+         ;; INSERT не вставляем: данные важнее завершённости операции.
+         (setq blkTally (cs-block-type-tally blockName))
+         (setq expTally (cs-ss-type-tally ss))
+         (setq tallyOk (and blkTally (cs-tally-equal-p (cdr blkTally) expTally)))
+         (if tallyOk
+           (princ (strcat "\n[CUTSHEET] В блоке объектов: " (itoa (car blkTally))
+                          " (карта: " (itoa (sslength ss)) ") — "
+                          (cs-tally-str (cdr blkTally))))
+           (progn
+             (setq ok nil)
+             (princ (strcat "\n[CUTSHEET][GUARD] состав блока не совпал с набором карты — "
+                            "оригиналы не удалены, INSERT не вставлен: "
+                            (if blkTally
+                              (strcat "в блоке " (itoa (car blkTally)) " (" (cs-tally-str (cdr blkTally))
+                                      "), в наборе " (itoa (sslength ss)) " (" (cs-tally-str expTally) ")")
+                              "состав блока недоступен")))))
+         (if tallyOk
+           (progn
+             ;; CopyObjects КОПИРУЕТ: оригиналы в модели больше не нужны
+             (setq si 0 retained 0)
+             (repeat (sslength ss)
+               (setq e (ssname ss si))
+               (if (entget e) (progn (entdel e) (setq retained (1+ retained))))
+               (setq si (1+ si)))
+             (if (> retained 0)
+               (princ (strcat "\n[wrap] Удалено оригиналов после копии в блок: " (itoa retained))))
+             ;; Вставляем ровно один INSERT обратно в базовую точку
+             (setq insertPt3 (vlax-3d-point (list (car basePt) (cadr basePt) 0.0)))
+             (setq ins-result (ex-safe-call 'vla-InsertBlock (list ms insertPt3 blockName 1.0 1.0 1.0 0.0)))
+             (if (ex-safe-ok-p ins-result)
+               (progn
+                 (if (= (type ae-settings-output-layer) 'SUBR)
+                   (ae-settings-apply-vla-layer
+                     (ex-safe-value ins-result)
+                     (ae-settings-output-layer 'CUTSHEET)))
+                 (princ (strcat "\n[wrap] Блок вставлен в базовую точку: " (rtos (car basePt) 2 2) "," (rtos (cadr basePt) 2 2))))
+               (princ (strcat "\n[wrap] ОШИБКА вставки INSERT: " (ex-safe-message ins-result))))
+             ;; Контроль (Шаг 4): после упаковки в чертеже ровно один новый INSERT
+             (setq r (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+             (setq finalRefs (if r (sslength r) 0))
+             (princ (strcat "\n[wrap] Проверка: ссылок до упаковки: " (itoa oldRefs)
+                            ", после вставки: " (itoa finalRefs)
+                            (if (= finalRefs (1+ oldRefs)) " (OK: ровно 1 новый)" " (ВНИМАНИЕ: прирост не равен 1!)")))))
          (pu-end "CUTSHEET:wrap:insert")))
       ok)))
 
@@ -1390,7 +1925,8 @@
                       insPt colorMap bbox1 bbox2 bbox3 bbox
                       doc oldEcho lastEnt ssNew ent blockName baseName uMark
                       totalCnt actualArea bboxArea sheetArea kpdFact kpdBox
-                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc v5ans)
+                      blockBasePt oldOsmode oldCmddia oldFiledia bboxFact bboxCalc v5ans
+                      srcTitle)
   
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
@@ -1412,6 +1948,16 @@
         *CUTSHEET-FRAME-LAYER*)))
   
   (princ "\n=== РАСКРОЙ ЛИСТА ===")
+
+  ;; Ред. 24: подпись источника слоёв от общей системы фильтров диспетчера
+  ;; («по фильтру: Мои» / «по фильтрам: Фасады, Окна»), если слои дал фильтр
+  (setq srcTitle nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq srcTitle (extraction-layer-filter-source-title))
+  )
+  (if srcTitle
+    (princ (strcat "\n" srcTitle))
+  )
   
   (if (eq layers-from-caller 'ASK)
     (progn
@@ -1460,6 +2006,17 @@
   (setq records (cs-collect-records ss choice dynType))
   (pu-end "CUTSHEET:collect")
   (cs-print-rejects)
+  ;; Диагностика заполнения: видно, сколько деталей посчитано по проёму
+  ;; и с каким припуском. Маска «*» ловит ВСЕ блоки — предупреждаем.
+  (if (> *cs-fill-count* 0)
+    (progn
+      (princ (strcat "\n[CUTSHEET] Заполнение: " (itoa *cs-fill-count*)
+                     " блоков, размер в свету + припуск "
+                     (itoa (cs-fill-allowance)) " мм"))
+      (if (member "*" (cs-fill-masks))
+        (princ (strcat "\n[CUTSHEET][GUARD] Маска блоков ЗАПОЛНЕНИЯ = \"*\": "
+                       "припуск применён ко ВСЕМ подходящим блокам. "
+                       "Сузьте маску в Настройках, если это не нужно.")))))
   (tu-diag "FILTER" (strcat "принято деталей: " (itoa (length records))
                              ", исключено: " (itoa (apply (quote +) (mapcar (quote cdr) *cs-rejects*)))))
 
@@ -1554,6 +2111,12 @@
             (progn (tu-undo-begin) (setq uMark T)))
           
           (setq lastEnt (entlast))
+
+          ;; Ред. 25: набор для блока строится ТОЛЬКО из объектов, созданных
+          ;; отрисовкой (обход базы затягивал чужие объекты и ронял упаковку).
+          (setq *cs-created* '())
+          (setq *cs-created-miss* 0)
+          (princ "\n[CUTSHEET][STEP] отрисовка карты: старт")
           
           (pu-begin "CUTSHEET:draw-layout")
           (setq bbox1 (cs-draw-layout sheets sheetW sheetH insPt colorMap))
@@ -1565,8 +2128,7 @@
           (pu-end "CUTSHEET:draw-summary")
           
           ;; Собрать созданные примитивы для фактического bbox
-          (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
-          (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          (setq ssNew (cs-ss-from-created))
           (tu-diag "DRAW" (strcat "примитивов карты: " (itoa (sslength ssNew))))
           
           ;; Этап 2: рамка - по ФАКТИЧЕСКИМ границам результата (GetBoundingBox
@@ -1586,8 +2148,16 @@
           (setq bbox (cs-combine-bbox bbox bbox3))
           
           ;; Пересобрать набор с учетом рамки для обертки в блок
-          (setq ssNew (ssadd) ent (if lastEnt (entnext lastEnt) (entnext)))
-          (while ent (ssadd ent ssNew) (setq ent (entnext ent)))
+          (setq ssNew (cs-ss-from-created))
+          (princ (strcat "\n[CUTSHEET][STEP] отрисовка карты: готово (листы, сводка, рамка)"))
+          (princ (strcat "\n[CUTSHEET][STEP] набор для блока: "
+                         (itoa (sslength ssNew)) " объектов карты"
+                         (if (> *cs-created-miss* 0)
+                           (strcat ", НЕ отслежено: " (itoa *cs-created-miss*))
+                           "")))
+          (vl-catch-all-apply 'cs-scan-foreign-entities
+                              (list lastEnt ssNew))
+          (princ "\n[CUTSHEET][STEP] диагностика цепочки БД: завершена")
 
           
           (if (> (sslength ssNew) 0)
@@ -1627,5 +2197,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 23: U2, П1-П3, V5 мягкий лимит 10000 (alert+запрос на продолжение)). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 34: сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
