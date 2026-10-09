@@ -41,6 +41,8 @@
 (setq *NEST-COLOR-KPD*     1)
 ;; Цвет текста длины детали (желтый)
 (setq *NEST-COLOR-PART-TEXT* 2)
+;; Марка элемента (атрибут МАРКА динамического блока) в углу детали
+(setq *CUTLINE-MARK-COLOR* 7)
 
 ;; ================= ПАРАМЕТРЫ ШАПКИ КАРТЫ РАСКРОЯ =================
 (setq *CUTLINE-ROW-H*          200.0)   ;; высота строки шапки
@@ -182,6 +184,281 @@
   ent
 )
 
+;; ============================================================
+;; ЗАЩИТА УПАКОВКИ РАСКЛАДКИ В БЛОК (ред. 15)
+;; Если в чертеже есть выделенные (grip) объекты, команда -BLOCK
+;; добавляет их к переданному набору: посторонние объекты уходят
+;; внутрь блока и пропадают из чертежа. Перед -BLOCK предвыделение
+;; снимается, а PICKFIRST на время команды выключается.
+;; ============================================================
+
+;; Сколько объектов сейчас выделено (grip). 0 — предвыделения нет.
+(defun n1-pickfirst-count ( / pf)
+  (setq pf (ssgetfirst))
+  (if (and pf (cadr pf)) (sslength (cadr pf)) 0)
+)
+
+;; Снять предвыделение. quiet=T — без сообщения.
+;; Возвращает число снятых объектов (0 — снимать было нечего).
+(defun n1-clear-pickfirst (quiet / n)
+  (setq n (n1-pickfirst-count))
+  (sssetfirst nil nil)
+  (if (and (> n 0) (not quiet))
+    (princ (strcat "\n[CUTLINE] Снято предвыделение: " (itoa n)
+                   " объект(ов) — в блок раскладки они не попадут."))
+  )
+  n
+)
+
+;; Ключ типа объекта: DXF-код 0 и ActiveX ObjectName -> один словарь
+(defun n1-type-key (typ / s)
+  (setq s (strcase (if (= (type typ) 'STR) typ "")))
+  (cond
+    ((= s "ACDBLINE")          "LINE")
+    ((= s "ACDBPOLYLINE")      "LWPOLYLINE")
+    ((= s "ACDBTEXT")          "TEXT")
+    ((= s "ACDBMTEXT")         "MTEXT")
+    ((= s "ACDBTRACE")         "SOLID")
+    ((= s "ACDBSOLID")         "SOLID")
+    ((= s "ACDBMLINE")         "MLINE")
+    ((= s "ACDBBLOCKREFERENCE") "INSERT")
+    (T s)
+  )
+)
+
+;; Состав набора: список пар (ТИП . КОЛИЧЕСТВО)
+(defun n1-ss-type-tally (ss / i ent typ rec out)
+  (setq out '() i 0)
+  (if ss
+    (repeat (sslength ss)
+      (setq ent (ssname ss i))
+      (setq typ (n1-type-key (cdr (assoc 0 (entget ent)))))
+      (setq rec (assoc typ out))
+      (if rec
+        (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+        (setq out (append out (list (cons typ 1))))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Тип объекта внутри блока: тем же способом, что и у набора раскладки
+;; (DXF-код 0 через ename); ObjectName — только запасной путь.
+(defun n1-object-type-key (obj / e typ)
+  (setq typ nil)
+  (setq e (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+  (if (not (vl-catch-all-error-p e))
+    (setq typ (n1-type-key (cdr (assoc 0 (entget e)))))
+  )
+  (if (or (null typ) (= typ ""))
+    (setq typ (n1-type-key (vl-catch-all-apply 'vla-get-ObjectName (list obj))))
+  )
+  (if (or (null typ) (= typ "")) "?" typ)
+)
+
+;; Состав определения блока (ActiveX-обход): (ВСЕГО ТИП . КОЛИЧЕСТВО ...)
+(defun n1-block-type-tally (blockName / acad doc blocks blk obj n out typ rec)
+  (setq acad (vl-catch-all-apply 'vlax-get-acad-object '()))
+  (if (vl-catch-all-error-p acad)
+    nil
+    (progn
+      (setq doc (vl-catch-all-apply 'vla-get-ActiveDocument (list acad)))
+      (if (vl-catch-all-error-p doc)
+        nil
+        (progn
+          (setq blocks (vl-catch-all-apply 'vla-get-Blocks (list doc)))
+          (setq blk
+            (if (vl-catch-all-error-p blocks)
+              nil
+              (vl-catch-all-apply 'vla-Item (list blocks blockName))))
+          (if (vl-catch-all-error-p blk)
+            nil
+            (progn
+              (setq n 0 out '())
+              (vlax-for obj blk
+                (setq n (1+ n))
+                (setq typ (n1-object-type-key obj))
+                (setq rec (assoc typ out))
+                (if rec
+                  (setq out (subst (cons typ (1+ (cdr rec))) rec out))
+                  (setq out (append out (list (cons typ 1))))
+                )
+              )
+              (cons n out)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Состав одной строкой: "LINE 12, LWPOLYLINE 40, TEXT 33"
+(defun n1-tally-str (tally / s rec)
+  (setq s "")
+  (foreach rec tally
+    (setq s (strcat s (if (= s "") "" ", ")
+                    (car rec) " " (itoa (cdr rec)))))
+  s
+)
+
+(defun n1-tally-sort (tally)
+  (vl-sort (mapcar '(lambda (x) (cons (car x) (cdr x))) tally)
+    '(lambda (a b) (< (car a) (car b))))
+)
+
+;; Совпадают ли составы (порядок не важен)
+(defun n1-tally-equal-p (a b)
+  (equal (n1-tally-sort a) (n1-tally-sort b))
+)
+
+;; ============================================================
+;; УЧЁТ ОБЪЕКТОВ РАСКЛАДКИ (ред. 16)
+;; Набор для упаковки в блок — ТОЛЬКО объекты, созданные отрисовкой.
+;; Обход базы (entnext) для этого не годится: он затягивает посторонние
+;; объекты чертежа (атрибуты и вставки из других пространств/определений),
+;; а -BLOCK вместе с атрибутами уносит в блок и их вставку-владельца.
+;; ============================================================
+
+(if (not (boundp '*n1-created*))
+  (setq *n1-created* nil)
+)
+
+;; Сколько объектов не удалось отследить (диагностика)
+(if (not (boundp '*n1-created-miss*))
+  (setq *n1-created-miss* 0)
+)
+
+;; Всё, что печатается, приводится к строке: диагностика не имеет права
+;; упасть на чужом типе (например, на имени объекта вместо имени).
+(defun n1-safe-str (x)
+  (if (= (type x) 'STR) x (vl-princ-to-string x))
+)
+
+;; Имя владельца объекта: слой/пространство/определение блока.
+;; Код 330 возвращает то handle-строку, то имя объекта (зависит от контекста),
+;; поэтому обрабатываются оба случая. Только чтение, все вызовы под защитой:
+;; диагностика НЕ имеет права упасть и уронить раскрой.
+(defun n1-owner-name (ent / d h oe od name)
+  (setq name nil)
+  (setq d (vl-catch-all-apply (function entget) (list ent)))
+  (if (not (vl-catch-all-error-p d))
+    (progn
+      (setq h (cdr (assoc 330 d)))
+      (cond
+        ;; Владелец уже пришёл именем объекта
+        ((= (type h) 'ENAME) (setq oe h))
+        ;; Владелец пришёл handle-строкой
+        ((= (type h) 'STR)
+         (setq oe (vl-catch-all-apply (function handent) (list h)))
+         (if (vl-catch-all-error-p oe) (setq oe nil)))
+      )
+      (if oe
+        (progn
+          (setq od (vl-catch-all-apply (function entget) (list oe)))
+          (if (not (vl-catch-all-error-p od))
+            (setq name (cdr (assoc 2 od)))
+          )
+        )
+      )
+    )
+  )
+  (cond
+    ((= (type name) 'STR) name)
+    ((= (type h) 'ENAME)
+     (strcat "имя объекта " (n1-safe-str h)))
+    ((= (type h) 'STR) (strcat "handle " h))
+    (T "?")
+  )
+)
+
+;; Создать объект и запомнить его в *n1-created*.
+;; Тип проверяется: entlast обязан вернуть именно созданный объект.
+(defun n1-mk (dxf / want before res e)
+  (setq want (n1-type-key (cdr (assoc 0 dxf))))
+  (setq before (entlast))
+  (setq res (entmake dxf))
+  (if res
+    (progn
+      (setq e (entlast))
+      (if (and e (not (eq e before))
+               (= (n1-type-key (cdr (assoc 0 (entget e)))) want))
+        (setq *n1-created* (cons e *n1-created*))
+        (setq *n1-created-miss* (1+ *n1-created-miss*))
+      )
+    )
+  )
+  res
+)
+
+;; Диагностика: что обход базы затянул бы в блок помимо раскладки.
+;; Работает только на чтение и НИКОГДА не возвращает ошибку наружу: при сбое
+;; печатается причина, раскрой продолжается (диагностика не роняет работу).
+(defun n1-scan-foreign-entities (from-ent ssNew / ent n typ layer owner res)
+  (setq n 0)
+  (setq ent (vl-catch-all-apply (function entnext)
+              (if from-ent (list from-ent) '())))
+  (while (and ent (not (vl-catch-all-error-p ent)))
+    (if (not (n1-ss-contains-p ssNew ent))
+      (progn
+        (setq typ   (n1-safe-str
+                      (n1-type-key (cdr (assoc 0 (entget ent))))))
+        (setq layer (n1-safe-str (cdr (assoc 8 (entget ent)))))
+        (setq owner (vl-catch-all-apply (function n1-owner-name) (list ent)))
+        (if (vl-catch-all-error-p owner)
+          (setq owner (strcat "ошибка определения: "
+                              (n1-safe-str
+                                (vl-catch-all-error-message owner)))))
+        (setq n (1+ n))
+        (if (<= n 10)
+          (princ (strcat "\n[CUTLINE][SCAN] посторонний объект в цепочке БД: "
+                         typ " (слой " layer ", владелец " owner ")")))
+      )
+    )
+    (setq ent (vl-catch-all-apply (function entnext) (list ent)))
+  )
+  (if (and ent (vl-catch-all-error-p ent))
+    (princ (strcat "\n[CUTLINE][SCAN] Обход прерван: "
+                   (n1-safe-str (vl-catch-all-error-message ent)))))
+  (if (> n 0)
+    (princ (strcat "\n[CUTLINE][SCAN] Посторонних объектов в цепочке БД: "
+                   (itoa n) " — в блок раскладки не берутся."))
+    (princ "\n[CUTLINE][SCAN] Посторонних объектов в цепочке БД нет."))
+  n
+)
+
+;; Собственная undo-метка вокруг отрисовки и упаковки раскладки.
+;; Нужна для детерминированного отката: сравнивать DBMOD нельзя (в уже
+;; несохранённом чертеже он не меняется), а откатывать нужно ровно группу
+;; раскладки (UNDO Back после EndUndoMark).
+(defun n1-wrap-mark-begin (doc)
+  (if (and doc (not (vl-catch-all-error-p doc))
+           (not (vl-catch-all-error-p
+                  (vl-catch-all-apply 'vla-StartUndoMark (list doc)))))
+    T
+    nil
+  )
+)
+
+(defun n1-wrap-mark-end (doc ok / old-echo)
+  (if (and doc (not (vl-catch-all-error-p doc)))
+    (progn
+      (vl-catch-all-apply 'vla-EndUndoMark (list doc))
+      (if (not ok)
+        (progn
+          (setq old-echo (getvar "CMDECHO"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" 0))
+          (princ "\n[CUTLINE] Откат раскладки (UNDO Back)...")
+          (vl-catch-all-apply 'vl-cmdf (list "_.UNDO" "1"))
+          (vl-catch-all-apply 'setvar (list "CMDECHO" old-echo))
+        )
+      )
+    )
+  )
+)
+
 (defun n1-ss-contains-p (ss ent / i found)
   (setq i 0 found nil)
   (if ss
@@ -225,7 +502,7 @@
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq c (if (and color (numberp color)) color 7))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 0.0)))
 )
@@ -240,7 +517,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)))
 )
@@ -255,7 +532,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -271,7 +548,7 @@
   (setq c (if (and color (numberp color)) color 7))
   (setq style (if (and *NEST-TEXT-STYLE* (/= *NEST-TEXT-STYLE* ""))
                 *NEST-TEXT-STYLE* (getvar "TEXTSTYLE")))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 0.0)
@@ -289,7 +566,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -308,7 +585,7 @@
   (setq style (if (and *NEST-BOLD-TEXT-STYLE* (/= *NEST-BOLD-TEXT-STYLE* ""))
                 *NEST-BOLD-TEXT-STYLE* (getvar "TEXTSTYLE")))
   (setq angle-rad (if (and angle (numberp angle)) (* angle (/ pi 180.0)) 0.0))
-  (entmake (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
+  (n1-mk (list (cons 0 "TEXT") (cons 62 c) (cons 7 style)
                  (cons 10 (list (car pt) (cadr pt) 0.0))
                  (cons 11 (list (car pt) (cadr pt) 0.0))
                  (cons 40 h) (cons 1 str) (cons 50 angle-rad)
@@ -322,14 +599,14 @@
 ;; ============================================================
 
 (defun n1-draw-line (p1 p2 color)
-  (entmake (list (cons 0 "LINE") (cons 62 color)
+  (n1-mk (list (cons 0 "LINE") (cons 62 color)
                  (cons 10 (list (car p1) (cadr p1) 0.0))
                  (cons 11 (list (car p2) (cadr p2) 0.0))))
 )
 
 (defun n1-draw-rect (p1 p2 color / x1 y1 x2 y2)
   (setq x1 (car p1) y1 (cadr p1) x2 (car p2) y2 (cadr p2))
-  (entmake (list (cons 0 "LWPOLYLINE") (cons 100 "AcDbEntity")
+  (n1-mk (list (cons 0 "LWPOLYLINE") (cons 100 "AcDbEntity")
                  (cons 62 color) (cons 100 "AcDbPolyline")
                  (cons 90 4) (cons 70 1)
                  (cons 10 (list x1 y1)) (cons 10 (list x2 y1))
@@ -366,7 +643,7 @@
   (if (< aci 0) (setq aci 0))
 
   (setq res
-    (entmake
+    (n1-mk
       (list
         (cons 0 "SOLID")
         (cons 100 "AcDbEntity")
@@ -430,7 +707,7 @@
   (setq y1 (- (cadr (car  bbox)) *CUTLINE-FRAME-PAD-BOTTOM*))
   (setq x2 (+ (car  (cadr bbox)) *CUTLINE-FRAME-PAD-RIGHT*))
   (setq y2 (+ (cadr (cadr bbox)) *CUTLINE-FRAME-PAD-TOP*))
-  (entmake
+  (n1-mk
     (list '(0 . "LWPOLYLINE")
           '(100 . "AcDbEntity")
           (cons 8 *CUTLINE-FRAME-LAYER*)
@@ -601,6 +878,82 @@
   )
   bars
 )
+
+;; ============================================================
+;; МАРКИ ДЕТАЛЕЙ
+;; Решатель FFD работает с голыми длинами: связь детали с исходным
+;; объектом теряется ещё при группировке по длине, а трогать решатель
+;; нельзя. Поэтому марки собираются в побочную очередь «длина -> марки»
+;; при измерении и выдаются при отрисовке по длине детали.
+;;
+;; Следствие, которое надо знать: детали ОДНОЙ длины взаимозаменяемы —
+;; это один и тот же рез, — поэтому марка может достаться соседней
+;; детали той же длины. На раскрой и на длины это не влияет.
+;; ============================================================
+
+(setq *n1-marks* '())     ;; собранные при измерении: (ключ . список марок)
+(setq *n1-marks-q* '())   ;; расходуемая копия на время отрисовки
+
+;; Ключ длины: целые доли миллиметра, чтобы не сравнивать float напрямую
+(defun n1-mark-key (len)
+  (fix (+ (* (float len) 1000.0) 0.5)))
+
+(defun n1-mark-add (len mk / k f)
+  (if (and mk (= (type mk) 'STR) (/= mk ""))
+    (progn
+      (setq k (n1-mark-key len) f (assoc k *n1-marks*))
+      (if f
+        (setq *n1-marks* (subst (cons k (append (cdr f) (list mk))) f *n1-marks*))
+        (setq *n1-marks* (cons (cons k (list mk)) *n1-marks*)))))
+  mk)
+
+;; Марки деталей данной длины — для перечня изделий. Берутся из
+;; мастер-списка, который при отрисовке не расходуется.
+(defun n1-marks-for (len / f)
+  (setq f (assoc (n1-mark-key len) *n1-marks*))
+  (if f (cdr f) '())
+)
+
+;; Строки перечня изделий: одна на каждую марку.
+;; Было «первая марка +N» — читалось как часть названия («ТБ-1 Рг3ср +2»),
+;; хотя означало «есть ещё 2 другие марки». Теперь длина с несколькими
+;; марками даёт несколько строк с точным количеством по каждой, а изделия
+;; без марки идут отдельной строкой с прочерком.
+;; Решатель уже отработал — это только таблица, раскрой не меняется.
+(defun n1-piece-rows (pieces / out rec len cnt marks seen m f nomark)
+  (setq out '())
+  (foreach rec pieces
+    (setq len (car rec) cnt (cadr rec) marks (n1-marks-for len) seen '())
+    ;; количество по каждой марке, порядок — как при измерении
+    (foreach m marks
+      (setq f (assoc m seen))
+      (if f
+        (setq seen (subst (cons m (1+ (cdr f))) f seen))
+        (setq seen (append seen (list (cons m 1))))))
+    (setq nomark (- cnt (length marks)))
+    (if (null seen)
+      (setq out (append out (list (list len cnt ""))))
+      (progn
+        (foreach f seen
+          (setq out (append out (list (list len (cdr f) (car f))))))
+        (if (> nomark 0)
+          (setq out (append out (list (list len nomark "-")))))))
+  )
+  out
+)
+
+;; Копия очереди на отрисовку: повторный вызов отрисовки не остаётся без марок
+(defun n1-marks-begin ()
+  (setq *n1-marks-q* *n1-marks*))
+
+;; Очередная марка для детали данной длины; nil, если марок больше нет
+(defun n1-mark-take (len / k f v)
+  (setq k (n1-mark-key len) f (assoc k *n1-marks-q*) v nil)
+  (if (and f (cdr f))
+    (progn
+      (setq v (car (cdr f)))
+      (setq *n1-marks-q* (subst (cons k (cdr (cdr f))) f *n1-marks-q*))))
+  v)
 
 (defun n1-add-group (groups key / found)
   (setq found (assoc key groups))
@@ -794,15 +1147,14 @@
   )
 )
 
-(defun n1-filter-name-str ( / f1 f2 f3 s)
-  (setq f1 (if (boundp '*EXTRACTION-FILTER-FACADES*) *EXTRACTION-FILTER-FACADES* nil))
-  (setq f2 (if (boundp '*EXTRACTION-FILTER-VITRAZH*) *EXTRACTION-FILTER-VITRAZH* nil))
-  (setq f3 (if (boundp '*EXTRACTION-FILTER-FONAR*) *EXTRACTION-FILTER-FONAR* nil))
-  (setq s "")
-  (if f1 (setq s "Фасады"))
-  (if f2 (setq s (if (= s "") "Витражи" (strcat s ", Витражи"))))
-  (if f3 (setq s (if (= s "") "Фонарь 3D" (strcat s ", Фонарь 3D"))))
-  (if (= s "") nil s)
+(defun n1-filter-name-str ( / s)
+  ;; Ред. 14: общая система фильтров диспетчера (extraction.lsp, ред. 2).
+  ;; Возвращает «по фильтру: Мои» / «по фильтрам: Фасады, Окна» либо nil.
+  (setq s nil)
+  (if (= (type extraction-layer-filter-source-title) 'SUBR)
+    (setq s (extraction-layer-filter-source-title))
+  )
+  s
 )
 
 ;; ============================================================
@@ -817,12 +1169,42 @@
           *CUTLINE-IS-AUTO-FILTER*
           fname)
      (setq suffix " (за исключением слоя 0)")
-     (list (strcat "Групповой фильтр " fname suffix))
+     (list (strcat fname suffix))
     )
     ((or (null layers) (not (listp layers)) (= (length layers) 0))
      (list "Все слои")
     )
     (T layers)
+  )
+)
+
+;; «Фильтр Витражи» / «Фильтры Фасады, Окна» либо nil
+(defun n1-filter-header-str ( / keys s)
+  (setq s nil)
+  (if (and (n1-filter-name-str)
+           (= (type extraction-layer-filter-list-str) 'SUBR)
+           (boundp '*EXTRACTION-LAYER-FILTERS*))
+    (progn
+      (setq keys *EXTRACTION-LAYER-FILTERS*)
+      (setq s (extraction-layer-filter-list-str keys))
+      (setq s
+        (if (= s "")
+          nil
+          (strcat (if (= (length keys) 1) "Фильтр " "Фильтры ") s)))
+    )
+  )
+  s
+)
+
+;; Заголовок рамки: «Выбранные слои (Фильтр Витражи: 31 слой)»
+;; либо «Выбранные слои (3 слоя)» / «Выбранные слои (все слои)»
+(defun n1-layers-header-text (layers / n f)
+  (setq n (if (listp layers) (length layers) 0))
+  (setq f (n1-filter-header-str))
+  (cond
+    (f (strcat "Выбранные слои (" f ": " (itoa n) " " (tu-layer-word n) ")"))
+    ((<= n 0) "Выбранные слои (все слои)")
+    (T (strcat "Выбранные слои (" (itoa n) " " (tu-layer-word n) ")"))
   )
 )
 
@@ -941,9 +1323,17 @@
                           layers
                           default-xls default-acad
                           / dcl-file dcl-id result
-                            all-cnt base-layers tn)
+                            all-cnt base-layers tn dcl-src)
 
-  (setq dcl-file (findfile "cutline_filter.dcl"))
+  (setq dcl-src (findfile "cutline_filter.dcl"))
+
+  ;; Заголовок рамки «Выбранные слои» статичен в DCL — подменяется
+  ;; во временной копии файла; при неудаче берётся исходный файл
+  (setq dcl-file
+    (if dcl-src
+      (tu-dcl-with-label dcl-src "label = \"Выбранные слои"
+        (n1-layers-header-text (n1-layer-display-list layers)))
+      nil))
 
   (if (null dcl-file)
     (progn
@@ -955,6 +1345,7 @@
       (if (< dcl-id 0)
         (progn
           (princ "\n[cutline] ошибка load_dialog")
+          (tu-dcl-cleanup dcl-file dcl-src)
           nil
         )
         (progn
@@ -969,6 +1360,7 @@
             (progn
               (princ "\n[cutline] ошибка new_dialog")
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
               nil
             )
             (progn
@@ -1090,6 +1482,7 @@
               (setq result (start_dialog))
 
               (vl-catch-all-apply 'unload_dialog (list dcl-id))
+              (tu-dcl-cleanup dcl-file dcl-src)
 
               (if (= result 1)
                 (list
@@ -1141,7 +1534,7 @@
                             i ent typ len key pieces total geom
                             measured obj)
   (setq pieces '() i 0 total (sslength ss) measured 0
-        *n1-rejects* '() *n1-reject-reason* nil)
+        *n1-rejects* '() *n1-reject-reason* nil *n1-marks* '())
   (repeat total
     (setq ent (ssname ss i))
     (setq typ (cdr (assoc 0 (entget ent))))
@@ -1195,6 +1588,8 @@
        (n1-reject-note (strcat "длиннее максимума (" (rtos max-len 2 0) " мм)")))
       (T (setq measured (1+ measured))
          (setq key (fix (+ (/ len tol) 0.5)))
+         ;; марка берётся по ОКРУГЛЁННОЙ длине — ровно та, что уйдёт в решатель
+         (n1-mark-add (* (float key) tol) (tu-entity-mark ent))
          (setq pieces (n1-add-group pieces key)))
     )
     (setq i (1+ i))
@@ -1258,7 +1653,7 @@
 (defun n1-draw-layout (bars stock kerf insPt color-map /
     barHeight gap txtH axisStep x0 y0 maxy miny i bar pieces waste used util pgi pgn
     curx p str col labelX labelY1 labelY2 centerY
-    waste-txt-h waste-center-y waste-x)
+    waste-txt-h waste-center-y waste-x mk mkH drawMk markW sizeW textX)
 
   ;; ============================================================
   ;; ПАРАМЕТРЫ РАСКЛАДКИ (РЕГУЛИРОВАТЬ ЗДЕСЬ)
@@ -1274,6 +1669,8 @@
   ;; ============================================================
 
   (setq x0 (car insPt) y0 (cadr insPt) maxy (+ y0 barHeight) miny y0 i 0)
+  ;; свежая копия очереди марок: повторная отрисовка не остаётся без них
+  (n1-marks-begin)
   ;; П3 (п.20): прогресс в статусной строке
   (setq pgi 0 pgn (length bars))
   (foreach bar bars
@@ -1329,8 +1726,28 @@
     (setq curx x0)
     (foreach p pieces
       (setq str (itoa (fix p)))
-      (n1-draw-text-bold-center (list (+ curx (* p 0.5)) (+ y0 (* barHeight 0.5)))
+      ;; Марка считается ПЕРВОЙ: деталь на хлысте — узкая полоса, обе
+      ;; подписи идут в один ряд, поэтому габарит центрируется не по
+      ;; всей детали, а по месту, оставшемуся справа от марки.
+      (setq mk (n1-mark-take p))
+      (setq mkH (if mk (* txtH 0.75) 0.0))
+      (setq markW (if mk (+ (* mkH 0.35) (* (strlen mk) mkH 0.6)) 0.0))
+      (setq sizeW (* (strlen str) txtH 1.1 0.6))
+      ;; обе подписи влезают, только если хватает места по длине детали
+      ;; марка растёт вверх от середины: нужна половина высоты плюс запас
+      (setq drawMk (and mk
+                        (> barHeight (* mkH 2.2))
+                        (> p (+ markW sizeW (* mkH 0.5)))))
+      (if (not drawMk) (setq markW 0.0))
+      (setq textX (+ curx markW (* (- p markW) 0.5)))
+      (n1-draw-text-bold-center (list textX (+ y0 (* barHeight 0.5)))
                                 (* txtH 1.1) str *NEST-COLOR-PART-TEXT* 0.0)
+      (if drawMk
+        ;; марка на той же базовой линии, что и длина: подписи читаются
+        ;; одной строкой. Высоты разные (0.75 против 1.1), поэтому
+        ;; совпадают низы букв — так и выравнивают текст в строке.
+        (n1-draw-text (list (+ curx (* mkH 0.35)) (+ y0 (* barHeight 0.5)))
+                      mkH mk *CUTLINE-MARK-COLOR*))
       (setq curx (+ curx p kerf))
     )
 
@@ -1355,15 +1772,29 @@
 ;; Сводная таблица раскроя
 ;; ============================================================
 (defun n1-draw-summary (bars pieces stock insPt color-map oversized /
-    barHeight th rowH pad col1W col2W col3W tableW tableH
-    left top x1 x2 x3 y bottom
+    barHeight th rowH pad col1W colMW col2W col3W tableW tableH
+    left top x1 xM x2 x3 y bottom hasMarks
     num-bars stock-total-mm stock-total-m
     total-cnt total-product-mm total-product-m kpd rec oversized-cnt
-    num-piece-rows)
+    num-piece-rows rows)
   (setq barHeight (/ stock 30.0) th (* barHeight 0.30)
-        rowH (* barHeight 0.6) pad (* barHeight 0.6)
-        col1W (* barHeight 5.0) col2W (* barHeight 3.5) col3W (* barHeight 4.5))
-  (setq tableW (+ col1W col2W col3W (* pad 2)))
+        rowH (* barHeight 0.6) pad (* barHeight 0.6))
+  ;; Колонка «Марка» появляется, только если марки есть. Ширина таблицы
+  ;; при этом НЕ меняется: сумма колонок та же (13.0 долей barHeight),
+  ;; просто перераспределена.
+  (setq hasMarks nil)
+  (foreach rec pieces
+    (if (n1-marks-for (car rec)) (setq hasMarks T)))
+  ;; порядок важен: ширины колонок зависят от hasMarks, а строки от марок
+  ;; Ширины подобраны по заголовкам: «Изделие, мм» и «Сумма, м.п.» по
+  ;; 11 знаков, «Кол-во, шт» 10. Прежнее 2.6 для «Кол-во» было тесным —
+  ;; заголовок не помещался. Марка стоит ближе к «Изделие».
+  (if hasMarks
+    (setq col1W (* barHeight 3.1) colMW (* barHeight 3.95)
+          col2W (* barHeight 2.85) col3W (* barHeight 3.1))
+    (setq col1W (* barHeight 5.0) colMW 0.0
+          col2W (* barHeight 3.5) col3W (* barHeight 4.5)))
+  (setq tableW (+ col1W colMW col2W col3W (* pad 2)))
   (setq num-bars (length bars) stock-total-mm (* num-bars stock)
         stock-total-m (/ stock-total-mm 1000.0))
   (setq total-cnt 0 total-product-mm 0.0)
@@ -1376,7 +1807,10 @@
               (* 100.0 (/ (float total-product-mm) (float stock-total-mm))) 0.0))
 
   (setq pieces (vl-sort pieces '(lambda (a b) (> (car a) (car b)))))
-  (setq num-piece-rows (length pieces))
+  ;; перечень разбивается по маркам: строк становится больше, высота
+  ;; таблицы пересчитывается ниже по их фактическому числу
+  (setq rows (n1-piece-rows pieces))
+  (setq num-piece-rows (length rows))
 
   (setq left (car insPt) top (cadr insPt))
 
@@ -1384,7 +1818,10 @@
                   (* (+ 9.0 num-piece-rows (if oversized 1.0 0.0)) rowH)))
 
   (setq bottom (- top tableH))
-  (setq x1 (+ left pad) x2 (+ left pad col1W) x3 (+ left pad col1W col2W))
+  (setq x1 (+ left pad)
+        xM (+ left pad col1W)
+        x2 (+ left pad col1W colMW)
+        x3 (+ left pad col1W colMW col2W))
 
   (n1-draw-rect (list left bottom) (list (+ left tableW) top) *NEST-COLOR-OUTLINE*)
 
@@ -1404,13 +1841,20 @@
 
   (setq y (- y rowH))
   (n1-draw-text (list x1 y) th "Изделие, мм" *NEST-COLOR-HEADER*)
+  (if hasMarks
+    (n1-draw-text (list xM y) th "Марка" *NEST-COLOR-HEADER*))
   (n1-draw-text (list x2 y) th "Кол-во, шт" *NEST-COLOR-HEADER*)
   (n1-draw-text (list x3 y) th "Сумма, м.п." *NEST-COLOR-HEADER*)
 
   (setq y (- y rowH))
-  (foreach rec pieces
+  (foreach rec rows
     (n1-draw-text (list x1 y) th (itoa (fix (car rec)))
                   (n1-get-color color-map (car rec)))
+    (if hasMarks
+      (n1-draw-text (list xM y) th
+                    (tu-marks-brief (list (caddr rec))
+                                    (tu-fit-chars colMW th))
+                    *NEST-COLOR-VALUE*))
     (n1-draw-text (list x2 y) th (itoa (cadr rec)) *NEST-COLOR-VALUE*)
     (n1-draw-text (list x3 y) th
                   (rtos (/ (* (car rec) (cadr rec)) 1000.0) 2 2) *NEST-COLOR-VALUE*)
@@ -1927,7 +2371,9 @@
                        default-xls default-acad
                        default-stock default-kerf
                        dialog-result r xls-ok
-                       old-transparency-display svSaved v5ans)
+                       old-transparency-display svSaved v5ans
+                       pfCount oldPickfirst blkExpected blkTally
+                       blkObjCount blkTypes ssNewCount blkGuard wrapMark)
   (defun *error* (msg)
     (if (and msg (not (wcmatch (strcase msg) "*CANCEL*,*QUIT*,*BREAK*,*EXIT*")))
       (princ (strcat "\n[CUTLINE ERROR] " msg)))
@@ -2183,6 +2629,15 @@
 
           (setq lastEnt (entlast))
 
+          ;; Ред. 16: своя undo-метка на отрисовку+упаковку раскладки и сброс
+          ;; учёта созданных объектов (набор для блока строится из него).
+          (setq *n1-created* '())
+          (setq *n1-created-miss* 0)
+          (setq wrapMark (n1-wrap-mark-begin doc))
+          (princ (strcat "\n[CUTLINE][STEP] отрисовка раскладки: старт ("
+                         (n1-safe-str (if wrapMark "метка UNDO открыта"
+                                          "метка UNDO недоступна")) ")"))
+
           ;; ШАПКА КАРТЫ РАСКРОЯ (над первым хлыстом)
           (pu-begin "CUTLINE:draw-header")
           (setq bbox0 (n1-draw-header insPt stock kerf))
@@ -2210,14 +2665,25 @@
                 (list (car (car bbox2))
                       (- (cadr (car bbox2)) (* barHeight 2.0))))
               nil))
+          (princ "\n[CUTLINE][STEP] отрисовка раскладки: готово (шапка, хлысты, рамка, таблицы)")
 
+          ;; Ред. 16: только объекты, созданные отрисовкой (*n1-created*).
+          ;; Обход базы entnext затягивал в блок посторонние объекты чертежа:
+          ;; атрибуты и вставки иных пространств/определений (диагностика ниже,
+          ;; только чтение и печать).
           (setq ssNew (ssadd))
-          (if lastEnt
-            (setq ent (entnext lastEnt))
-            (setq ent (entnext)))
-          (while ent
-            (ssadd ent ssNew)
-            (setq ent (entnext ent)))
+          (foreach ent *n1-created*
+            (if (entget ent) (ssadd ent ssNew)))
+          (setq ssNewCount (sslength ssNew))
+          (princ (strcat "\n[CUTLINE][STEP] набор для блока: "
+                         (itoa ssNewCount) " объектов раскладки"
+                         (if (> *n1-created-miss* 0)
+                           (strcat ", НЕ отслежено: "
+                                   (itoa *n1-created-miss*))
+                           "")))
+          (vl-catch-all-apply (function n1-scan-foreign-entities)
+                              (list lastEnt ssNew))
+          (princ "\n[CUTLINE][STEP] диагностика цепочки БД: завершена")
 
           (princ "\nCUTLINE: упаковка раскладки в блок...")
           (pu-begin "CUTLINE:wrap-block")
@@ -2233,12 +2699,19 @@
               (setq blkRefsBeforeSet blkRefsSet)
               (pu-end "CUTLINE:wrap:ssget")
               (setq blkRefsBefore (if blkRefsSet (sslength blkRefsSet) 0))
+              ;; Ред. 15: предвыделение недопустимо — -BLOCK добавляет
+              ;; выделенные объекты к набору и уносит их в блок раскладки.
+              (setq pfCount (n1-clear-pickfirst nil))
+              (setq oldPickfirst (getvar "PICKFIRST"))
+              (vl-catch-all-apply 'setvar (list "PICKFIRST" 0))
+              (setq blkExpected (n1-ss-type-tally ssNew))
               (pu-begin "CUTLINE:wrap:block")
               (setq blkCmdResult
                     (vl-catch-all-apply 'vl-cmdf
                       (list "_.-BLOCK" blockName insPt ssNew "")))
               (pu-end "CUTLINE:wrap:block")
               (setvar "CMDECHO" oldEcho)
+              (vl-catch-all-apply 'setvar (list "PICKFIRST" oldPickfirst))
               (cond
                 ((vl-catch-all-error-p blkCmdResult)
                  (princ (strcat "\nОшибка при создании блока: "
@@ -2287,6 +2760,78 @@
           )
           (pu-end "CUTLINE:wrap-block")
 
+          ;; Ред. 15: контроль состава. В блоке должны быть ТОЛЬКО объекты
+          ;; раскладки; посторонние (предвыделение) = потеря объектов чертежа.
+          (if (and (not blkGuard) (tblsearch "BLOCK" blockName))
+            (progn
+              (setq blkTally
+                (vl-catch-all-apply (function n1-block-type-tally)
+                                    (list blockName)))
+              (if (vl-catch-all-error-p blkTally) (setq blkTally nil))
+              (if blkTally
+                (progn
+                  (setq blkObjCount (car blkTally)
+                        blkTypes   (cdr blkTally))
+                  (princ (strcat "\n[CUTLINE] В блоке объектов: "
+                                 (itoa blkObjCount)
+                                 " (раскладка: " (itoa ssNewCount) ") — "
+                                 (n1-tally-str blkTypes)))
+                  (if (/= blkObjCount ssNewCount)
+                    ;; Число объектов в блоке не совпало с нарисованным:
+                    ;; больше — -BLOCK забрал посторонние (предвыделение),
+                    ;; меньше — часть раскладки в блок не попала. И то и другое
+                    ;; портит результат, поэтому раскладку откатываем.
+                    (progn
+                      (setq blkGuard T)
+                      (princ (strcat "\n[CUTLINE][GUARD] В блоке объектов "
+                                     (itoa blkObjCount) " вместо "
+                                     (itoa ssNewCount) ": "
+                                     (if (> blkObjCount ssNewCount)
+                                       "в блок забраны посторонние объекты."
+                                       "часть объектов раскладки в блок не попала.")))
+                      (princ (strcat "\n[CUTLINE][GUARD] Состав блока: "
+                                     (n1-tally-str blkTypes)))
+                      (princ (strcat "\n[CUTLINE][GUARD] Ожидался состав: "
+                                     (n1-tally-str blkExpected)))
+                      (princ (strcat "\n[CUTLINE][GUARD] Раскладка откатывается ("
+                                     blockName
+                                     "); объекты чертежа возвращаются на место."))
+                      ;; откат делает ветка blkGuard ниже (своя метка)
+                    )
+                    (if (not (n1-tally-equal-p blkTypes blkExpected))
+                      (princ (strcat "\n[CUTLINE] ВНИМАНИЕ: состав блока отличается от раскладки: "
+                                     (n1-tally-str blkTypes)))
+                    )
+                  )
+                )
+              )
+            )
+          )
+
+          (if blkGuard
+            (progn
+              (n1-clear-pickfirst T)
+              (n1-disable-transparency-display old-transparency-display)
+              ;; Ред. 16: откат всей группы раскладки (метка открыта до отрисовки)
+              (n1-wrap-mark-end doc nil)
+              (setq wrapMark nil)
+              (if uMark (progn (tu-undo-end doc) (setq uMark nil)))
+              (setq blkRefsSet (ssget "_X" (list '(0 . "INSERT") (cons 2 blockName))))
+              (if (and blkRefsSet (> (sslength blkRefsSet) 0))
+                (princ "\n[CUTLINE][GUARD] Автооткат не удался — удалите блок раскроя и выполните UNDO вручную.")
+                (princ "\n[CUTLINE] Раскладка откатана: чертёж не изменён.")
+              )
+              (princ "\n[CUTLINE] Запустите раскрой повторно.")
+              (princ)
+              (exit)
+            )
+          )
+
+          ;; Ред. 16: раскладка построена и упакована — закрываем свою метку
+          (if wrapMark
+            (progn (n1-wrap-mark-end doc T) (setq wrapMark nil))
+          )
+
           ;; Объединяем bbox: рамка (уже включает шапку и хлысты) + таблицы
           (setq bbox (n1-combine-bbox bbox-frame
                         (if bbox3 (n1-combine-bbox bbox2 bbox3) bbox2)))
@@ -2300,6 +2845,9 @@
               (setq uMark nil)
             )
           )
+
+          ;; Ред. 15: не оставляем пользователю подсвеченное выделение
+          (n1-clear-pickfirst T)
 
           (n1-disable-transparency-display old-transparency-display)
         )
@@ -2329,5 +2877,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 13: U2, П1-П3, V5 мягкий лимит 10000, V4 rejects-контракт отбраковки). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 24: марка в одну строку с длиной; перечень изделий — строка на каждую марку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

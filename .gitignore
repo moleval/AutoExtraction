@@ -13,3 +13,7 @@ Desktop.ini
 
 # VS Code local workspace files
 *.code-workspace
+
+# Python
+__pycache__/
+*.pyc

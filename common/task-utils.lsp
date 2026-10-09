@@ -270,3 +270,178 @@
     (setq n (1+ n) name (strcat base " " (itoa n))))
   name)
 
+
+;; ------------------------------------------------------------
+;; DCL: динамический заголовок рамки
+;; Заголовок кластера (boxed_column) в DCL статичен: у кластера нет
+;; ключа, set_tile на него не действует. Чтобы показать в заголовке
+;; счётчик, файл диалога копируется во временный с заменой строки
+;; label. Любая неудача — возвращается ИСХОДНЫЙ файл: окно откроется
+;; как раньше, просто с обычным заголовком.
+;; ------------------------------------------------------------
+
+;; В заголовке DCL недопустимы кавычка и обратный слэш
+(defun tu-dcl-safe-label (s / out i ch)
+  (setq out "" i 1)
+  (if (= (type s) 'STR)
+    (repeat (strlen s)
+      (setq ch (substr s i 1))
+      (if (and (/= ch "\"") (/= ch "\\"))
+        (setq out (strcat out ch))
+      )
+      (setq i (1+ i))
+    )
+  )
+  out
+)
+
+;; Копия .dcl, в которой первая строка с подстрокой anchor заменена
+;; заголовком new-label. Возвращает путь к копии либо исходный путь.
+(defun tu-dcl-with-label (src anchor new-label / tmp fin fout line done res)
+  (setq new-label (tu-dcl-safe-label new-label))
+  (setq done nil tmp nil)
+  (if (and (= (type src) 'STR)
+           (= (type anchor) 'STR)
+           (/= new-label "")
+           (findfile src))
+    (progn
+      (setq tmp (vl-filename-mktemp "ae_dcl" nil ".dcl"))
+      (setq fin (open src "r"))
+      (setq fout (if fin (open tmp "w")))
+      (if (and fin fout)
+        (progn
+          (while (setq line (read-line fin))
+            (if (and (not done) (vl-string-search anchor line))
+              (progn
+                (write-line (strcat "    label = \"" new-label "\";") fout)
+                (setq done T)
+              )
+              (write-line line fout)
+            )
+          )
+          (close fin)
+          (close fout)
+        )
+        (progn
+          (if fin (close fin))
+          (if fout (close fout))
+        )
+      )
+    )
+  )
+  (setq res (if done tmp src))
+  (if (and tmp (not done)) (vl-catch-all-apply 'vl-file-delete (list tmp)))
+  res
+)
+
+;; Удалить временную копию (исходный файл не трогает)
+(defun tu-dcl-cleanup (path src)
+  (if (and (= (type path) 'STR) (= (type src) 'STR) (/= path src))
+    (vl-catch-all-apply 'vl-file-delete (list path))
+  )
+  nil
+)
+
+;; Склонение слова «слой»: 1 слой, 2 слоя, 5 слоев, 11 слоев
+(defun tu-layer-word (n / n10 n100)
+  (if (not (numberp n)) (setq n 0))
+  (setq n (fix (abs n)))
+  (setq n100 (rem n 100) n10 (rem n 10))
+  (cond
+    ((and (>= n100 11) (<= n100 14)) "слоев")
+    ((= n10 1) "слой")
+    ((and (>= n10 2) (<= n10 4)) "слоя")
+    (T "слоев")
+  )
+)
+
+
+;; ------------------------------------------------------------
+;; МАРКА ЭЛЕМЕНТА (атрибут вставки блока)
+;; Тег сравнивается без учёта регистра и пробелов по краям.
+;; Любая ошибка ActiveX гасится: отсутствие марки — это nil, а не сбой
+;; задачи. Карта раскроя не должна падать из-за подписи.
+;; ------------------------------------------------------------
+
+;; Имя атрибута с маркой. Меняется здесь, если в чертежах другой тег.
+(if (not (boundp '*AE-MARK-ATTR*))
+  (setq *AE-MARK-ATTR* "МАРКА")
+)
+
+;; Значение атрибута блока по тегу либо nil
+(defun tu-block-attr (obj tag / attrs a tagname value result)
+  (setq result nil)
+  (setq attrs (vl-catch-all-apply 'vlax-invoke (list obj 'GetAttributes)))
+  (if (or (vl-catch-all-error-p attrs) (not (listp attrs)))
+    nil
+    (progn
+      (foreach a attrs
+        (if (null result)
+          (progn
+            (setq tagname (vl-catch-all-apply 'vla-get-TagString (list a)))
+            (if (and (not (vl-catch-all-error-p tagname))
+                     (= (type tagname) 'STR)
+                     (= (strcase (vl-string-trim " \t" tagname)) (strcase tag)))
+              (progn
+                (setq value (vl-catch-all-apply 'vla-get-TextString (list a)))
+                (if (and (not (vl-catch-all-error-p value))
+                         (= (type value) 'STR))
+                  (setq value (vl-string-trim " \t" value))
+                  (setq value nil))
+                (if (and value (/= value "")) (setq result value)))))))
+      result))
+)
+
+;; Краткая строка марок для колонки таблицы. Длинный список не
+;; растягивает колонку: вместо перечисления даётся «первая +N».
+(defun tu-marks-brief (marks maxlen / out s n tail)
+  (setq out '())
+  (if (listp marks)
+    (foreach m marks
+      (if (and (= (type m) 'STR) (/= m "") (not (member m out)))
+        (setq out (append out (list m))))))
+  (if (null out)
+    ""
+    (progn
+      (setq s "")
+      (foreach m out (setq s (if (= s "") m (strcat s ", " m))))
+      (if (<= (strlen s) maxlen)
+        s
+        (progn
+          (setq n (1- (length out)))
+          (if (> n 0)
+            ;; ВАЖНО: хвост « +N» входит в предел. Без обрезки первой
+            ;; марки свёртка выходила ДЛИННЕЕ колонки и наезжала на
+            ;; соседнюю — «ТБ-1 Рг5.1бдв +1» рядом с «2» читалось «+12».
+            (progn
+              (setq tail (strcat " +" (itoa n)))
+              (strcat (substr (car out) 1 (max 1 (- maxlen (strlen tail))))
+                      tail))
+            (substr (car out) 1 maxlen))))))
+)
+
+;; Сколько символов влезает в колонку шириной colW при высоте текста
+;; textH. Ширина знака в шрифтах карты около 0.6 высоты; один знак
+;; оставляем на зазор до соседней колонки.
+(defun tu-fit-chars (colW textH / n)
+  (if (or (not (numberp colW)) (not (numberp textH)) (<= textH 0.0))
+    8
+    (progn
+      (setq n (1- (fix (/ colW (* textH 0.6)))))
+      (if (< n 3) 3 n)))
+)
+
+;; Марка объекта: только у вставок блоков, у прочих типов nil
+(defun tu-entity-mark (ent / ed obj v)
+  (setq v nil)
+  (if (and ent (= (type ent) 'ENAME))
+    (progn
+      (setq ed (vl-catch-all-apply 'entget (list ent)))
+      (if (and (not (vl-catch-all-error-p ed))
+               (= (cdr (assoc 0 ed)) "INSERT"))
+        (progn
+          (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list ent)))
+          (if (not (vl-catch-all-error-p obj))
+            (setq v (tu-block-attr obj *AE-MARK-ATTR*)))))))
+  v
+)
