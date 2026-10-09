@@ -1101,6 +1101,71 @@ def check_call_arity(files=None) -> list[str]:
     return errors
 
 
+CHKPARENS_PLUGINS_MUST = [
+    ('(strcat root "\\\\Plugins\\\\")',
+     "папки Plugins\\ в обходе CHKALL - принятые плагины остались бы без проверки"),
+    ("(boundp '*ae-reload-plugin-files*)",
+     "стража boundp по *ae-reload-plugin-files*: без него CHKALL падает, "
+     "если reload.lsp не загружен"),
+    ("(member (type ae-reload-plugin-dev-path) '(SUBR USUBR))",
+     "проверки типа резолвера - CHKALL обязан работать и без reload.lsp"),
+    ("(setq p (ae-reload-plugin-dev-path f))",
+     "вызова резолвера ae-reload-plugin-dev-path: CHKALL обязан брать тот же "
+     "путь, что и RELOAD"),
+    ("(if (and p (findfile p))",
+     "проверки, что файл плагина действительно найден"),
+    ("(setq total (+ total (chk-parens-scan p)))",
+     "самого сканирования плагина в разработке (иголка с setq, потому что "
+     "голое (chk-parens-scan p) есть ещё в c:CHKFILE)"),
+]
+
+CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p")
+
+
+def check_chkparens_plugins_guard() -> list[str]:
+    """CHKALL достаёт плагины: и Plugins\, и каталоги разработки.
+
+    Без этого обхода у плагина не остаётся ни одной проверки внутри
+    AutoCAD: RELOAD сканирует скобки только ПОСЛЕ ошибки загрузки
+    (post-диагностика в ae-reload-load-file), а не до неё.
+    """
+    path = TEST_DIR / "chkparens.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in CHKPARENS_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: CHKALL и плагины: нет {what}")
+
+    # Переменные обхода обязаны быть локальными для c:CHKALL: иначе они
+    # глобальные и переживают команду.
+    try:
+        forms = lisp_parse(text)
+    except LispParseError as exc:
+        return errors + [f"{rel}: CHKALL и плагины: разбор форм - {exc}"]
+    locals_found = None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, args = node[1][0], node[1][1], node[1][2]
+        if (head[0] == "atom" and head[1].lower() == "defun"
+                and name[0] == "atom" and name[1].lower() == "c:chkall"
+                and args[0] == "list"):
+            locals_found = [a[1].lower() for a in args[1][1:] if a[0] == "atom"]
+            break
+    if locals_found is None:
+        errors.append(f"{rel}: CHKALL и плагины: не найдена форма (defun c:CHKALL ...)")
+    else:
+        for var in CHKALL_LOCALS:
+            if var not in locals_found:
+                errors.append(
+                    f"{rel}: CHKALL и плагины: '{var}' не среди локальных "
+                    f"переменных c:CHKALL")
+    return errors
+
+
 def check_dialog_layers_section() -> list[str]:
     """Раздел «Выбранные слои» в окнах раскроя (CUTLINE и CUTSHEET).
 
@@ -1428,6 +1493,7 @@ def main() -> int:
     errors += check_cutsheet_wrap_guard()
     errors += check_reload_chkload_guard()
     errors += check_reload_plugins_guard()
+    errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -1494,7 +1560,7 @@ def main() -> int:
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
-        f" / call-arity"
+        f" / chkparens-plugins-guard / call-arity"
         f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")
