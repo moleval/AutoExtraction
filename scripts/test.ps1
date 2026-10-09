@@ -71,6 +71,55 @@ if (-not $Quiet) {
 }
 
 # ------------------------------------------------------------
+# Логические тесты (Python, без AutoCAD)
+#
+# Важно: это ПОРТЫ алгоритмов, они проверяют расчёт, а не текст .lsp.
+# Связь порта с кодом держит static_check.py выше, поэтому прогон
+# имеет смысл только целиком: обе половины.
+# ------------------------------------------------------------
+$logicTests = @(
+    "tests\layer_filter_logic_test.py",
+    "tests\mark_logic_test.py",
+    "tests\fill_allowance_test.py"
+)
+
+$logicFailed = @()
+
+foreach ($t in $logicTests) {
+    $tpath = Join-Path $Root $t
+
+    if (-not (Test-Path $tpath)) {
+        if (-not $Quiet) { Write-Host "SKIP: $t (файл не найден)" }
+        continue
+    }
+
+    $out = & $python @pythonArgs $tpath
+    $rc  = $LASTEXITCODE
+
+    if ($rc -ne 0) {
+        $logicFailed += $t
+        Write-Host ""
+        Write-Host "FAIL: $t (код возврата $rc)"
+        $out | ForEach-Object { Write-Host "    $_" }
+    }
+    elseif (-not $Quiet) {
+        $last = ($out | Where-Object { $_ -ne "" } | Select-Object -Last 1)
+        Write-Host "PASS: $t  $last"
+    }
+}
+
+if ($logicFailed.Count -gt 0) {
+    Write-Host ""
+    Write-Host "RESULT: FAIL (логические тесты: $($logicFailed -join ', '))"
+    exit 1
+}
+
+if (-not $Quiet) {
+    Write-Host ""
+    Write-Host "Logic tests: PASS"
+}
+
+# ------------------------------------------------------------
 # AutoCAD (опционально)
 # ------------------------------------------------------------
 if ($AutoCAD) {

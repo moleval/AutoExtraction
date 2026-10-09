@@ -139,7 +139,7 @@
   (princ)
 )
 
-(defun c:chkall ( / root d files f total)
+(defun c:chkall ( / root d files f total p)
   (setq root
     (if (findfile "extraction.lsp")
       (vl-filename-directory
@@ -149,13 +149,29 @@
     (princ "\n[CHK] не найден корень проекта (extraction.lsp).")
     (progn
       (setq total 0)
+      ;; Plugins\ - сторонние модули (раздел плагинов RELOAD).
+      ;; Если папки нет, vl-directory-files вернёт nil - проверка
+      ;; ниже просто пропустит каталог.
       (foreach d (list (strcat root "\\common\\")
-                       (strcat root "\\Extraction\\"))
+                       (strcat root "\\Extraction\\")
+                       (strcat root "\\Plugins\\"))
         (setq files (vl-directory-files d "*.lsp" 1))
         (if files
           (foreach f files
             (setq total (+ total (chk-parens-scan (strcat d f))))
           )
+        )
+      )
+      ;; Плагины в разработке: лежат вне проекта, но грузятся тем же
+      ;; RELOAD, поэтому проверяются здесь же. Путь берётся тем же
+      ;; резолвером, что и в RELOAD (ae-reload-plugin-dev-path из
+      ;; reload.lsp) - проверяем ровно тот файл, который будет загружен.
+      (if (and (boundp '*ae-reload-plugin-files*)
+               (member (type ae-reload-plugin-dev-path) '(SUBR USUBR)))
+        (foreach f *ae-reload-plugin-files*
+          (setq p (ae-reload-plugin-dev-path f))
+          (if (and p (findfile p))
+            (setq total (+ total (chk-parens-scan p))))
         )
       )
       (setq files (vl-directory-files root "*.lsp" 1))

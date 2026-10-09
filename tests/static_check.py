@@ -31,6 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 LISP_DIRS = [ROOT / "Extraction", ROOT / "common"]
 DCL_DIRS  = [ROOT / "Extraction"]
+# Plugins\ - сторонние модули (раздел плагинов RELOAD). Проверяются на
+# баланс, лексику, спецформы и пересечение имён defun с проектом; проектные
+# группы (mains, dcl-keys, wrap-guard) на них не распространяются.
+PLUGIN_DIR = ROOT / "Plugins"
 # tests/*.lsp в основные группы не входят (там свои defun и свои правила),
 # но баланс и лексика проверяются отдельно: chkparens.lsp автозагружает RELOAD.
 TEST_DIR = ROOT / "tests"
@@ -93,10 +97,67 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _rel(path: Path) -> str:
+    """Путь для отчёта: относительно корня, а для плагинов разработки - как есть.
+
+    Плагины в разработке лежат в своих каталогах (например D:\\PlotFrameToPDF),
+    поэтому relative_to(ROOT) для них неприменим.
+    """
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def lisp_files():
     for d in LISP_DIRS:
         if d.exists():
             yield from sorted(d.glob("*.lsp"))
+
+
+def _reload_string_list(var: str) -> list[str]:
+    """Список строк из (setq <var> '("a" "b")) в reload.lsp."""
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    try:
+        forms = lisp_parse(read_text(path))
+    except LispParseError:
+        return []
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, val = node[1][0], node[1][1], node[1][2]
+        if not (head[0] == "atom" and head[1].lower() == "setq"
+                and name[0] == "atom" and name[1].lower() == var.lower()):
+            continue
+        inner = val[1][0] if (val[0] == "quote" and val[1]) else val
+        if inner[0] == "list":
+            return [x[1] for x in inner[1] if x[0] == "str"]
+    return []
+
+
+def plugin_dev_files():
+    """Плагины в каталогах разработки - те же пути, что грузит RELOAD.
+
+    Каталог разработки имеет приоритет над Plugins\; каталога может не быть
+    (другая машина) - тогда список пуст, и это не ошибка.
+    """
+    names = _reload_string_list("*ae-reload-plugin-files*")
+    dirs = _reload_string_list("*ae-reload-plugin-dev-dirs*")
+    for name in names:
+        for d in dirs:
+            # в .lsp путь записан с экранированным слэшем: D:\\PlotFrameToPDF
+            cand = Path(d.replace("\\\\", "\\")) / name
+            if cand.is_file():
+                yield cand
+                break
+
+
+def plugin_lisp_files():
+    """Сторонние модули из Plugins\ (могут отсутствовать - это не ошибка)."""
+    if PLUGIN_DIR.exists():
+        yield from sorted(PLUGIN_DIR.glob("*.lsp"))
 
 
 def dcl_files():
@@ -111,9 +172,10 @@ def test_lisp_files():
 
 
 def all_lisp_files():
-    """Весь LISP проекта: модули, tests/*.lsp и корневой reload.lsp."""
+    """Весь LISP проекта: модули, tests/*.lsp, Plugins/*.lsp и reload.lsp."""
     yield from lisp_files()
     yield from test_lisp_files()
+    yield from plugin_lisp_files()
     root_lisp = ROOT / "reload.lsp"
     if root_lisp.exists():
         yield root_lisp
@@ -254,8 +316,9 @@ def check_duplicates() -> list[str]:
     errors: list[str] = []
     seen: dict[str, tuple[str, int]] = {}
 
-    for path in lisp_files():
-        rel = str(path.relative_to(ROOT))
+    for path in (list(lisp_files()) + list(plugin_lisp_files())
+                 + list(plugin_dev_files())):
+        rel = _rel(path)
         for name, line in find_defuns(path):
             lname = name.lower()
             if lname in WHITELIST_DEFUN:
@@ -574,6 +637,72 @@ def check_reload_chkload_guard() -> list[str]:
     return errors
 
 
+RELOAD_PLUGINS_MUST = [
+    ("(setq *ae-reload-plugin-files*",
+     "списка плагинов *ae-reload-plugin-files* на верхнем уровне"),
+    ("(setq *ae-reload-plugin-dev-dirs*",
+     "списка каталогов разработки *ae-reload-plugin-dev-dirs*"),
+    ("(defun ae-reload-plugin-dev-path (",
+     "резолвера ae-reload-plugin-dev-path (плагин в разработке грузится из своего каталога)"),
+    ("(ae-reload-plugin-dev-path f)",
+     "вызова резолвера при сборке путей плагинов"),
+    ("(vl-file-directory-p plugins-dir)",
+     "проверки папки Plugins\\ - без неё отсутствующий плагин даёт «НЕ НАЙДЕН»"),
+    ("(if dev-path \"разработка\" nil)",
+     "пометки источника в логе: без неё не видно, разработка это или Plugins\\"),
+    ("(if (> plugin-cnt 0)",
+     "условия секции PLUGINS: пустой список обязан пропускаться молча"),
+    ("(setq plugin-cnt (length plugin-items))",
+     "подсчёта плагинов - без него итог «из N модулей» расходится с фактом"),
+    ("(setq revpaths (cons (car it) revpaths))",
+     "учёта плагинов в маркере редакции"),
+    ("(length extraction-files) plugin-cnt)",
+     "знаменателя «из N модулей» с плагинами"),
+]
+
+PLUGIN_LOCALS = ("plugins-dir", "plugin-items", "plugin-cnt", "dev-path", "it")
+
+
+def check_reload_plugins_guard() -> list[str]:
+    """RELOAD: раздел плагинов молча не работает и не течёт в глобальные."""
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in RELOAD_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: раздел плагинов: нет {what}")
+
+    # Переменные секции обязаны быть локальными для c:RELOAD: иначе они
+    # становятся глобальными и переживают прогон (класс дефекта, который
+    # уже давал ложные итоги).
+    try:
+        forms = lisp_parse(text)
+    except LispParseError as exc:
+        return errors + [f"{rel}: раздел плагинов: разбор форм - {exc}"]
+    locals_found = None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, args = node[1][0], node[1][1], node[1][2]
+        if (head[0] == "atom" and head[1].lower() == "defun"
+                and name[0] == "atom" and name[1].lower() == "c:reload"
+                and args[0] == "list"):
+            locals_found = [a[1].lower() for a in args[1][1:] if a[0] == "atom"]
+            break
+    if locals_found is None:
+        errors.append(f"{rel}: раздел плагинов: не найдена форма (defun c:RELOAD ...)")
+    else:
+        for var in PLUGIN_LOCALS:
+            if var not in locals_found:
+                errors.append(
+                    f"{rel}: раздел плагинов: '{var}' не в списке локальных "
+                    f"переменных c:RELOAD (утечёт в глобальные)")
+    return errors
+
+
 def check_lisp_lexical(files=None) -> list[str]:
     """Причины «синтаксической ошибки» при целом балансе скобок.
 
@@ -584,7 +713,7 @@ def check_lisp_lexical(files=None) -> list[str]:
     errors: list[str] = []
     for path in (files if files is not None else lisp_files()):
         raw = path.read_bytes()
-        rel = path.relative_to(ROOT)
+        rel = _rel(path)
         if raw.startswith(b"\xef\xbb\xbf"):
             errors.append(f"{rel}: BOM (UTF-8) в начале файла — AutoCAD читает .lsp как ANSI")
             raw = raw[3:]
@@ -808,7 +937,7 @@ def check_special_forms(files=None) -> list[str]:
     """
     errors: list[str] = []
     for path in (files if files is not None else all_lisp_files()):
-        rel = path.relative_to(ROOT)
+        rel = _rel(path)
         try:
             forms = lisp_parse(read_text(path))
         except LispParseError as exc:
@@ -857,7 +986,7 @@ def check_reload_version_line() -> list[str]:
             "(печать только из тела c:RELOAD теряется при старых определениях в сессии)"]
 
 
-def check_defun_duplicates_in_file() -> list[str]:
+def check_defun_duplicates_in_file(files=None) -> list[str]:
     """Один и тот же defun объявлен в файле дважды.
 
     Дубль переопределяет первую редакцию молча: сканеры баланса и
@@ -865,7 +994,7 @@ def check_defun_duplicates_in_file() -> list[str]:
     tests/*.lsp, которые в общий поиск дубликатов не входят.
     """
     errors: list[str] = []
-    for path in all_lisp_files():
+    for path in (files if files is not None else all_lisp_files()):
         seen: dict[str, int] = {}
         for name, line in find_defuns(path):
             key = name.upper()
@@ -873,10 +1002,389 @@ def check_defun_duplicates_in_file() -> list[str]:
             if name.lower() in {w.lower() for w in WHITELIST_DEFUN}:
                 continue
             if key in seen:
-                errors.append(f"{path.relative_to(ROOT)}: defun {name} объявлен дважды "
+                errors.append(f"{_rel(path)}: defun {name} объявлен дважды "
                               f"(строки {seen[key]} и {line})")
             else:
                 seen[key] = line
+    return errors
+
+
+# ----------------------------------------------------------------------
+# Арность вызовов
+# ----------------------------------------------------------------------
+
+ARITY_SKIP_HEADS = ("defun", "lambda")
+
+
+def lisp_signatures(files) -> dict[str, set]:
+    """Имя defun (строчными) -> набор допустимых чисел параметров."""
+    sig: dict[str, set] = {}
+    for path in files:
+        try:
+            forms = lisp_parse(read_text(path))
+        except (OSError, LispParseError):
+            continue
+        for node in forms:
+            if node[0] != "list" or len(node[1]) < 3:
+                continue
+            head, name, args = node[1][0], node[1][1], node[1][2]
+            if not (head[0] == "atom" and head[1].lower() == "defun"
+                    and name[0] == "atom" and args[0] == "list"):
+                continue
+            count = 0
+            for a in args[1]:
+                if a[0] == "atom" and a[1] == "/":
+                    break
+                if a[0] == "atom":
+                    count += 1
+            sig.setdefault(name[1].lower(), set()).add(count)
+    return sig
+
+
+def _walk_calls(node, cb) -> None:
+    """Обход формы: cb(голова строчными, число аргументов, строка).
+
+    Цитаты не обходятся: '(...) - данные, а не вызов. У defun и lambda
+    пропускаются имя и список параметров, иначе символы параметров
+    выглядели бы вызовами.
+    """
+    if node[0] != "list":
+        return
+    items = node[1]
+    head = items[0] if items else None
+    head_name = head[1].lower() if head and head[0] == "atom" else None
+    start = 3 if (head_name in ARITY_SKIP_HEADS and len(items) > 2) else 1
+    for child in items[start:]:
+        if child[0] != "quote":
+            _walk_calls(child, cb)
+    if head_name:
+        cb(head_name, len(items) - 1, node[2])
+
+
+def check_call_arity(files=None) -> list[str]:
+    """Число аргументов в вызове совпадает с числом параметров defun.
+
+    У пользовательской функции AutoLISP нет необязательных аргументов:
+    вызов с меньшим числом аргументов, чем параметров, - ошибка
+    «слишком мало аргументов», и она рвёт команду целиком. Именно так
+    RELOAD падал сразу после «--- COMMON ---», когда у
+    ae-reload-load-file появился второй параметр note, а два старых
+    вызова остались с одним аргументом (коммит 1dc99a1). Статически это
+    не видно: скобки сбалансированы, спецформы на месте.
+    """
+    paths = (files if files is not None
+             else list(all_lisp_files()) + list(plugin_dev_files()))
+    sig = lisp_signatures(paths)
+    errors: list[str] = []
+    for path in paths:
+        try:
+            forms = lisp_parse(read_text(path))
+        except (OSError, LispParseError):
+            continue
+        rel = _rel(path)
+
+        def cb(name, argc, line, rel=rel):
+            if name in ARITY_SKIP_HEADS:
+                return
+            allowed = sig.get(name)
+            if not allowed or argc in allowed:
+                return
+            want = "/".join(str(a) for a in sorted(allowed))
+            kind = ("слишком мало аргументов" if argc < min(allowed)
+                    else "слишком много аргументов")
+            errors.append(
+                f"{rel}: строка {line}: {name} - аргументов {argc}, "
+                f"параметров {want}: в AutoCAD будет «{kind}»")
+
+        for form in forms:
+            _walk_calls(form, cb)
+    return errors
+
+
+CHKPARENS_PLUGINS_MUST = [
+    ('(strcat root "\\\\Plugins\\\\")',
+     "папки Plugins\\ в обходе CHKALL - принятые плагины остались бы без проверки"),
+    ("(boundp '*ae-reload-plugin-files*)",
+     "стража boundp по *ae-reload-plugin-files*: без него CHKALL падает, "
+     "если reload.lsp не загружен"),
+    ("(member (type ae-reload-plugin-dev-path) '(SUBR USUBR))",
+     "проверки типа резолвера - CHKALL обязан работать и без reload.lsp"),
+    ("(setq p (ae-reload-plugin-dev-path f))",
+     "вызова резолвера ae-reload-plugin-dev-path: CHKALL обязан брать тот же "
+     "путь, что и RELOAD"),
+    ("(if (and p (findfile p))",
+     "проверки, что файл плагина действительно найден"),
+    ("(setq total (+ total (chk-parens-scan p)))",
+     "самого сканирования плагина в разработке (иголка с setq, потому что "
+     "голое (chk-parens-scan p) есть ещё в c:CHKFILE)"),
+]
+
+CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p")
+
+
+def check_chkparens_plugins_guard() -> list[str]:
+    """CHKALL достаёт плагины: и Plugins\, и каталоги разработки.
+
+    Без этого обхода у плагина не остаётся ни одной проверки внутри
+    AutoCAD: RELOAD сканирует скобки только ПОСЛЕ ошибки загрузки
+    (post-диагностика в ae-reload-load-file), а не до неё.
+    """
+    path = TEST_DIR / "chkparens.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in CHKPARENS_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: CHKALL и плагины: нет {what}")
+
+    # Переменные обхода обязаны быть локальными для c:CHKALL: иначе они
+    # глобальные и переживают команду.
+    try:
+        forms = lisp_parse(text)
+    except LispParseError as exc:
+        return errors + [f"{rel}: CHKALL и плагины: разбор форм - {exc}"]
+    locals_found = None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, args = node[1][0], node[1][1], node[1][2]
+        if (head[0] == "atom" and head[1].lower() == "defun"
+                and name[0] == "atom" and name[1].lower() == "c:chkall"
+                and args[0] == "list"):
+            locals_found = [a[1].lower() for a in args[1][1:] if a[0] == "atom"]
+            break
+    if locals_found is None:
+        errors.append(f"{rel}: CHKALL и плагины: не найдена форма (defun c:CHKALL ...)")
+    else:
+        for var in CHKALL_LOCALS:
+            if var not in locals_found:
+                errors.append(
+                    f"{rel}: CHKALL и плагины: '{var}' не среди локальных "
+                    f"переменных c:CHKALL")
+    return errors
+
+
+XLS_MARKS_MUST = {
+    "Extraction/cutsheet.lsp": [
+        ('(defun cs-xls-has-marks (',
+         'помощника cs-xls-has-marks: без него колонка «Марка» появится и в прогонах без марок'),
+        ('(setq hasMarks (cs-xls-has-marks sheets oversized))',
+         'расчёта hasMarks в писателях XLS/CSV'),
+        ('(if hasMarks (eu-cell f "H" "String" "Марка" ""))',
+         'заголовка «Марка» в XLS листа'),
+        ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
+         'ячейки марки детали в XLS листа'),
+        ('(if hasMarks (eu-cell f "D" "String" (if (car rw) (car rw) "") ""))',
+         'ячейки марки в перечне изделий XLS листа'),
+        ('(if hasMarks (eu-column f "150" "0"))',
+         'колонки под марку в листе «Итоги»'),
+        ('(foreach rw rowsList',
+         'разбивки группы на строки по маркам в XLS листа'),
+        ('(if hasMarks (strcat (if mk mk "") ";") "")',
+         'колонки марки в CSV листа'),
+        ('(setq visName (cs-get-visibility-safe obj))',
+         'типа для отчётов из состояния видимости: cs-get-dyn-type-name '
+         'возвращает имя блока, а не видимость'),
+        ('(if (or (null visName) (= visName "")) (setq visName "-"))',
+         'прочерка вместо пустой видимости: с nil cs-part-type откатится '
+         'на (nth 3), то есть на марку'),
+        ('(tu-entity-mark ent) visName)',
+         '12-го элемента записи блока — типа для отчётов'),
+        ('area nominal T ent nil type)',
+         '12-го элемента записи полилинии: арность записей должна совпадать'),
+        ('(defun cs-part-type (r)',
+         'доступа cs-part-type: без него «Тип» в отчёте печатает марку'),
+        ('(defun cs-group-type (g)',
+         'доступа cs-group-type: тип группы для отчёта'),
+    ],
+    "Extraction/cutline.lsp": [
+        ('kpd all-pieces /',
+         'параметра all-pieces у писателей: без него перечень не собрать'),
+        ('total-product-mm kpd pieces-ok)',
+         'передачи pieces-ok в n1-write-xls'),
+        ('(n1-write-csv bars stock kerf pieces-oversized pieces-ok)',
+         'передачи pieces-ok в n1-write-csv'),
+        ('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"',
+         'раздела «ПЕРЕЧЕНЬ ИЗДЕЛИЙ» в XLS хлыста'),
+        ('(setq rows (n1-piece-rows',
+         'строк перечня через n1-piece-rows (те же, что в таблице AutoCAD)'),
+        ('(if hasMarks (eu-cell f "SkipDataMid" "String" (caddr rw) ""))',
+         'ячейки марки в перечне XLS хлыста'),
+        ('"Длина, мм;Марка;Кол-во, шт;Сумма, м.п."',
+         'заголовка перечня с маркой в CSV хлыста'),
+        ('(vl-string-translate ";" "," (caddr rw))',
+         'замены точки с запятой в марке: иначе ломается разделитель CSV'),
+    ],
+}
+
+XLS_MARKS_LOCALS = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": ((), ("hasmarks", "mk", "gmarks", "gcnt", "marked",
+                              "rowslist", "rw")),
+        "cs-write-csv": ((), ("hasmarks", "mk")),
+    },
+    "Extraction/cutline.lsp": {
+        "n1-write-xls": (("all-pieces",), ("hasmarks", "rows", "rw")),
+        "n1-write-csv": (("all-pieces",), ("hasmarks", "rows", "rw")),
+    },
+}
+
+
+def _defun_args(text: str, name: str):
+    """(параметры, локальные) для defun name либо None."""
+    try:
+        forms = lisp_parse(text)
+    except LispParseError:
+        return None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, fname, args = node[1][0], node[1][1], node[1][2]
+        if not (head[0] == "atom" and head[1].lower() == "defun"
+                and fname[0] == "atom" and fname[1].lower() == name.lower()
+                and args[0] == "list"):
+            continue
+        params, locals_, seen_slash = [], [], False
+        for a in args[1]:
+            if a[0] != "atom":
+                continue
+            if a[1] == "/":
+                seen_slash = True
+                continue
+            (locals_ if seen_slash else params).append(a[1].lower())
+        return params, locals_
+    return None
+
+
+XLS_MARKS_SCOPED = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": [('"Марка"', 2), ("(if hasMarks (eu-column", 1),
+                         ('(eu-cell f "H" "String" "Размер" "")\n'
+                          '      (eu-cell f "H" "String" "Тип" "")', 1),
+                         ('(eu-cell f "D" "String" (cs-part-label r) "")\n'
+                          '          (eu-cell f "D" "String" (cs-part-type r) "")', 1),
+                         ('(eu-cell f "D" "String" (cs-part-label r) "")\n'
+                          '            (eu-cell f "D" "String" (cs-part-type r) "")', 1),
+                         ("(foreach rw rowsList", 1), ("(cs-part-mark r)", 2),
+                         ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
+                          2), ("(cs-part-type r)", 2), ("(cs-group-type rec)", 1)],
+        "cs-write-csv": [('"№ листа;№ детали;Размер;Тип;Марка;', 1),
+                         ("(cs-part-mark r)", 2), ("(cs-part-type r)", 2),
+                         ('(cs-part-label r) ";" (cs-part-type r) ";"', 2),
+                         ('(if hasMarks (strcat (if mk mk "") ";") "")', 2)],
+        "cs-aggregate": [("(cs-part-type r)", 2)],
+        "cs-block-record": [("(setq visName (cs-get-visibility-safe obj))", 1)],
+    },
+    "Extraction/cutline.lsp": {
+        "n1-write-xls": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
+                         ("(caddr rw)", 1)],
+        "n1-write-csv": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
+                         ('(vl-string-translate ";" ","', 1)],
+    },
+}
+
+# Чего в писателях быть не должно. У блоков ЗАПОЛНЕНИЯ cs-block-record
+# подменяет тип маркой, поэтому (nth 3) в отчёте печатает марку ещё раз -
+# колонки «Тип» и «Марка» совпадают строка в строку. Тип берётся только
+# через cs-part-type / cs-group-type. Порядок колонок в выгрузке листа -
+# «Размер | Тип | Марка» (по решению пользователя), старый «Тип | Размер»
+# запрещён. В cs-block-record поле visName
+# заполняется состоянием видимости: typName - это имя блока, с ним
+# колонка «Тип» показывала имя блока вместо видимости.
+XLS_MARKS_NOT = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": ["(nth 3 r)", "(nth 3 rec)",
+                         '(eu-cell f "H" "String" "Тип" "")\n'
+                         '      (eu-cell f "H" "String" "Размер" "")'],
+        "cs-write-csv": ["(nth 3 r)", '"№ листа;№ детали;Тип;Размер;'],
+        "cs-block-record": ["(setq visName typName)",
+                            "(setq visName (cs-get-dyn-type-name"],
+    },
+}
+
+
+def _defun_body(text: str, name: str):
+    """Текст формы (defun name ...) целиком либо None."""
+    toks = lisp_tokens(text)
+    start = None
+    for k in range(len(toks) - 2):
+        if (toks[k][0] == "(" and toks[k + 1][0] == "atom"
+                and toks[k + 1][1].lower() == "defun"
+                and toks[k + 2][0] == "atom"
+                and toks[k + 2][1].lower() == name.lower()):
+            start = k
+            break
+    if start is None:
+        return None
+    depth = 0
+    for k in range(start, len(toks)):
+        if toks[k][0] == "(":
+            depth += 1
+        elif toks[k][0] == ")":
+            depth -= 1
+            if depth == 0:
+                lines = text.split("\n")
+                return "\n".join(lines[toks[start][2] - 1:toks[k][2]])
+    return None
+
+
+def check_xls_marks_guard() -> list[str]:
+    """Колонка «Марка» в XLS и CSV раскроя не потеряна.
+
+    Марки долго жили только в таблицах AutoCAD: писатели XLS/CSV их не
+    содержали, и таблица чертежа расходилась с файлом того же прогона по
+    составу строк. Колонка добавлена во все листы и в CSV; она появляется
+    только при наличии марок, поэтому прогон без марок даёт прежний файл.
+
+    Отдельно закреплён тип: у блоков ЗАПОЛНЕНИЯ cs-block-record подменяет
+    тип маркой, и прямое (nth 3) в писателе печатало марку во второй раз.
+    """
+    errors: list[str] = []
+    for rel, needles in XLS_MARKS_MUST.items():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for needle, what in needles:
+            if needle not in text:
+                errors.append(f"{rel}: выгрузка марок: нет {what}")
+        for fn, needles_in in XLS_MARKS_SCOPED.get(rel, {}).items():
+            body = _defun_body(text, fn)
+            if body is None:
+                errors.append(f"{rel}: выгрузка марок: не найден (defun {fn} ...)")
+                continue
+            for needle, need in needles_in:
+                got = body.count(needle)
+                if got < need:
+                    errors.append(
+                        f"{rel}: выгрузка марок: в {fn} нет {needle} "
+                        f"(найдено {got}, нужно {need})")
+        for fn, banned in XLS_MARKS_NOT.get(rel, {}).items():
+            body = _defun_body(text, fn)
+            if body is None:
+                continue
+            for needle in banned:
+                if needle in body:
+                    errors.append(
+                        f"{rel}: выгрузка марок: в {fn} тип берётся напрямую "
+                        f"через {needle} — колонки «Тип» и «Марка» продублируют "
+                        f"марку (нужен cs-part-type / cs-group-type)")
+        for fn, (params, locals_) in XLS_MARKS_LOCALS.get(rel, {}).items():
+            got = _defun_args(text, fn)
+            if got is None:
+                errors.append(f"{rel}: выгрузка марок: не найден (defun {fn} ...)")
+                continue
+            for want in params:
+                if want not in got[0]:
+                    errors.append(
+                        f"{rel}: выгрузка марок: '{want}' не среди аргументов {fn}")
+            for want in locals_:
+                if want not in got[1]:
+                    errors.append(
+                        f"{rel}: выгрузка марок: '{want}' не среди локальных "
+                        f"переменных {fn}")
     return errors
 
 
@@ -1206,6 +1714,8 @@ def main() -> int:
     errors += check_cutline_wrap_guard()
     errors += check_cutsheet_wrap_guard()
     errors += check_reload_chkload_guard()
+    errors += check_reload_plugins_guard()
+    errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -1217,6 +1727,27 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(test_lisp_files()))
 
+    # Plugins\*.lsp: сторонние модули грузятся тем же RELOAD, поэтому
+    # баланс и лексика проверяются наравне с модулями проекта
+    plugins_count = 0
+    for path in plugin_lisp_files():
+        plugins_count += 1
+        ok, msg = check_balance_lex(path)
+        if not ok:
+            errors.append(f"{path.relative_to(ROOT)}: {msg}")
+    errors += check_lisp_lexical(list(plugin_lisp_files()))
+
+    # Плагины в разработке: лежат вне репозитория, но грузятся тем же RELOAD,
+    # поэтому проверяются тем же набором общих групп
+    plugins_dev_count = 0
+    dev_files = list(plugin_dev_files())
+    for path in dev_files:
+        plugins_dev_count += 1
+        ok, msg = check_balance_lex(path)
+        if not ok:
+            errors.append(f"{_rel(path)}: {msg}")
+    errors += check_lisp_lexical(dev_files)
+
     # reload.lsp в корне: грузится первым, его дефект лишает всей диагностики
     root_lisp = ROOT / "reload.lsp"
     if root_lisp.exists():
@@ -1225,15 +1756,17 @@ def main() -> int:
             errors.append(f"{root_lisp.relative_to(ROOT)}: {msg}")
         errors += check_lisp_lexical([root_lisp])
 
-    # Спецформы по всем .lsp сразу (модули + tests + reload.lsp)
-    errors += check_special_forms()
+    # Спецформы по всем .lsp сразу (модули + tests + reload.lsp + плагины)
+    errors += check_special_forms(list(all_lisp_files()) + dev_files)
     errors += check_reload_version_line()
-    errors += check_defun_duplicates_in_file()
+    errors += check_defun_duplicates_in_file(list(all_lisp_files()) + dev_files)
+    errors += check_call_arity(list(all_lisp_files()) + dev_files)
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
     errors += check_fill_allowance()
     errors += check_summary_marks()
+    errors += check_xls_marks_guard()
 
     if errors:
         print("ERRORS:")
@@ -1244,10 +1777,13 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
+        f"plugins={plugins_count} plugins-dev={plugins_dev_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
+        f" / plugins-balance / plugins-lexical / reload-plugins-guard"
+        f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")

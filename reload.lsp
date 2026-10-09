@@ -58,6 +58,35 @@
 )
 
 ;; ------------------------------------------------------------
+;; ПЛАГИНЫ: сторонние модули. Это отдельные продукты со своими
+;; репозиториями: в списки COMMON/EXTRACTION не входят и грузятся
+;; последними. Для каждого имени файл ищется сначала в каталогах
+;; разработки (см. *ae-reload-plugin-dev-dirs* ниже), затем в папке
+;; Plugins\ проекта - туда кладутся принятые плагины, как есть
+;; (cp1251, без перекодирования).
+;; Если файл не найден нигде и папки Plugins\ нет - секция RELOAD
+;; молча пропускается (отсутствие плагина - не ошибка проекта).
+;; ------------------------------------------------------------
+(setq *ae-reload-plugin-files*
+  '(
+    "PlotFrameToPDF.lsp"
+  )
+)
+
+;; Каталоги РАЗРАБОТКИ плагинов. Если файл плагина найден в одном из
+;; этих каталогов, RELOAD грузит его ОТТУДА, а не из Plugins\ - правки
+;; в рабочем репозитории плагина подхватываются без копирования.
+;; В таком случае копия в Plugins\ не нужна и в git не кладётся.
+;; Пути меняются здесь, без правок кода; список может быть пустым.
+;; Пути пишутся БЕЗ завершающего обратного слэша: имя файла добавляется
+;; через "\\".
+(setq *ae-reload-plugin-dev-dirs*
+  '(
+    "D:\\PlotFrameToPDF"
+  )
+)
+
+;; ------------------------------------------------------------
 ;; Автоподгрузка проверки скобок (дешево: только defun'ы,
 ;; без сканирования). Если файла нет - молча пропускаем.
 ;; Загрузка обёрнута в перехват: сбой в tests\chkparens.lsp не должен
@@ -103,6 +132,25 @@
         (close ff)))
     (if found (setq cnt (1+ cnt))))
   cnt)
+
+;; ------------------------------------------------------------
+;; Путь к плагину в каталоге разработки, если файл там есть.
+;; Первый найденный каталог выигрывает; nil - файла нет ни в одном.
+;; ------------------------------------------------------------
+(defun ae-reload-plugin-dev-path (name / d p hit)
+  (setq hit nil)
+  (foreach d *ae-reload-plugin-dev-dirs*
+    (if (null hit)
+      (progn
+        (setq p (strcat d "\\" name))
+        (if (findfile p)
+          (setq hit p))
+      )
+    )
+  )
+  hit
+)
+
 
 ;; ============================================================
 ;; ВСТРОЕННЫЙ ПОИСК ФОРМЫ СО СБОЕМ ЗАГРУЗКИ (резерв CHKLOAD)
@@ -259,7 +307,7 @@
 )
 
 (defun ae-reload-load-file
-       (fullpath / result)
+       (fullpath note / result)
 
   ;; ------------------------------------------------------------
   ;; Загрузка одного LSP-файла с перехватом ошибки
@@ -320,6 +368,10 @@
             (strcat
               "\nЗагружен: "
               fullpath
+              (if note
+                (strcat "  [" note "]")
+                ""
+              )
             )
           )
           T
@@ -338,6 +390,11 @@
            fullpath
            common-files
            extraction-files
+           plugins-dir
+           plugin-items
+           plugin-cnt
+           dev-path
+           it
            ok
            errors
            missing
@@ -402,6 +459,10 @@
 
       (setq extraction-dir
         (strcat root "\\Extraction\\")
+      )
+
+      (setq plugins-dir
+        (strcat root "\\Plugins\\")
       )
 
 
@@ -473,7 +534,7 @@
           (strcat common f)
         )
 
-        (if (ae-reload-load-file fullpath)
+        (if (ae-reload-load-file fullpath nil)
           (setq ok (1+ ok))
           (if (findfile fullpath)
             (setq errors (1+ errors))
@@ -504,11 +565,69 @@
           (strcat extraction-dir f)
         )
 
-        (if (ae-reload-load-file fullpath)
+        (if (ae-reload-load-file fullpath nil)
           (setq ok (1+ ok))
           (if (findfile fullpath)
             (setq errors (1+ errors))
             (setq missing (1+ missing))
+          )
+        )
+      )
+
+
+      ;; --------------------------------------------------------
+      ;; PLUGINS (сторонние модули)
+      ;; --------------------------------------------------------
+      ;; Плагин ищется сначала в каталогах разработки
+      ;; (*ae-reload-plugin-dev-dirs*), затем в Plugins\ проекта.
+      ;; Молча пропускаем то, чего нет нигде и для чего нет папки
+      ;; Plugins\: ни строки "НЕ НАЙДЕН", ни влияния на счётчики.
+      ;; Но если папка Plugins\ есть, а заявленного файла в ней нет -
+      ;; это честно попадает в missing (иначе потеря была бы невидимой).
+      (setq plugin-items '())
+      (foreach f *ae-reload-plugin-files*
+
+        (setq dev-path (ae-reload-plugin-dev-path f))
+        (setq fullpath
+          (if dev-path
+            dev-path
+            (strcat plugins-dir f)
+          )
+        )
+
+        (if (or dev-path (vl-file-directory-p plugins-dir))
+          (setq plugin-items
+            (cons
+              (cons fullpath (if dev-path "разработка" nil))
+              plugin-items
+            )
+          )
+        )
+      )
+      (setq plugin-items (reverse plugin-items))
+      (setq plugin-cnt (length plugin-items))
+
+      (if (> plugin-cnt 0)
+        (progn
+
+          (princ
+            "\n"
+          )
+          (princ
+            "\n--- PLUGINS ---"
+          )
+
+          (foreach it plugin-items
+
+            (setq fullpath (car it))
+
+            (if (ae-reload-load-file fullpath (cdr it))
+              (setq ok (1+ ok))
+              (if (findfile fullpath)
+                (setq errors (1+ errors))
+                (setq missing (1+ missing))
+              )
+            )
           )
         )
       )
@@ -528,6 +647,8 @@
         (setq revpaths (cons (strcat common f) revpaths)))
       (foreach f extraction-files
         (setq revpaths (cons (strcat extraction-dir f) revpaths)))
+      (foreach it plugin-items
+        (setq revpaths (cons (car it) revpaths)))
       (setq revcnt (ae-reload-rev-count revpaths))
 
       (princ
@@ -549,7 +670,7 @@
           "\n Маркер редакции: "
           (itoa revcnt)
           " из "
-          (itoa (+ (length common-files) (length extraction-files)))
+          (itoa (+ (length common-files) (length extraction-files) plugin-cnt))
           " модулей."
         )
       )
