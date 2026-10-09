@@ -58,6 +58,20 @@
 )
 
 ;; ------------------------------------------------------------
+;; ПЛАГИНЫ: сторонние модули из папки Plugins\.
+;; Это отдельные продукты со своими репозиториями: файл кладётся
+;; в Plugins\ как есть (cp1251, без перекодирования), в списки
+;; COMMON/EXTRACTION не входит и грузится последним.
+;; Если папки Plugins\ нет или список пуст - секция RELOAD
+;; молча пропускается (отсутствие плагина - не ошибка проекта).
+;; ------------------------------------------------------------
+(setq *ae-reload-plugin-files*
+  '(
+    "PlotFrameToPDF.lsp"
+  )
+)
+
+;; ------------------------------------------------------------
 ;; Автоподгрузка проверки скобок (дешево: только defun'ы,
 ;; без сканирования). Если файла нет - молча пропускаем.
 ;; Загрузка обёрнута в перехват: сбой в tests\chkparens.lsp не должен
@@ -338,6 +352,9 @@
            fullpath
            common-files
            extraction-files
+           plugins-dir
+           plugin-files
+           plugin-cnt
            ok
            errors
            missing
@@ -402,6 +419,10 @@
 
       (setq extraction-dir
         (strcat root "\\Extraction\\")
+      )
+
+      (setq plugins-dir
+        (strcat root "\\Plugins\\")
       )
 
 
@@ -515,6 +536,49 @@
 
 
       ;; --------------------------------------------------------
+      ;; PLUGINS (сторонние модули из Plugins\)
+      ;; --------------------------------------------------------
+      ;; Молча пропускаем, если папки нет или список пуст: ни строки
+      ;; "НЕ НАЙДЕН", ни влияния на итоговые счётчики. Но если папка
+      ;; есть, а заявленного файла в ней нет - это честно попадает
+      ;; в missing (иначе потеря плагина была бы невидимой).
+      (setq plugin-files
+        (if (vl-file-directory-p plugins-dir)
+          *ae-reload-plugin-files*
+          nil
+        )
+      )
+      (setq plugin-cnt (length plugin-files))
+
+      (if (> plugin-cnt 0)
+        (progn
+
+          (princ
+            "\n"
+          )
+          (princ
+            "\n--- PLUGINS ---"
+          )
+
+          (foreach f plugin-files
+
+            (setq fullpath
+              (strcat plugins-dir f)
+            )
+
+            (if (ae-reload-load-file fullpath)
+              (setq ok (1+ ok))
+              (if (findfile fullpath)
+                (setq errors (1+ errors))
+                (setq missing (1+ missing))
+              )
+            )
+          )
+        )
+      )
+
+
+      ;; --------------------------------------------------------
       ;; Итог
       ;; --------------------------------------------------------
 
@@ -528,6 +592,8 @@
         (setq revpaths (cons (strcat common f) revpaths)))
       (foreach f extraction-files
         (setq revpaths (cons (strcat extraction-dir f) revpaths)))
+      (foreach f plugin-files
+        (setq revpaths (cons (strcat plugins-dir f) revpaths)))
       (setq revcnt (ae-reload-rev-count revpaths))
 
       (princ
@@ -549,7 +615,7 @@
           "\n Маркер редакции: "
           (itoa revcnt)
           " из "
-          (itoa (+ (length common-files) (length extraction-files)))
+          (itoa (+ (length common-files) (length extraction-files) plugin-cnt))
           " модулей."
         )
       )
