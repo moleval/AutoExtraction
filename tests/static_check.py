@@ -97,10 +97,61 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _rel(path: Path) -> str:
+    """Путь для отчёта: относительно корня, а для плагинов разработки - как есть.
+
+    Плагины в разработке лежат в своих каталогах (например D:\\PlotFrameToPDF),
+    поэтому relative_to(ROOT) для них неприменим.
+    """
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def lisp_files():
     for d in LISP_DIRS:
         if d.exists():
             yield from sorted(d.glob("*.lsp"))
+
+
+def _reload_string_list(var: str) -> list[str]:
+    """Список строк из (setq <var> '("a" "b")) в reload.lsp."""
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    try:
+        forms = lisp_parse(read_text(path))
+    except LispParseError:
+        return []
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, name, val = node[1][0], node[1][1], node[1][2]
+        if not (head[0] == "atom" and head[1].lower() == "setq"
+                and name[0] == "atom" and name[1].lower() == var.lower()):
+            continue
+        inner = val[1][0] if (val[0] == "quote" and val[1]) else val
+        if inner[0] == "list":
+            return [x[1] for x in inner[1] if x[0] == "str"]
+    return []
+
+
+def plugin_dev_files():
+    """Плагины в каталогах разработки - те же пути, что грузит RELOAD.
+
+    Каталог разработки имеет приоритет над Plugins\; каталога может не быть
+    (другая машина) - тогда список пуст, и это не ошибка.
+    """
+    names = _reload_string_list("*ae-reload-plugin-files*")
+    dirs = _reload_string_list("*ae-reload-plugin-dev-dirs*")
+    for name in names:
+        for d in dirs:
+            # в .lsp путь записан с экранированным слэшем: D:\\PlotFrameToPDF
+            cand = Path(d.replace("\\\\", "\\")) / name
+            if cand.is_file():
+                yield cand
+                break
 
 
 def plugin_lisp_files():
@@ -265,8 +316,9 @@ def check_duplicates() -> list[str]:
     errors: list[str] = []
     seen: dict[str, tuple[str, int]] = {}
 
-    for path in list(lisp_files()) + list(plugin_lisp_files()):
-        rel = str(path.relative_to(ROOT))
+    for path in (list(lisp_files()) + list(plugin_lisp_files())
+                 + list(plugin_dev_files())):
+        rel = _rel(path)
         for name, line in find_defuns(path):
             lname = name.lower()
             if lname in WHITELIST_DEFUN:
@@ -661,7 +713,7 @@ def check_lisp_lexical(files=None) -> list[str]:
     errors: list[str] = []
     for path in (files if files is not None else lisp_files()):
         raw = path.read_bytes()
-        rel = path.relative_to(ROOT)
+        rel = _rel(path)
         if raw.startswith(b"\xef\xbb\xbf"):
             errors.append(f"{rel}: BOM (UTF-8) в начале файла — AutoCAD читает .lsp как ANSI")
             raw = raw[3:]
@@ -885,7 +937,7 @@ def check_special_forms(files=None) -> list[str]:
     """
     errors: list[str] = []
     for path in (files if files is not None else all_lisp_files()):
-        rel = path.relative_to(ROOT)
+        rel = _rel(path)
         try:
             forms = lisp_parse(read_text(path))
         except LispParseError as exc:
@@ -934,7 +986,7 @@ def check_reload_version_line() -> list[str]:
             "(печать только из тела c:RELOAD теряется при старых определениях в сессии)"]
 
 
-def check_defun_duplicates_in_file() -> list[str]:
+def check_defun_duplicates_in_file(files=None) -> list[str]:
     """Один и тот же defun объявлен в файле дважды.
 
     Дубль переопределяет первую редакцию молча: сканеры баланса и
@@ -942,7 +994,7 @@ def check_defun_duplicates_in_file() -> list[str]:
     tests/*.lsp, которые в общий поиск дубликатов не входят.
     """
     errors: list[str] = []
-    for path in all_lisp_files():
+    for path in (files if files is not None else all_lisp_files()):
         seen: dict[str, int] = {}
         for name, line in find_defuns(path):
             key = name.upper()
@@ -950,7 +1002,7 @@ def check_defun_duplicates_in_file() -> list[str]:
             if name.lower() in {w.lower() for w in WHITELIST_DEFUN}:
                 continue
             if key in seen:
-                errors.append(f"{path.relative_to(ROOT)}: defun {name} объявлен дважды "
+                errors.append(f"{_rel(path)}: defun {name} объявлен дважды "
                               f"(строки {seen[key]} и {line})")
             else:
                 seen[key] = line
@@ -1305,6 +1357,17 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(plugin_lisp_files()))
 
+    # Плагины в разработке: лежат вне репозитория, но грузятся тем же RELOAD,
+    # поэтому проверяются тем же набором общих групп
+    plugins_dev_count = 0
+    dev_files = list(plugin_dev_files())
+    for path in dev_files:
+        plugins_dev_count += 1
+        ok, msg = check_balance_lex(path)
+        if not ok:
+            errors.append(f"{_rel(path)}: {msg}")
+    errors += check_lisp_lexical(dev_files)
+
     # reload.lsp в корне: грузится первым, его дефект лишает всей диагностики
     root_lisp = ROOT / "reload.lsp"
     if root_lisp.exists():
@@ -1313,10 +1376,10 @@ def main() -> int:
             errors.append(f"{root_lisp.relative_to(ROOT)}: {msg}")
         errors += check_lisp_lexical([root_lisp])
 
-    # Спецформы по всем .lsp сразу (модули + tests + reload.lsp)
-    errors += check_special_forms()
+    # Спецформы по всем .lsp сразу (модули + tests + reload.lsp + плагины)
+    errors += check_special_forms(list(all_lisp_files()) + dev_files)
     errors += check_reload_version_line()
-    errors += check_defun_duplicates_in_file()
+    errors += check_defun_duplicates_in_file(list(all_lisp_files()) + dev_files)
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
@@ -1332,7 +1395,7 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
-        f"plugins={plugins_count} "
+        f"plugins={plugins_count} plugins-dev={plugins_dev_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"

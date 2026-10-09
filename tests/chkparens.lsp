@@ -139,7 +139,7 @@
   (princ)
 )
 
-(defun c:chkall ( / root d files f total)
+(defun c:chkall ( / root d files f total p)
   (setq root
     (if (findfile "extraction.lsp")
       (vl-filename-directory
@@ -160,6 +160,18 @@
           (foreach f files
             (setq total (+ total (chk-parens-scan (strcat d f))))
           )
+        )
+      )
+      ;; ѕлагины в разработке: лежат вне проекта, но груз€тс€ тем же
+      ;; RELOAD, поэтому провер€ютс€ здесь же. ѕуть берЄтс€ тем же
+      ;; резолвером, что и в RELOAD (ae-reload-plugin-dev-path из
+      ;; reload.lsp) - провер€ем ровно тот файл, который будет загружен.
+      (if (and (boundp '*ae-reload-plugin-files*)
+               (member (type ae-reload-plugin-dev-path) '(SUBR USUBR)))
+        (foreach f *ae-reload-plugin-files*
+          (setq p (ae-reload-plugin-dev-path f))
+          (if (and p (findfile p))
+            (setq total (+ total (chk-parens-scan p))))
         )
       )
       (setq files (vl-directory-files root "*.lsp" 1))
