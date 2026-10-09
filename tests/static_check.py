@@ -1261,11 +1261,18 @@ def _defun_args(text: str, name: str):
 XLS_MARKS_SCOPED = {
     "Extraction/cutsheet.lsp": {
         "cs-write-xls": [('"Марка"', 2), ("(if hasMarks (eu-column", 1),
+                         ('(eu-cell f "H" "String" "Размер" "")\n'
+                          '      (eu-cell f "H" "String" "Тип" "")', 1),
+                         ('(eu-cell f "D" "String" (cs-part-label r) "")\n'
+                          '          (eu-cell f "D" "String" (cs-part-type r) "")', 1),
+                         ('(eu-cell f "D" "String" (cs-part-label r) "")\n'
+                          '            (eu-cell f "D" "String" (cs-part-type r) "")', 1),
                          ("(foreach rw rowsList", 1), ("(cs-part-mark r)", 2),
                          ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
                           2), ("(cs-part-type r)", 2), ("(cs-group-type rec)", 1)],
-        "cs-write-csv": [('"№ листа;№ детали;Тип;Размер;Марка;', 1),
+        "cs-write-csv": [('"№ листа;№ детали;Размер;Тип;Марка;', 1),
                          ("(cs-part-mark r)", 2), ("(cs-part-type r)", 2),
+                         ('(cs-part-label r) ";" (cs-part-type r) ";"', 2),
                          ('(if hasMarks (strcat (if mk mk "") ";") "")', 2)],
         "cs-aggregate": [("(cs-part-type r)", 2)],
         "cs-block-record": [("(setq visName (cs-get-visibility-safe obj))", 1)],
@@ -1281,13 +1288,17 @@ XLS_MARKS_SCOPED = {
 # Чего в писателях быть не должно. У блоков ЗАПОЛНЕНИЯ cs-block-record
 # подменяет тип маркой, поэтому (nth 3) в отчёте печатает марку ещё раз -
 # колонки «Тип» и «Марка» совпадают строка в строку. Тип берётся только
-# через cs-part-type / cs-group-type. В cs-block-record поле visName
+# через cs-part-type / cs-group-type. Порядок колонок в выгрузке листа -
+# «Размер | Тип | Марка» (по решению пользователя), старый «Тип | Размер»
+# запрещён. В cs-block-record поле visName
 # заполняется состоянием видимости: typName - это имя блока, с ним
 # колонка «Тип» показывала имя блока вместо видимости.
 XLS_MARKS_NOT = {
     "Extraction/cutsheet.lsp": {
-        "cs-write-xls": ["(nth 3 r)", "(nth 3 rec)"],
-        "cs-write-csv": ["(nth 3 r)"],
+        "cs-write-xls": ["(nth 3 r)", "(nth 3 rec)",
+                         '(eu-cell f "H" "String" "Тип" "")\n'
+                         '      (eu-cell f "H" "String" "Размер" "")'],
+        "cs-write-csv": ["(nth 3 r)", '"№ листа;№ детали;Тип;Размер;'],
         "cs-block-record": ["(setq visName typName)",
                             "(setq visName (cs-get-dyn-type-name"],
     },

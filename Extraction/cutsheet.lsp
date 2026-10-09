@@ -1647,14 +1647,14 @@
       (write-line "Раскрой листа" f)
       (write-line (strcat "Лист;" (cs-itoa-safe sheetW) "x" (cs-itoa-safe sheetH) ";Пропил;" (cs-format-num kerf 2)) f)
       (write-line (if hasMarks
-                    "№ листа;№ детали;Тип;Размер;Марка;X;Y;Поворот;Площадь, м2"
-                    "№ листа;№ детали;Тип;Размер;X;Y;Поворот;Площадь, м2") f)
+                    "№ листа;№ детали;Размер;Тип;Марка;X;Y;Поворот;Площадь, м2"
+                    "№ листа;№ детали;Размер;Тип;X;Y;Поворот;Площадь, м2") f)
       (setq n 0)
       (foreach sh sheets
         (setq n (1+ n))
         (foreach p (cadr sh)
           (setq r (car p) mk (cs-part-mark r))
-          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (cs-part-type r) ";" (cs-part-label r) ";"
+          (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (cs-part-label r) ";" (cs-part-type r) ";"
                               (if hasMarks (strcat (if mk mk "") ";") "")
                               (cs-format-num (nth 1 p) 1) ";" (cs-format-num (nth 2 p) 1) ";"
                               (if (= (nth 5 p) 1) "90" "0") ";" (cs-format-num (nth 6 r) 4)) f)))
@@ -1664,7 +1664,7 @@
           (write-line "НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ" f)
           (foreach r oversized
             (setq mk (cs-part-mark r))
-            (write-line (strcat (itoa (car r)) ";" (cs-part-type r) ";" (cs-part-label r) ";"
+            (write-line (strcat (itoa (car r)) ";" (cs-part-label r) ";" (cs-part-type r) ";"
                                 (if hasMarks (strcat (if mk mk "") ";") "")
                                 (cs-format-num (nth 6 r) 4)) f))))
       (close f)
@@ -1795,8 +1795,8 @@
       (eu-row-begin f "")
       (eu-cell f "H" "String" "Лист" "")
       (eu-cell f "H" "String" "№" "")
-      (eu-cell f "H" "String" "Тип" "")
       (eu-cell f "H" "String" "Размер" "")
+      (eu-cell f "H" "String" "Тип" "")
       (if hasMarks (eu-cell f "H" "String" "Марка" ""))
       (eu-cell f "H" "String" "X" "")
       (eu-cell f "H" "String" "Y" "")
@@ -1812,8 +1812,8 @@
           (eu-row-begin f "")
           (eu-cell f "D" "Number" (itoa n) "")
           (eu-cell f "D" "Number" (itoa (car r)) "")
-          (eu-cell f "D" "String" (cs-part-type r) "")
           (eu-cell f "D" "String" (cs-part-label r) "")
+          (eu-cell f "D" "String" (cs-part-type r) "")
           (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
           (eu-cell f "N" "Number" (cs-xls-num (nth 1 p) 1) "")
           (eu-cell f "N" "Number" (cs-xls-num (nth 2 p) 1) "")
@@ -1833,8 +1833,8 @@
             (setq mk (cs-part-mark r))
             (eu-row-begin f "")
             (eu-cell f "D" "Number" (itoa (car r)) "")
-            (eu-cell f "D" "String" (cs-part-type r) "")
             (eu-cell f "D" "String" (cs-part-label r) "")
+            (eu-cell f "D" "String" (cs-part-type r) "")
             (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
             (eu-cell f "N" "Number" (cs-xls-num (nth 6 r) 4) "")
             (eu-row-end f))
@@ -2268,5 +2268,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 37: в отчётах «Тип» — состояние видимости блока, марка отдельно; марка в XLS и CSV; сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 38: в отчётах «Тип» — состояние видимости блока, марка отдельно; марка в XLS и CSV; сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
