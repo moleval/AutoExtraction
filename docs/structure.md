@@ -21,6 +21,8 @@ AutoExtraction/
 ? ??? requirements-dev.md # Требования к разработке и окружению
 ? ??? structure.md # Этот файл
 ? ??? START.md # Инструкция по быстрому старту
+??? Plugins/
+? ??? PlotFrameToPDF.lsp # Плагин: экспорт области, выделенной рамкой, в PDF
 ??? reload.lsp # Команда RELOAD для перезагрузки всех модулей
 ??? AutoExtraction.prj # Файл проекта Visual LISP
 ??? .gitignore # Игнорирование временных файлов
