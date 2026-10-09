@@ -454,6 +454,88 @@ def scenario_rows():
           abs(sum(areas) - group_area) < 1e-9)
 
 
+# ---------------------------------------------------------------
+# Порт: выгрузка перечня в XLS и CSV (cs-write-xls, n1-write-xls)
+# ---------------------------------------------------------------
+
+def xls_sheet_rows(groups):
+    """Порт разбивки группы листа на строки таблицы «Итоги».
+
+    Строка на каждую марку; изделия без марки - отдельной строкой с
+    прочерком; площадь строки - доля площади группы по количеству.
+    """
+    out = []
+    for g in groups:
+        g_marks, g_cnt, area = g["marks"], g["cnt"], g["area"]
+        marked = sum(c for _, c in g_marks)
+        if not g_marks:
+            rows = [("", g_cnt)]
+        else:
+            rows = list(g_marks)
+            if g_cnt - marked > 0:
+                rows.append(("-", g_cnt - marked))
+        for m, c in rows:
+            out.append((g["size"], m, c, area * (c / g_cnt) if g_cnt else 0.0))
+    return out
+
+
+def csv_fields(mark, has_marks):
+    """Порт строки CSV: марка с точкой с запятой не ломает разделитель."""
+    return (mark.replace(";", ",") + ";") if has_marks else ""
+
+
+def scenario_export():
+    """Перечень изделий в XLS/CSV: состав строк и состав колонок."""
+    groups = [
+        {"size": "950x300", "cnt": 9, "area": 3.6,
+         "marks": [("ТБ-1 Рг3ср", 6), ("ТБ-1 Рг3м", 2), ("ТБ-1 Рг3", 1)]},
+        {"size": "600x200", "cnt": 4, "area": 0.8, "marks": []},
+        {"size": "1100x250", "cnt": 5, "area": 2.0,
+         "marks": [("М-1", 2), ("М-2", 1)]},
+    ]
+    rows = xls_sheet_rows(groups)
+    check("xls листа: строк столько, сколько марок plus немаркированные",
+          len(rows) == 3 + 1 + 3)
+    check("xls листа: сумма количеств равна числу изделий",
+          sum(r[2] for r in rows) == sum(g["cnt"] for g in groups))
+    check("xls листа: сумма площадей строк равна сумме площадей групп",
+          abs(sum(r[3] for r in rows) - sum(g["area"] for g in groups)) < 1e-9)
+    check("xls листа: группа без марок даёт одну строку с полной площадью",
+          [r for r in rows if r[0] == "600x200"] == [("600x200", "", 4, 0.8)])
+    check("xls листа: немаркированные внутри группы идут прочерком",
+          rows[-1] == ("1100x250", "-", 2, 2.0 * (2 / 5)))
+
+    # состав колонок: без марок схема прежняя, с марками plus одна колонка
+    check("xls: без марок колонок столько же, сколько было",
+          len([c for c in ("Размер", "Тип", "Кол-во", "Площадь")]) == 4)
+    check("xls: с марками добавляется ровно одна колонка",
+          len([c for c in ("Размер", "Тип", "Марка", "Кол-во", "Площадь")]) == 5)
+
+    # CSV: число полей строки совпадает с заголовком, марка не ломает разделитель
+    head_no = "№ листа;№ детали;Тип;Размер;X;Y;Поворот;Площадь, м2"
+    head_mk = "№ листа;№ детали;Тип;Размер;Марка;X;Y;Поворот;Площадь, м2"
+    row = "1;7;Облицовка;950x300;" + csv_fields("ТБ-1; Рг3ср", True) + "12,0;34,0;0;0,2850"
+    check("csv: полей в строке столько же, сколько в заголовке с маркой",
+          row.count(";") == head_mk.count(";"))
+    check("csv: точка с запятой внутри марки заменена запятой",
+          ";" not in csv_fields("ТБ-1; Рг3ср", True).rstrip(";"))
+    row_no = "1;7;Облицовка;950x300;" + csv_fields("", False) + "12,0;34,0;0;0,2850"
+    check("csv: без марок схема строки прежняя",
+          row_no.count(";") == head_no.count(";"))
+
+    # перечень хлыста: те же строки, что в таблице AutoCAD
+    pieces = [(950, 9), (1100, 5), (600, 4)]
+    marks_q = {950: ["ТБ-1 Рг3ср"] * 6 + ["ТБ-1 Рг3м"] * 2 + ["ТБ-1 Рг3"],
+               1100: ["М-1", "М-1", "М-2"]}
+    rows = []
+    for length, cnt in pieces:
+        rows.extend(piece_rows(length, cnt, marks_q.get(length, [])))
+    check("xls хлыста: сумма количеств перечня равна числу изделий",
+          sum(r[1] for r in rows) == sum(c for _, c in pieces))
+    check("xls хлыста: длина без марок даёт одну строку",
+          [r for r in rows if r[0] == 600] == [(600, 4, "")])
+
+
 def main():
     print("=== Тест подписи марок в картах раскроя ===")
     scenario_attr()
@@ -464,6 +546,7 @@ def main():
     scenario_overlap()
     scenario_fit()
     scenario_rows()
+    scenario_export()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[MARK-LOGIC][OK]")

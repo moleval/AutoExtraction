@@ -1166,6 +1166,173 @@ def check_chkparens_plugins_guard() -> list[str]:
     return errors
 
 
+XLS_MARKS_MUST = {
+    "Extraction/cutsheet.lsp": [
+        ('(defun cs-xls-has-marks (',
+         'помощника cs-xls-has-marks: без него колонка «Марка» появится и в прогонах без марок'),
+        ('(setq hasMarks (cs-xls-has-marks sheets oversized))',
+         'расчёта hasMarks в писателях XLS/CSV'),
+        ('(if hasMarks (eu-cell f "H" "String" "Марка" ""))',
+         'заголовка «Марка» в XLS листа'),
+        ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
+         'ячейки марки детали в XLS листа'),
+        ('(if hasMarks (eu-cell f "D" "String" (if (car rw) (car rw) "") ""))',
+         'ячейки марки в перечне изделий XLS листа'),
+        ('(if hasMarks (eu-column f "150" "0"))',
+         'колонки под марку в листе «Итоги»'),
+        ('(foreach rw rowsList',
+         'разбивки группы на строки по маркам в XLS листа'),
+        ('(if hasMarks (strcat (if mk mk "") ";") "")',
+         'колонки марки в CSV листа'),
+    ],
+    "Extraction/cutline.lsp": [
+        ('kpd all-pieces /',
+         'параметра all-pieces у писателей: без него перечень не собрать'),
+        ('total-product-mm kpd pieces-ok)',
+         'передачи pieces-ok в n1-write-xls'),
+        ('(n1-write-csv bars stock kerf pieces-oversized pieces-ok)',
+         'передачи pieces-ok в n1-write-csv'),
+        ('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"',
+         'раздела «ПЕРЕЧЕНЬ ИЗДЕЛИЙ» в XLS хлыста'),
+        ('(setq rows (n1-piece-rows',
+         'строк перечня через n1-piece-rows (те же, что в таблице AutoCAD)'),
+        ('(if hasMarks (eu-cell f "SkipDataMid" "String" (caddr rw) ""))',
+         'ячейки марки в перечне XLS хлыста'),
+        ('"Длина, мм;Марка;Кол-во, шт;Сумма, м.п."',
+         'заголовка перечня с маркой в CSV хлыста'),
+        ('(vl-string-translate ";" "," (caddr rw))',
+         'замены точки с запятой в марке: иначе ломается разделитель CSV'),
+    ],
+}
+
+XLS_MARKS_LOCALS = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": ((), ("hasmarks", "mk", "gmarks", "gcnt", "marked",
+                              "rowslist", "rw")),
+        "cs-write-csv": ((), ("hasmarks", "mk")),
+    },
+    "Extraction/cutline.lsp": {
+        "n1-write-xls": (("all-pieces",), ("hasmarks", "rows", "rw")),
+        "n1-write-csv": (("all-pieces",), ("hasmarks", "rows", "rw")),
+    },
+}
+
+
+def _defun_args(text: str, name: str):
+    """(параметры, локальные) для defun name либо None."""
+    try:
+        forms = lisp_parse(text)
+    except LispParseError:
+        return None
+    for node in forms:
+        if node[0] != "list" or len(node[1]) < 3:
+            continue
+        head, fname, args = node[1][0], node[1][1], node[1][2]
+        if not (head[0] == "atom" and head[1].lower() == "defun"
+                and fname[0] == "atom" and fname[1].lower() == name.lower()
+                and args[0] == "list"):
+            continue
+        params, locals_, seen_slash = [], [], False
+        for a in args[1]:
+            if a[0] != "atom":
+                continue
+            if a[1] == "/":
+                seen_slash = True
+                continue
+            (locals_ if seen_slash else params).append(a[1].lower())
+        return params, locals_
+    return None
+
+
+XLS_MARKS_SCOPED = {
+    "Extraction/cutsheet.lsp": {
+        "cs-write-xls": [('"Марка"', 2), ("(if hasMarks (eu-column", 1),
+                         ("(foreach rw rowsList", 1), ("(cs-part-mark r)", 2),
+                         ('(if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))',
+                          2)],
+        "cs-write-csv": [('"№ листа;№ детали;Тип;Размер;Марка;', 1),
+                         ("(cs-part-mark r)", 2),
+                         ('(if hasMarks (strcat (if mk mk "") ";") "")', 2)],
+    },
+    "Extraction/cutline.lsp": {
+        "n1-write-xls": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
+                         ("(caddr rw)", 1)],
+        "n1-write-csv": [('"ПЕРЕЧЕНЬ ИЗДЕЛИЙ"', 1), ("(n1-piece-rows", 1),
+                         ('(vl-string-translate ";" ","', 1)],
+    },
+}
+
+
+def _defun_body(text: str, name: str):
+    """Текст формы (defun name ...) целиком либо None."""
+    toks = lisp_tokens(text)
+    start = None
+    for k in range(len(toks) - 2):
+        if (toks[k][0] == "(" and toks[k + 1][0] == "atom"
+                and toks[k + 1][1].lower() == "defun"
+                and toks[k + 2][0] == "atom"
+                and toks[k + 2][1].lower() == name.lower()):
+            start = k
+            break
+    if start is None:
+        return None
+    depth = 0
+    for k in range(start, len(toks)):
+        if toks[k][0] == "(":
+            depth += 1
+        elif toks[k][0] == ")":
+            depth -= 1
+            if depth == 0:
+                lines = text.split("\n")
+                return "\n".join(lines[toks[start][2] - 1:toks[k][2]])
+    return None
+
+
+def check_xls_marks_guard() -> list[str]:
+    """Колонка «Марка» в XLS и CSV раскроя не потеряна.
+
+    Марки долго жили только в таблицах AutoCAD: писатели XLS/CSV их не
+    содержали, и таблица чертежа расходилась с файлом того же прогона по
+    составу строк. Колонка добавлена во все листы и в CSV; она появляется
+    только при наличии марок, поэтому прогон без марок даёт прежний файл.
+    """
+    errors: list[str] = []
+    for rel, needles in XLS_MARKS_MUST.items():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for needle, what in needles:
+            if needle not in text:
+                errors.append(f"{rel}: выгрузка марок: нет {what}")
+        for fn, needles_in in XLS_MARKS_SCOPED.get(rel, {}).items():
+            body = _defun_body(text, fn)
+            if body is None:
+                errors.append(f"{rel}: выгрузка марок: не найден (defun {fn} ...)")
+                continue
+            for needle, need in needles_in:
+                got = body.count(needle)
+                if got < need:
+                    errors.append(
+                        f"{rel}: выгрузка марок: в {fn} нет {needle} "
+                        f"(найдено {got}, нужно {need})")
+        for fn, (params, locals_) in XLS_MARKS_LOCALS.get(rel, {}).items():
+            got = _defun_args(text, fn)
+            if got is None:
+                errors.append(f"{rel}: выгрузка марок: не найден (defun {fn} ...)")
+                continue
+            for want in params:
+                if want not in got[0]:
+                    errors.append(
+                        f"{rel}: выгрузка марок: '{want}' не среди аргументов {fn}")
+            for want in locals_:
+                if want not in got[1]:
+                    errors.append(
+                        f"{rel}: выгрузка марок: '{want}' не среди локальных "
+                        f"переменных {fn}")
+    return errors
+
+
 def check_dialog_layers_section() -> list[str]:
     """Раздел «Выбранные слои» в окнах раскроя (CUTLINE и CUTSHEET).
 
@@ -1544,6 +1711,7 @@ def main() -> int:
     errors += check_mark_labels()
     errors += check_fill_allowance()
     errors += check_summary_marks()
+    errors += check_xls_marks_guard()
 
     if errors:
         print("ERRORS:")
@@ -1560,7 +1728,7 @@ def main() -> int:
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
-        f" / chkparens-plugins-guard / call-arity"
+        f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")

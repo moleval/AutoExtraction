@@ -1976,9 +1976,10 @@
 ;; XLS-экспорт
 ;; ============================================================
 (defun n1-write-xls (bars stock kerf oversized
-                     num-bars stock-total-mm product-total-mm kpd /
+                     num-bars stock-total-mm product-total-mm kpd all-pieces /
                      fname f i bar pieces waste used util rec
-                     total-cnt-unplaced total-sum-unplaced)
+                     total-cnt-unplaced total-sum-unplaced
+                     hasMarks rows rw)
   (setq fname (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
                       " Раскрой хлыстов.xls"))
@@ -2258,6 +2259,50 @@
       (eu-cell f "ReportKpd" "String" (strcat (rtos kpd 2 1) " %") "ss:MergeAcross=\"1\"")
       (eu-row-end f)
 
+      ;; ------------------------------------------------------
+      ;; ПЕРЕЧЕНЬ ИЗДЕЛИЙ - те же строки, что в таблице AutoCAD:
+      ;; n1-piece-rows даёт строку на каждую марку, изделия без марки
+      ;; идут отдельной строкой с прочерком. Решатель уже отработал,
+      ;; на раскрой раздел не влияет. Колонка «Марка» появляется только
+      ;; при наличии марок - без них состав файла прежний.
+      ;; ------------------------------------------------------
+      (setq hasMarks nil)
+      (foreach rec all-pieces
+        (if (n1-marks-for (car rec)) (setq hasMarks T)))
+      (if all-pieces
+        (progn
+          (eu-row-begin f "")
+          (eu-cell f "" "String" "" "")
+          (eu-row-end f)
+
+          (eu-row-begin f "")
+          (eu-cell-skip f 1)
+          (eu-cell f "SectionTitle" "String" "ПЕРЕЧЕНЬ ИЗДЕЛИЙ"
+                   (if hasMarks "ss:MergeAcross=\"3\"" "ss:MergeAcross=\"2\""))
+          (eu-row-end f)
+
+          (eu-row-begin f "")
+          (eu-cell-skip f 1)
+          (eu-cell f "SkipHeaderLeft" "String" "Длина, мм" "")
+          (if hasMarks (eu-cell f "SkipHeaderMid" "String" "Марка" ""))
+          (eu-cell f "SkipHeaderMid" "String" "Кол-во, шт" "")
+          (eu-cell f "SkipHeaderRight" "String" "Сумма, м.п." "")
+          (eu-row-end f)
+
+          (setq rows (n1-piece-rows
+                       (vl-sort all-pieces '(lambda (a b) (> (car a) (car b))))))
+          (foreach rw rows
+            (eu-row-begin f "")
+            (eu-cell-skip f 1)
+            (eu-cell f "SkipDataLeft" "Number" (itoa (fix (car rw))) "")
+            (if hasMarks (eu-cell f "SkipDataMid" "String" (caddr rw) ""))
+            (eu-cell f "SkipDataMid" "Number" (itoa (cadr rw)) "")
+            (eu-cell f "SkipDataRight" "Number"
+                     (rtos (/ (* (car rw) (cadr rw)) 1000.0) 2 2) "")
+            (eu-row-end f))
+        )
+      )
+
       (if oversized
         (progn
           (eu-row-begin f "")
@@ -2302,9 +2347,10 @@
 )
 
 ;; ---------- CSV-экспорт (fallback) ----------
-(defun n1-write-csv (bars stock kerf oversized /
+(defun n1-write-csv (bars stock kerf oversized all-pieces /
                        fname f i bar pieces waste used util rec
-                       total-cnt-unplaced total-sum-unplaced)
+                       total-cnt-unplaced total-sum-unplaced
+                       hasMarks rows rw)
   (setq fname (strcat (getvar "DWGPREFIX")
                       (vl-filename-base (getvar "DWGNAME"))
                       " Раскрой хлыстов.csv"))
@@ -2320,6 +2366,32 @@
         (write-line (strcat (itoa i) ";" (n1-list-to-str pieces " + ") ";"
                             (rtos used 2 1) ";" (rtos waste 2 1) ";"
                             (rtos util 2 1)) f)
+      )
+      ;; Перечень изделий - тот же состав строк, что в XLS и в таблице
+      ;; AutoCAD. Точка с запятой внутри марки заменяется запятой, чтобы
+      ;; не ломать разделитель CSV.
+      (setq hasMarks nil)
+      (foreach rec all-pieces
+        (if (n1-marks-for (car rec)) (setq hasMarks T)))
+      (if all-pieces
+        (progn
+          (write-line "" f)
+          (write-line "ПЕРЕЧЕНЬ ИЗДЕЛИЙ" f)
+          (write-line (if hasMarks
+                        "Длина, мм;Марка;Кол-во, шт;Сумма, м.п."
+                        "Длина, мм;Кол-во, шт;Сумма, м.п.") f)
+          (setq rows (n1-piece-rows
+                       (vl-sort all-pieces '(lambda (a b) (> (car a) (car b))))))
+          (foreach rw rows
+            (write-line
+              (strcat (itoa (fix (car rw))) ";"
+                      (if hasMarks
+                        (strcat (vl-string-translate ";" "," (caddr rw)) ";")
+                        "")
+                      (itoa (cadr rw)) ";"
+                      (vl-string-translate "." ","
+                        (rtos (/ (* (car rw) (cadr rw)) 1000.0) 2 2))) f))
+        )
       )
       (if oversized
         (progn
@@ -2589,12 +2661,12 @@
       (pu-begin "CUTLINE:xls")
       (setq xls-ok
         (n1-write-xls bars stock kerf pieces-oversized
-                      num-bars stock-total-mm total-product-mm kpd))
+                      num-bars stock-total-mm total-product-mm kpd pieces-ok))
       (pu-end "CUTLINE:xls")
       (if (not xls-ok)
         (progn
           (princ "\nНе удалось создать XLS. Сохраняю CSV...")
-          (n1-write-csv bars stock kerf pieces-oversized)
+          (n1-write-csv bars stock kerf pieces-oversized pieces-ok)
         )
       )
     )
@@ -2877,5 +2949,5 @@
   (princ))
 (defun c:РАСКРОЙХЛЫСТА () (c:cutline))
 
-(princ "\nCUTLINE.LSP загружен (ред. 24: марка в одну строку с длиной; перечень изделий — строка на каждую марку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
+(princ "\nCUTLINE.LSP загружен (ред. 25: перечень изделий и марки в XLS и CSV; марка в одну строку с длиной; перечень изделий — строка на каждую марку; подписи детали не наползают; марки в перечне изделий и в углу детали; заголовок «Выбранные слои» со счётчиком; в блок идёт только раскладка; диагностика не роняет раскрой, пошаговые метки; фильтры слоёв Мои/Фасады/Витражи/Окна; U2, П1-П3, V5, V4). Команды: CUTLINE, РАСКРОЙХЛЫСТА")
 (princ)

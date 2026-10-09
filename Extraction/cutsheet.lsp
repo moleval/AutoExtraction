@@ -710,6 +710,19 @@
         (append lst (list (cons mk 1))))))
 )
 
+;; Есть ли хотя бы одна марка среди деталей прогона (размещённые и
+;; неразмещённые). Колонка «Марка» в XLS/CSV появляется только тогда:
+;; без марок состав файлов остаётся прежним, как и в таблице AutoCAD.
+(defun cs-xls-has-marks (sheets oversized / has sh p)
+  (setq has nil)
+  (foreach sh sheets
+    (foreach p (cadr sh)
+      (if (cs-part-mark (car p)) (setq has T))))
+  (foreach p oversized
+    (if (cs-part-mark p) (setq has T)))
+  (if has T nil)
+)
+
 (defun cs-aggregate (records / acc r key f out mk)
   (setq acc '())
   (foreach r records
@@ -1604,20 +1617,24 @@
   (setq s (vl-string-subst "&quot;" "\"" s))
   s)
 
-(defun cs-write-csv (sheets oversized sheetW sheetH kerf / fname f n sh p r)
+(defun cs-write-csv (sheets oversized sheetW sheetH kerf / fname f n sh p r hasMarks mk)
   (setq fname (strcat (getvar "DWGPREFIX") (vl-filename-base (getvar "DWGNAME")) " Раскрой листа.csv"))
   (setq f (open fname "w"))
   (if f
     (progn
+      (setq hasMarks (cs-xls-has-marks sheets oversized))
       (write-line "Раскрой листа" f)
       (write-line (strcat "Лист;" (cs-itoa-safe sheetW) "x" (cs-itoa-safe sheetH) ";Пропил;" (cs-format-num kerf 2)) f)
-      (write-line "№ листа;№ детали;Тип;Размер;X;Y;Поворот;Площадь, м2" f)
+      (write-line (if hasMarks
+                    "№ листа;№ детали;Тип;Размер;Марка;X;Y;Поворот;Площадь, м2"
+                    "№ листа;№ детали;Тип;Размер;X;Y;Поворот;Площадь, м2") f)
       (setq n 0)
       (foreach sh sheets
         (setq n (1+ n))
         (foreach p (cadr sh)
-          (setq r (car p))
+          (setq r (car p) mk (cs-part-mark r))
           (write-line (strcat (itoa n) ";" (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+                              (if hasMarks (strcat (if mk mk "") ";") "")
                               (cs-format-num (nth 1 p) 1) ";" (cs-format-num (nth 2 p) 1) ";"
                               (if (= (nth 5 p) 1) "90" "0") ";" (cs-format-num (nth 6 r) 4)) f)))
       (if oversized
@@ -1625,19 +1642,24 @@
           (write-line "" f)
           (write-line "НЕРАЗМЕЩЕННЫЕ ДЕТАЛИ" f)
           (foreach r oversized
+            (setq mk (cs-part-mark r))
             (write-line (strcat (itoa (car r)) ";" (nth 3 r) ";" (cs-part-label r) ";"
+                                (if hasMarks (strcat (if mk mk "") ";") "")
                                 (cs-format-num (nth 6 r) 4)) f))))
       (close f)
       (princ (strcat "\nCSV сохранен: " fname))
       T)
     nil))
 
-(defun cs-write-xls (groups sheets oversized sheetW sheetH kerf / fname f n sh p r rec totalCnt actualArea bboxArea sheetArea kpdFact kpdBox)
+(defun cs-write-xls (groups sheets oversized sheetW sheetH kerf /
+                      fname f n sh p r rec totalCnt actualArea bboxArea sheetArea
+                      kpdFact kpdBox hasMarks mk gMarks gCnt marked rowsList rw)
   (setq fname (strcat (getvar "DWGPREFIX") (vl-filename-base (getvar "DWGNAME")) " Раскрой листа.xls"))
   (setq f (open fname "w"))
   (if f
     (progn
       (setq totalCnt 0 actualArea 0.0 bboxArea 0.0)
+      (setq hasMarks (cs-xls-has-marks sheets oversized))
       (foreach rec groups (setq totalCnt (+ totalCnt (nth 6 rec)) bboxArea (+ bboxArea (nth 7 rec))
                                 actualArea (+ actualArea (nth 8 rec))))
       (setq sheetArea (* (length sheets) sheetW sheetH (/ 1.0 1000000.0))
@@ -1653,13 +1675,17 @@
       (write-line "</Styles>" f)
 
       (eu-worksheet f "Итоги")
+      ;; С маркой колонок пять: ширина колонки марки добавляется,
+      ;; остальные не меняются.
       (eu-column f "220" "0")
       (eu-column f "110" "0")
+      (if hasMarks (eu-column f "150" "0"))
       (eu-column f "110" "0")
       (eu-column f "120" "0")
 
       (eu-row-begin f "")
-      (eu-cell f "T" "String" "Раскрой листа" "ss:MergeAcross=\"3\"")
+      (eu-cell f "T" "String" "Раскрой листа"
+               (if hasMarks "ss:MergeAcross=\"4\"" "ss:MergeAcross=\"3\""))
       (eu-row-end f)
 
       (eu-row-begin f "")
@@ -1708,22 +1734,41 @@
       (eu-row-begin f "")
       (eu-cell f "H" "String" "Размер" "")
       (eu-cell f "H" "String" "Тип" "")
+      (if hasMarks (eu-cell f "H" "String" "Марка" ""))
       (eu-cell f "H" "String" "Кол-во" "")
       (eu-cell f "H" "String" "Площадь, м2" "")
       (eu-row-end f)
 
+      ;; Строка на каждую марку - как в таблице AutoCAD (cs-draw-summary):
+      ;; изделия без марки отдельной строкой с прочерком, площадь строки -
+      ;; доля площади группы по количеству, поэтому сумма строк равна
+      ;; площади группы.
       (foreach rec groups
-        (eu-row-begin f "")
-        (eu-cell f "D" "String" (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))) "")
-        (eu-cell f "D" "String" (nth 3 rec) "")
-        (eu-cell f "D" "Number" (itoa (nth 6 rec)) "")
-        (eu-cell f "N" "Number" (cs-xls-num (nth 8 rec) 4) "")
-        (eu-row-end f))
+        (setq gMarks (if (> (length rec) 9) (nth 9 rec) '())
+              gCnt (nth 6 rec) marked 0 rowsList '())
+        (foreach mk gMarks (setq marked (+ marked (cdr mk))))
+        (if (null gMarks)
+          (setq rowsList (list (cons "" gCnt)))
+          (progn
+            (foreach mk gMarks (setq rowsList (append rowsList (list mk))))
+            (if (> (- gCnt marked) 0)
+              (setq rowsList (append rowsList (list (cons "-" (- gCnt marked))))))))
+        (foreach rw rowsList
+          (eu-row-begin f "")
+          (eu-cell f "D" "String" (strcat (cs-itoa-safe (nth 4 rec)) "x" (cs-itoa-safe (nth 5 rec))) "")
+          (eu-cell f "D" "String" (nth 3 rec) "")
+          (if hasMarks (eu-cell f "D" "String" (if (car rw) (car rw) "") ""))
+          (eu-cell f "D" "Number" (itoa (cdr rw)) "")
+          (eu-cell f "N" "Number" (cs-xls-num (if (> gCnt 0)
+                                                (* (nth 8 rec) (/ (float (cdr rw)) (float gCnt)))
+                                                0.0) 4) "")
+          (eu-row-end f)))
       (eu-worksheet-end f)
 
       (eu-worksheet f "Размещение")
       (eu-row-begin f "")
-      (eu-cell f "T" "String" "Размещение деталей" "ss:MergeAcross=\"7\"")
+      (eu-cell f "T" "String" "Размещение деталей"
+               (if hasMarks "ss:MergeAcross=\"8\"" "ss:MergeAcross=\"7\""))
       (eu-row-end f)
 
       (eu-row-begin f "")
@@ -1731,6 +1776,7 @@
       (eu-cell f "H" "String" "№" "")
       (eu-cell f "H" "String" "Тип" "")
       (eu-cell f "H" "String" "Размер" "")
+      (if hasMarks (eu-cell f "H" "String" "Марка" ""))
       (eu-cell f "H" "String" "X" "")
       (eu-cell f "H" "String" "Y" "")
       (eu-cell f "H" "String" "Поворот" "")
@@ -1741,12 +1787,13 @@
       (foreach sh sheets
         (setq n (1+ n))
         (foreach p (cadr sh)
-          (setq r (car p))
+          (setq r (car p) mk (cs-part-mark r))
           (eu-row-begin f "")
           (eu-cell f "D" "Number" (itoa n) "")
           (eu-cell f "D" "Number" (itoa (car r)) "")
           (eu-cell f "D" "String" (nth 3 r) "")
           (eu-cell f "D" "String" (cs-part-label r) "")
+          (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
           (eu-cell f "N" "Number" (cs-xls-num (nth 1 p) 1) "")
           (eu-cell f "N" "Number" (cs-xls-num (nth 2 p) 1) "")
           (eu-cell f "D" "Number" (if (= (nth 5 p) 1) "90" "0") "")
@@ -1758,13 +1805,16 @@
         (progn
           (eu-worksheet f "Неразмещенные")
           (eu-row-begin f "")
-          (eu-cell f "T" "String" "Неразмещенные детали" "ss:MergeAcross=\"3\"")
+          (eu-cell f "T" "String" "Неразмещенные детали"
+               (if hasMarks "ss:MergeAcross=\"4\"" "ss:MergeAcross=\"3\""))
           (eu-row-end f)
           (foreach r oversized
+            (setq mk (cs-part-mark r))
             (eu-row-begin f "")
             (eu-cell f "D" "Number" (itoa (car r)) "")
             (eu-cell f "D" "String" (nth 3 r) "")
             (eu-cell f "D" "String" (cs-part-label r) "")
+            (if hasMarks (eu-cell f "D" "String" (if mk mk "") ""))
             (eu-cell f "N" "Number" (cs-xls-num (nth 6 r) 4) "")
             (eu-row-end f))
           (eu-worksheet-end f)))
@@ -2197,5 +2247,5 @@
   (princ))
 (defun c:РАСКРОЙЛИСТА () (c:CUTSHEET))
 
-(princ "\nCUTSHEET.LSP загружен (ред. 34: сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
+(princ "\nCUTSHEET.LSP загружен (ред. 35: марка в XLS и CSV; сводка — строка на каждую марку; подписи детали не наползают; марки в перечне изделий; блоки заполнения — размер в свету + припуск; марка элемента в углу детали; заголовок «Выбранные слои» со счётчиком; карта в блок берёт только свои объекты; скан и состав блока с защитой; фильтры слоёв; U2, П1-П3, V5). Команды: CUTSHEET, РАСКРОЙЛИСТА")
 (princ)
