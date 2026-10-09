@@ -1009,6 +1009,98 @@ def check_defun_duplicates_in_file(files=None) -> list[str]:
     return errors
 
 
+# ----------------------------------------------------------------------
+# Арность вызовов
+# ----------------------------------------------------------------------
+
+ARITY_SKIP_HEADS = ("defun", "lambda")
+
+
+def lisp_signatures(files) -> dict[str, set]:
+    """Имя defun (строчными) -> набор допустимых чисел параметров."""
+    sig: dict[str, set] = {}
+    for path in files:
+        try:
+            forms = lisp_parse(read_text(path))
+        except (OSError, LispParseError):
+            continue
+        for node in forms:
+            if node[0] != "list" or len(node[1]) < 3:
+                continue
+            head, name, args = node[1][0], node[1][1], node[1][2]
+            if not (head[0] == "atom" and head[1].lower() == "defun"
+                    and name[0] == "atom" and args[0] == "list"):
+                continue
+            count = 0
+            for a in args[1]:
+                if a[0] == "atom" and a[1] == "/":
+                    break
+                if a[0] == "atom":
+                    count += 1
+            sig.setdefault(name[1].lower(), set()).add(count)
+    return sig
+
+
+def _walk_calls(node, cb) -> None:
+    """Обход формы: cb(голова строчными, число аргументов, строка).
+
+    Цитаты не обходятся: '(...) - данные, а не вызов. У defun и lambda
+    пропускаются имя и список параметров, иначе символы параметров
+    выглядели бы вызовами.
+    """
+    if node[0] != "list":
+        return
+    items = node[1]
+    head = items[0] if items else None
+    head_name = head[1].lower() if head and head[0] == "atom" else None
+    start = 3 if (head_name in ARITY_SKIP_HEADS and len(items) > 2) else 1
+    for child in items[start:]:
+        if child[0] != "quote":
+            _walk_calls(child, cb)
+    if head_name:
+        cb(head_name, len(items) - 1, node[2])
+
+
+def check_call_arity(files=None) -> list[str]:
+    """Число аргументов в вызове совпадает с числом параметров defun.
+
+    У пользовательской функции AutoLISP нет необязательных аргументов:
+    вызов с меньшим числом аргументов, чем параметров, - ошибка
+    «слишком мало аргументов», и она рвёт команду целиком. Именно так
+    RELOAD падал сразу после «--- COMMON ---», когда у
+    ae-reload-load-file появился второй параметр note, а два старых
+    вызова остались с одним аргументом (коммит 1dc99a1). Статически это
+    не видно: скобки сбалансированы, спецформы на месте.
+    """
+    paths = (files if files is not None
+             else list(all_lisp_files()) + list(plugin_dev_files()))
+    sig = lisp_signatures(paths)
+    errors: list[str] = []
+    for path in paths:
+        try:
+            forms = lisp_parse(read_text(path))
+        except (OSError, LispParseError):
+            continue
+        rel = _rel(path)
+
+        def cb(name, argc, line, rel=rel):
+            if name in ARITY_SKIP_HEADS:
+                return
+            allowed = sig.get(name)
+            if not allowed or argc in allowed:
+                return
+            want = "/".join(str(a) for a in sorted(allowed))
+            kind = ("слишком мало аргументов" if argc < min(allowed)
+                    else "слишком много аргументов")
+            errors.append(
+                f"{rel}: строка {line}: {name} - аргументов {argc}, "
+                f"параметров {want}: в AutoCAD будет «{kind}»")
+
+        for form in forms:
+            _walk_calls(form, cb)
+    return errors
+
+
 def check_dialog_layers_section() -> list[str]:
     """Раздел «Выбранные слои» в окнах раскроя (CUTLINE и CUTSHEET).
 
@@ -1380,6 +1472,7 @@ def main() -> int:
     errors += check_special_forms(list(all_lisp_files()) + dev_files)
     errors += check_reload_version_line()
     errors += check_defun_duplicates_in_file(list(all_lisp_files()) + dev_files)
+    errors += check_call_arity(list(all_lisp_files()) + dev_files)
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
@@ -1401,6 +1494,7 @@ def main() -> int:
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
+        f" / call-arity"
         f" / mark-labels / fill-allowance / summary-marks"
     )
     print("RESULT: PASS")
