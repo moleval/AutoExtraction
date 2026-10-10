@@ -92,5 +92,8 @@
 | `tests/validation-test.lsp` | парсер и предикаты V1/V2 (Этап 2): `tu-parse-number` (числа/строки/запятая/разрядка/VARIANT), `tu-parse-int-list`, все `tu-*-p` — около 50 проверок; ожидание `[V1][OK]` | после RELOAD: `(load "D:/AutoExtraction/tests/validation-test.lsp")` |
 | `tests/u2-xlsdiff.lsp` | семантический diff XLS против эталонов | см. заголовок файла |
 | `tests/layer-filter-test.lsp` | фильтры слоёв на живом чертеже: дерево групповых фильтров, состав «Мои/Фасады/Витражи/Окна», критическое условие «Отключенные», отсутствие дублей; ожидание `[LAYER-FILTER-TEST][OK]` | `(load "D:/AutoExtraction/tests/layer-filter-test.lsp")` затем команда `LAYERFILTERTEST` |
+| `tests/unit-tests.lsp` | лёгкие unit- и регрессионные тесты (`ae-test-assert`, `ae-test-eq`), итог PASS/FAIL | APPLOAD → `tests/unit-tests.lsp` → команда `AE_TEST` |
+| `tests/cladding-test.lsp` | тестовые помощники облицовки: `MKTEST` (8 полилиний на 2 слоях), `RMTEST`, `CLCOUNTERS` (счётчики предупреждений), `TEST-FALLBACK` (сверка Area и Green), `SCANBLOCKS` (сканер динамических блоков) | `(load "D:/AutoExtraction/tests/cladding-test.lsp")`, затем команды |
+| `tests/chkparens.lsp` | баланс скобок и кодировка `.lsp`: `CHKALL` — все файлы проекта, `CHKFILE` — один файл по пути, `CHKLOAD` — поиск места сбоя загрузки файла; `CHKPARENS.md` — описание правил | после RELOAD: команда `CHKALL` (описание — в разделе про `CHKALL` выше) |
 
 Зафиксированное поведение (ревью V1/V2, P1): пробелы в числовых строках — разрядка, поэтому `"1 2"` → `12`. Пересмотр семантики возможен только на V3.

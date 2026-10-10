@@ -1,7 +1,31 @@
 # Дорожная карта AutoExtraction: Этап 2+ («Защита → Унификация → Производительность»)
 
-Зафиксировано: 2026-09-22, ветка `arena/01a08717-autoextraction` (тип `bde9b71`+).
+Зафиксировано: 2026-09-22, ветка `arena/01a08717-autoextraction` (тип `bde9b71`+). Статус обновлён 2026-10-10.
 Статус старта: стабилизация закрыта, техдолг = 0, алгоритмы раскроя (FFD/MaxRects) **не меняем**.
+
+## Статус на 2026-10-10
+
+Статус по коду (имена функций и вызовы проверены по репозиторию на ветке `arena/c0eaf09d-autoextraction`).
+Исходные таблицы ниже сохранены без изменений; ориентироваться на эту таблицу.
+
+| ID | Статус | Факт в коде |
+|---|---|---|
+| V1 | выполнено | `common/validation-utils.lsp`, тесты `tests/validation-test.lsp` |
+| V2 | выполнено | `tu-parse-number` используется в `cutline.lsp` и `cutsheet.lsp` |
+| V3 | частично | `tu-valid-bar-length-p`, `tu-valid-kerf-p` — в CUTLINE; `tu-valid-sheet-size-p` в модулях не вызывается |
+| V4 | не начато | предикатов геометрии в модулях нет |
+| V5 | выполнено | `*n1-max-parts*`, `*cs-max-parts*` = 10000 (в плане было 5000) |
+| V6 | выполнено | `*n1-max-placement-attempts*`, `*cs-max-placement-attempts*` = 1000000 |
+| V7 | частично | детали, не помещающиеся на лист, выводятся в «НЕРАЗМЕЩЕНО» после размещения; предварительной проверки до солвера нет |
+| V8 | не выполнено | `ex-safe-main` отсутствует |
+| V9 | частично | контракт `ex-safe-call` / `ex-safe-ok-p` в `common/task-utils.lsp`; миграция точек — `docs/v9-activex-migration.md` |
+| V10 | выполнено | `tu-undo-begin` / `tu-undo-cancel` в blockrename, cladding, cutline, cutsheet, extraction |
+| V11 | частично | `*EXTRACTION-DIAGNOSTIC*` с тегами `[PACK]`, `[DRAW]` и др.; единый формат ошибок не везде |
+| V13 | не проверено | по коду однозначно не подтверждено; см. `HANDOFF_TZ.md` |
+| U1 | выполнено | `eu-cell`, `eu-row-begin`, `eu-row-end`, `eu-xml-styles`; тест `tests/u1-selftest.lsp` |
+| U2 | выполнено | cladding, cutline, cutsheet пишут через `eu-cell`; эталоны `u2-xlsdiff` устарели (см. `techdebt.md`) |
+| U3 | не выполнено | счётчик ревизий остался в `reload.lsp`, генератор имён в `common/` не найден |
+| Этап 5 | частично | кеш свойств блоков (`su-block-props-cache`, п. 16); прогресс `grtext` и отмена ESC по `HANDOFF_TZ.md` (П3); остальное не проверено |
 
 ## Принципы этапа
 
