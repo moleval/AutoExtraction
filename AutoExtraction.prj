@@ -1,21 +1,29 @@
-;;; VLisp project file [V2.0] AutoExtraction saved to:[d:\AutoExtraction] at:[09.09.2026]
-(VLISP-PROJECT-LIST 
+;;; VLisp project file [V2.0] AutoExtraction saved to:[d:\AutoExtraction] at:[10.10.2026]
+(VLISP-PROJECT-LIST
   :NAME
   AutoExtraction
   :OWN-LIST
-  ("d:/AutoExtraction/Extraction/extraction" 
-    "d:/AutoExtraction/Extraction/fasonka"
-    "d:/AutoExtraction/Extraction/subsystem"
-    "d:/AutoExtraction/Extraction/cutline"
-    "d:/AutoExtraction/Extraction/cutsheet"
-    "d:/AutoExtraction/common/excel-utils"
+  (
+    "d:/AutoExtraction/common/task-utils"
+    "d:/AutoExtraction/common/settings-utils"
+    "d:/AutoExtraction/common/perf-utils"
     "d:/AutoExtraction/common/layer-utils"
     "d:/AutoExtraction/common/select-utils"
+    "d:/AutoExtraction/common/excel-utils"
     "d:/AutoExtraction/common/table-utils"
-    "d:/AutoExtraction/common/task-utils"
     "d:/AutoExtraction/common/txt-utils"
-    "reload"
+    "d:/AutoExtraction/common/validation-utils"
+    "d:/AutoExtraction/Extraction/fasonka"
+    "d:/AutoExtraction/Extraction/subsystem"
+    "d:/AutoExtraction/Extraction/cladding"
     "d:/AutoExtraction/Extraction/zapolnenie"
+    "d:/AutoExtraction/Extraction/settings"
+    "d:/AutoExtraction/Extraction/help"
+    "d:/AutoExtraction/Extraction/extraction"
+    "d:/AutoExtraction/Extraction/cutline"
+    "d:/AutoExtraction/Extraction/cutsheet"
+    "d:/AutoExtraction/Extraction/blockrename"
+    "reload"
   )
   :FAS-DIRECTORY
   nil

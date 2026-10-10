@@ -55,8 +55,6 @@ AutoExtraction/
 ├── scripts/
 │   └── test.ps1               # Запуск static_check и Python-тестов одной командой (PowerShell);
 │                              #   ключ -AutoCAD пока только ищет acad.exe (заглушка)
-├── export/
-│   └── zapolnenie-bundle.txt  # Выгрузка ZAPOLNENIE для передачи (ред. 28, устарел; перевыпуск не сделан)
 ├── docs/                      # Документация
 │   ├── START.md               # Быстрый старт
 │   ├── requirements.md        # Функциональные требования (текущее поведение)
@@ -73,7 +71,6 @@ AutoExtraction/
 │   ├── nesting-quality.md     # Качество раскроя CUTSHEET
 │   ├── v9-activex-migration.md  # Контракт safe-call для ActiveX
 │   ├── acceptance-v3-v5-v6.md # Протокол живой приёмки V3/V5/V6
-│   ├── extraction-settings-design-draft.md  # Черновик проектирования настроек
 │   └── GIT.md                 # Работа с Git и GitHub
 ├── roadmap.md                 # Дорожная карта (этапы 2–5)
 ├── techdebt.md                # Технический долг

@@ -1631,13 +1631,6 @@
               (+ (cadr insPt) sheetH))))
 
 ;; ================= XLS / CSV =================
-(defun cs-xml-escape (s)
-  (setq s (vl-string-subst "&amp;" "&" s))
-  (setq s (vl-string-subst "&lt;" "<" s))
-  (setq s (vl-string-subst "&gt;" ">" s))
-  (setq s (vl-string-subst "&quot;" "\"" s))
-  s)
-
 (defun cs-write-csv (sheets oversized sheetW sheetH kerf / fname f n sh p r hasMarks mk)
   (setq fname (strcat (getvar "DWGPREFIX") (vl-filename-base (getvar "DWGNAME")) " Раскрой листа.csv"))
   (setq f (open fname "w"))

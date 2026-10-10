@@ -1,4 +1,4 @@
-;; AutoExtraction â€” lightweight unit/regression tests
+;; AutoExtraction — lightweight unit/regression tests
 ;; AutoCAD: APPLOAD -> tests/unit-tests.lsp -> AE_TEST
 
 (defun ae-test-assert (condition name /)
@@ -12,7 +12,7 @@
             " actual=" (vl-princ-to-string actual))))
 
 (defun ae-test-ffd (/ result)
-  (if (not (fboundp 'n1-ffd))
+  (if (not (= (type n1-ffd) 'SUBR))
     (progn (princ "\n  SKIP  n1-ffd not loaded") T)
     (progn
       (setq result (n1-ffd '(3000.0 3000.0) 6000.0 0.0))
@@ -28,7 +28,7 @@
 
 (defun c:AE_TEST (/)
   (setq *AE-TEST-PASS* 0 *AE-TEST-FAIL* 0)
-  (if (not (fboundp 'n1-ffd))
+  (if (not (= (type n1-ffd) 'SUBR))
     (if (findfile "Extraction/cutline.lsp") (load "Extraction/cutline.lsp")))
   (princ "\n========================================")
   (princ "\nAutoExtraction UNIT / REGRESSION TESTS")

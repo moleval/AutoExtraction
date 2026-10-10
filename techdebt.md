@@ -11,21 +11,20 @@
 
 | # | Пункт | Что сделать | Решение за |
 |---|---|---|---|
-| 1 | Мёртвый код: `cs-xml-escape` (`Extraction/cutsheet.lsp`), `lft-same-set-p` и `lft-overlap-p` (`tests/layer-filter-test.lsp`), 12 строк | Удалить | пользователь |
-| 2 | `tests/unit-tests.lsp` использует `fboundp` (2 места), которого нет в AutoLISP | Заменить на проверку через `type` или `boundp` | разработчик |
-| 3 | `tests/unit-tests.lsp` сохранён в UTF-8 (3 не-ASCII символа в комментариях); LSP-файлы должны быть в cp1251 | Перекодировать в cp1251 | разработчик |
-| 4 | `export/zapolnenie-bundle.txt` — выгрузка ред. 28, текущая ред. 30 | Перевыпустить или удалить | пользователь |
-| 5 | `AutoExtraction.prj` содержит 12 записей вместо 19 модулей (нет `cladding`, `blockrename`, `settings`, `help`, `validation-utils`, `perf-utils`, `settings-utils`) | Обновить список | пользователь |
-| 6 | Эталоны `tests/u2-xlsdiff.lsp` устарели для XLS с марками: CUTLINE 88/360, CUTSHEET 303/2259 | Прогон в AutoCAD и обновление эталонов | разработчик с AutoCAD |
-| 7 | Витраж — заглушка `vitrazh-main` | Реализовать (см. [next-tasks.md](docs/next-tasks.md)) | пользователь |
-| 8 | `scripts/test.ps1 -AutoCAD` — только поиск `acad.exe`, сам прогон не выполняет | Реализовать запуск скрипта `.scr` в AutoCAD или убрать ключ | разработчик |
-| 9 | Номера редакций в заголовках файлов не совпадают с журналом: `cladding.lsp` — «РЕДАКЦИЯ 29», `zapolnenie.lsp` — «РЕДАКЦИЯ 28» | Сверить заголовки с журналом | разработчик |
-| 10 | Пункты дорожной карты, выполненные частично или не начатые: V3, V4, V7, V8, V9, V11, U3, этап 5 | Статусы — в [roadmap.md](roadmap.md) | по плану |
-| 11 | Черновик `docs/extraction-settings-design-draft.md` (480 строк) — частично реализован | Оставить как есть или удалить | пользователь |
-| 12 | Раздел «Лицензия» в `README.md` не заполнен | Указать лицензию | пользователь |
+| 1 | Эталоны `tests/u2-xlsdiff.lsp` устарели для XLS с марками: CUTLINE 88/360, CUTSHEET 303/2259 | Прогон в AutoCAD и обновление эталонов | разработчик с AutoCAD |
+| 2 | Витраж — заглушка `vitrazh-main` | Реализовать (см. [next-tasks.md](docs/next-tasks.md)) | пользователь |
+| 3 | `scripts/test.ps1 -AutoCAD` — только поиск `acad.exe`, сам прогон не выполняет | Реализовать запуск `.scr` в AutoCAD или убрать ключ | разработчик |
+| 4 | Пункты дорожной карты, выполненные частично или не начатые: V3, V4, V7, V8, V9, V11, U3, этап 5 | Статусы — в [roadmap.md](roadmap.md) | по плану |
+| 5 | Лицензия не выбрана: в репозитории нет файла LICENSE, сторонний код и уведомления об авторстве не найдены; владелец по коммитам — moleval. Раздел «Лицензия» в `README.md` пока с заглушкой | Выбрать лицензию (например, MIT) или оставить закрытой и зафиксировать формулировку | пользователь |
+| 6 | Служебные файлы, которые могут быть отработанными: `tests/TEST_MLINE_NAME.LSP` (диагностика MLINE), `tests/run-tests.scr.example` (шаблон для `-AutoCAD`), `tests/TEST_CASES.md`, `docs/v9-activex-migration.md`, `docs/acceptance-v3-v5-v6.md`, `HANDOFF_TZ.md` | Подтвердить, какие оставить, а какие удалить | пользователь |
 
 ## Закрыто
 
+- 2026-10-10 — мёртвый код удалён: `cs-xml-escape`, `eu-export-zapolnenie-detail`, `eu-export-zapolnenie-csv-detail`, `su-mline-length`, `lft-same-set-p`, `lft-overlap-p` (вызовов не было).
+- 2026-10-10 — `tests/unit-tests.lsp`: `fboundp` заменён на `(= (type имя) 'SUBR)`, файл перекодирован в cp1251.
+- 2026-10-10 — `AutoExtraction.prj` приведён к 19 модулям в порядке загрузки `reload.lsp`.
+- 2026-10-10 — номера редакций в заголовках: `cladding.lsp` — ред. 31, `zapolnenie.lsp` — ред. 30 (история — в HANDOFF_TZ.md).
+- 2026-10-10 — удалены `export/zapolnenie-bundle.txt` (устаревшая выгрузка ред. 28) и `docs/extraction-settings-design-draft.md` (отработанный черновик; решения реализованы в `settings.lsp`, описаны в `requirements.md`).
 - 2026-10-10 — Документация приведена к текущему коду: `requirements.md`, `README.md`, `structure.md`, `START.md`, `promt.md`, `next-tasks.md`, `zapolnenie.md`; устаревшие отчёты и аудиты удалены (см. историю git).
 - 2026-10-08 — `Extraction/cutsheet.lsp` ред. 25 загружался с ошибкой; причина найдена статическим аудитом, редакция принята живыми прогонами.
 - 2026-10-07 — упаковка раскладки CUTLINE в блок захватывала посторонние объекты (ред. 15–16).

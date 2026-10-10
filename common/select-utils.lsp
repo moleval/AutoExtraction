@@ -12,10 +12,10 @@
 ;;;   кэш свойств блоков      — su-get-block-props (Р3.3)
 ;;;   su-select-inserts       — выбор INSERT (Р2.2)
 ;;;   su-get-effective-name / su-get-visibility
-;;;   su-has-length/width/height-property, su-is-valid-stock-block
+;;;   su-is-valid-stock-block
 ;;;   su-get-dynblock-type-name / su-collect-dynblock-types (3.1)
 ;;;   su-get-length           — двухступенчатый поиск (Р3.2)
-;;;   MLINE: su-mline-length, su-mline-vertices,
+;;;   MLINE: su-mline-vertices,
 ;;;          su-mline-vertex-count, su-mline-style-name,
 ;;;          su-mline-type-name, su-collect-mline-types,
 ;;;          su-count-mline-by-type, su-mline-cut-geom (M2.1, DXF)
@@ -376,27 +376,6 @@
     (atoi (rtos len 2 0))
     nil
   )
-)
-
-;; ============================================================
-;; MLINE: длина по вершинам DXF 11 (обратная совместимость)
-;; ============================================================
-(defun su-mline-length (ent / data verts i total p1 p2)
-  (setq data (entget ent))
-  (setq verts '())
-  (foreach pair data
-    (if (= (car pair) 11)
-      (setq verts (cons (cdr pair) verts))
-    )
-  )
-  (setq verts (reverse verts))
-  (setq total 0.0 i 0)
-  (while (< i (1- (length verts)))
-    (setq p1 (nth i verts) p2 (nth (1+ i) verts))
-    (setq total (+ total (distance p1 p2)))
-    (setq i (1+ i))
-  )
-  total
 )
 
 ;; ============================================================

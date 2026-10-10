@@ -267,9 +267,9 @@
 ### 11.1 `common/excel-utils.lsp`
 - `eu-round2` — округление до двух знаков
 - `eu-format-area-csv` — форматирование площади для CSV
-- `eu-export-zapolnenie-detail` — XLS DETAIL
+- `zapolnenie-export-xls-detail` — XLS DETAIL (`Extraction/zapolnenie.lsp`)
 - `eu-export-zapolnenie-summary` — XLS SUMMARY
-- `eu-export-zapolnenie-csv-detail` — CSV DETAIL
+- `zapolnenie-export-csv-detail` — CSV DETAIL (`Extraction/zapolnenie.lsp`)
 - `eu-export-zapolnenie-csv-summary` — CSV SUMMARY
 
 ### 11.2 `common/txt-utils.lsp`
@@ -342,7 +342,7 @@
 | Слои по умолчанию | Не заданы | Не заданы |
 
 ### 14.3 Чего избегать (уроки Заполнения)
-1. **Не использовать `fboundp`** — её нет в AutoLISP. Использовать `vl-catch-all-apply`.
+1. **Не использовать `fboundp`** — её нет в AutoLISP. Проверять наличие функции через `(= (type имя) 'SUBR)`, как в `cladding.lsp`.
 2. **Комментировать структуру записей списков** — чтобы избежать ошибок с индексами.
 3. **Проверять индексы элементов** при изменении структуры записи.
 4. **Округлять площади ДО суммирования** — чтобы не терялась 0,01 в подитогах.
