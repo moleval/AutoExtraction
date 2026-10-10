@@ -48,8 +48,6 @@ AutoExtraction/
 │   ├── cladding-test.lsp      # Тестовые помощники облицовки (MKTEST, RMTEST, SCANBLOCKS и др.)
 │   ├── chkparens.lsp          # Баланс скобок и кодировка (CHKALL, CHKFILE, CHKLOAD)
 │   ├── CHKPARENS.md           # Описание проверки баланса скобок
-│   ├── TEST_CASES.md          # Регрессионные случаи CUTLINE
-│   ├── TEST_MLINE_NAME.LSP    # Диагностика имени MLINE и её MLINESTYLE (TESTMLINENAME)
 │   ├── run-tests.scr.example  # Пример скрипта AutoCAD: загрузка unit-tests.lsp и AE_TEST
 │   └── README.md              # Описание тестов и порядок запуска
 ├── scripts/
