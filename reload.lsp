@@ -71,7 +71,7 @@
   (cdr (assoc key items))
 )
 
-(defun ae-reload-plugin-registry (/ root path f line section parsed items out n i name ppath ks it)
+(defun ae-reload-plugin-registry (/ root path f line section parsed items out i name ppath ks it)
   (setq root (ae-reload-root))
   (setq path (if root (strcat root "\\settings.ini") nil))
   (setq items '())
@@ -89,10 +89,10 @@
     )
   )
   (setq items (reverse items))
-  (setq n (atoi (ae-settings-trim (or (ae-reload-kv items "plugin.count") "0"))))
+  ;; Без счётчика: идём по plugin.1, plugin.2, ... пока есть plugin.N.name.
   (setq i 1)
   (setq out '())
-  (while (<= i n)
+  (while (and (<= i 99) (ae-reload-kv items (strcat "plugin." (itoa i) ".name")))
     (setq name (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) "")))
     (setq ppath (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) "")))
     (if (> (strlen name) 0)
@@ -108,7 +108,8 @@
   (setq *ae-reload-reg-diag*
     (strcat "файл=" (if path path "нет") " открыт=" (if f "да" "нет")
             " ключи:" ks
-            " | n=" (itoa n)
+            " | count=" (if (ae-reload-kv items "plugin.count")
+                          (strcat "\"" (ae-reload-kv items "plugin.count") "\"") "НЕТ")
             " | name1=" (if (ae-reload-kv items "plugin.1.name")
                           (ae-reload-kv items "plugin.1.name") "НЕТ")
             " | собрано=" (itoa (length out))))
