@@ -95,8 +95,11 @@
   (while (and (<= i 99) (ae-reload-kv items (strcat "plugin." (itoa i) ".name")))
     ;; «начени€ уже обрезаны ae-settings-read-line; повторна€ обрезка здесь
     ;; давала пустое им€ (собрано=0 при найденном plugin.1.name).
-    (setq name (or (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) ""))
-    (setq ppath (or (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) ""))
+    ;; ¬ AutoLISP (or ...) возвращает T, а не значение: берЄм через if.
+    (setq name (if (ae-reload-kv items (strcat "plugin." (itoa i) ".name"))
+                 (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) ""))
+    (setq ppath (if (ae-reload-kv items (strcat "plugin." (itoa i) ".path"))
+                  (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) ""))
     (if (> (strlen name) 0)
       (setq out (cons (list name ppath) out))
     )
