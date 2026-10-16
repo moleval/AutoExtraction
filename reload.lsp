@@ -71,7 +71,7 @@
   (cdr (assoc key items))
 )
 
-(defun ae-reload-plugin-registry (/ root path f line section parsed items out i name ppath ks it)
+(defun ae-reload-plugin-registry (/ root path f line section parsed items out i name ppath)
   (setq root (ae-reload-root))
   (setq path (if root (strcat root "\\settings.ini") nil))
   (setq items '())
@@ -93,9 +93,8 @@
   (setq i 1)
   (setq out '())
   (while (and (<= i 99) (ae-reload-kv items (strcat "plugin." (itoa i) ".name")))
-    ;; Значения уже обрезаны ae-settings-read-line; повторная обрезка здесь
-    ;; давала пустое имя (собрано=0 при найденном plugin.1.name).
-    ;; В AutoLISP (or ...) возвращает T, а не значение: берём через if.
+    ;; Значения уже обрезаны ae-settings-read-line. Не использовать (or ...):
+    ;; в AutoLISP он возвращает T, а не значение.
     (setq name (if (ae-reload-kv items (strcat "plugin." (itoa i) ".name"))
                  (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) ""))
     (setq ppath (if (ae-reload-kv items (strcat "plugin." (itoa i) ".path"))
@@ -105,21 +104,6 @@
     )
     (setq i (1+ i))
   )
-  ;; ВРЕМЕННАЯ диагностика (убрать после поиска причины): ключи как прочитаны,
-  ;; длины, поиск plugin.1.name, сколько записей собрал цикл.
-  (setq ks "")
-  (foreach it items
-    (setq ks (strcat ks " <" (car it) ":" (itoa (strlen (car it))) ">")))
-  (setq *ae-reload-reg-diag*
-    (strcat "файл=" (if path path "нет") " открыт=" (if f "да" "нет")
-            " ключи:" ks
-            " | count=" (if (ae-reload-kv items "plugin.count")
-                          (strcat "\"" (ae-reload-kv items "plugin.count") "\"") "НЕТ")
-            " | name1=" (if (ae-reload-kv items "plugin.1.name")
-                          (ae-reload-kv items "plugin.1.name") "НЕТ")
-            " | имя_len=" (itoa (strlen name))
-            " | trim_test=" (itoa (strlen (ae-settings-trim "  x.lsp ")))
-            " | собрано=" (itoa (length out))))
   (reverse out)
 )
 
@@ -695,8 +679,6 @@
         )
       )
       (setq plugin-items (reverse plugin-items))
-      ;; ВРЕМЕННАЯ диагностика (убрать после поиска причины).
-      (princ (strcat "\n[RELOAD][PLUGINS] диагностика: " *ae-reload-reg-diag*))
 
       (if (> (length plugin-items) 0)
         (progn
