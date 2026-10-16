@@ -115,7 +115,7 @@
             " | name1=" (if (ae-reload-kv items "plugin.1.name")
                           (ae-reload-kv items "plugin.1.name") "НЕТ")
             " | имя_len=" (itoa (strlen name))
-            " | trim_test=" (itoa (strlen (ae-settings-trim "PlotFrame.lsp")))
+            " | trim_test=" (itoa (strlen (ae-settings-trim "  x.lsp ")))
             " | собрано=" (itoa (length out))))
   (reverse out)
 )
