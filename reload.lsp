@@ -93,8 +93,10 @@
   (setq i 1)
   (setq out '())
   (while (and (<= i 99) (ae-reload-kv items (strcat "plugin." (itoa i) ".name")))
-    (setq name (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) "")))
-    (setq ppath (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) "")))
+    ;; Значения уже обрезаны ae-settings-read-line; повторная обрезка здесь
+    ;; давала пустое имя (собрано=0 при найденном plugin.1.name).
+    (setq name (or (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) ""))
+    (setq ppath (or (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) ""))
     (if (> (strlen name) 0)
       (setq out (cons (list name ppath) out))
     )
@@ -112,6 +114,8 @@
                           (strcat "\"" (ae-reload-kv items "plugin.count") "\"") "НЕТ")
             " | name1=" (if (ae-reload-kv items "plugin.1.name")
                           (ae-reload-kv items "plugin.1.name") "НЕТ")
+            " | имя_len=" (itoa (strlen name))
+            " | trim_test=" (itoa (strlen (ae-settings-trim "PlotFrame.lsp")))
             " | собрано=" (itoa (length out))))
   (reverse out)
 )
