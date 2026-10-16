@@ -88,6 +88,12 @@
       (close f)
     )
   )
+  ;; ¬–≈ћ≈ЌЌјя диагностика (убрать после поиска причины): что прочитано.
+  (setq *ae-reload-reg-diag*
+    (strcat "файл=" (if path path "нет") " открыт=" (if f "да" "нет")
+            " записей=" (itoa (length items))
+            " plugin.count=" (if (ae-reload-kv items "plugin.count")
+                               (ae-reload-kv items "plugin.count") "нет")))
   (setq items (reverse items))
   (setq n (atoi (ae-settings-trim (or (ae-reload-kv items "plugin.count") "0"))))
   (setq i 1)
@@ -675,6 +681,8 @@
         )
       )
       (setq plugin-items (reverse plugin-items))
+      ;; ¬–≈ћ≈ЌЌјя диагностика (убрать после поиска причины).
+      (princ (strcat "\n[RELOAD][PLUGINS] диагностика: " *ae-reload-reg-diag*))
 
       (if (> (length plugin-items) 0)
         (progn
