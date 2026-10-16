@@ -58,32 +58,106 @@
 )
 
 ;; ------------------------------------------------------------
-;; ПЛАГИНЫ: сторонние модули. Это отдельные продукты со своими
-;; репозиториями: в списки COMMON/EXTRACTION не входят и грузятся
-;; последними. Для каждого имени файл ищется сначала в каталогах
-;; разработки (см. *ae-reload-plugin-dev-dirs* ниже), затем в папке
-;; Plugins\ проекта - туда кладутся принятые плагины, как есть
-;; (cp1251, без перекодирования).
-;; Если файл не найден нигде и папки Plugins\ нет - секция RELOAD
-;; молча пропускается (отсутствие плагина - не ошибка проекта).
+;; ПЛАГИНЫ: сторонние модули. Программа не знает их содержимого.
+;; Реестр - секция [plugins] в settings.ini, его пишет окно
+;; «Настройки» (кнопка «Плагины...»). Одна запись на плагин:
+;;   plugin.N.name - имя файла, plugin.N.path - полный путь (может быть пуст).
+;; Путь задан - грузим по нему; файла нет - строка НЕ НАЙДЕН в логе
+;; (без отката на другой путь). Путь пуст - Plugins\\<имя> в проекте.
+;; Порядок загрузки - порядок записей реестра.
 ;; ------------------------------------------------------------
-(setq *ae-reload-plugin-files*
-  '(
-    "PlotFrame.lsp"
+
+(defun ae-reload-kv (items key)
+  (cdr (assoc key items))
+)
+
+(defun ae-reload-plugin-registry (/ root path f line section parsed items out n i name ppath)
+  (setq root (ae-reload-root))
+  (setq path (if root (strcat root "\\settings.ini") nil))
+  (setq items '())
+  (setq section "")
+  (if (and path (setq f (open path "r")))
+    (progn
+      (while (setq line (read-line f))
+        (setq parsed (ae-settings-read-line line section))
+        (setq section (car parsed))
+        (if (and (= section "plugins") (cadr parsed))
+          (setq items (cons (cons (cadr parsed) (caddr parsed)) items))
+        )
+      )
+      (close f)
+    )
+  )
+  (setq items (reverse items))
+  (setq n (atoi (ae-settings-trim (or (ae-reload-kv items "plugin.count") "0"))))
+  (setq i 1)
+  (setq out '())
+  (while (<= i n)
+    (setq name (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".name")) "")))
+    (setq ppath (ae-settings-trim (or (ae-reload-kv items (strcat "plugin." (itoa i) ".path")) "")))
+    (if (> (strlen name) 0)
+      (setq out (cons (list name ppath) out))
+    )
+    (setq i (1+ i))
+  )
+  (reverse out)
+)
+
+(defun ae-reload-plugin-resolve (name ppath / root)
+  ;; Полный путь к файлу плагина или nil.
+  ;; Путь из реестра задан - только он: нет файла - nil (НЕ НАЙДЕН).
+  ;; Путь пуст - Plugins\<имя> внутри проекта.
+  (setq root (ae-reload-root))
+  (cond
+    ((> (strlen ppath) 0) (findfile ppath))
+    ((and root (findfile (strcat root "\\Plugins\\" name))))
+    (T nil)
   )
 )
 
-;; Каталоги РАЗРАБОТКИ плагинов. Если файл плагина найден в одном из
-;; этих каталогов, RELOAD грузит его ОТТУДА, а не из Plugins\ - правки
-;; в рабочем репозитории плагина подхватываются без копирования.
-;; В таком случае копия в Plugins\ не нужна и в git не кладётся.
-;; Пути меняются здесь, без правок кода; список может быть пустым.
-;; Пути пишутся БЕЗ завершающего обратного слэша: имя файла добавляется
-;; через "\\".
-(setq *ae-reload-plugin-dev-dirs*
-  '(
-    "D:\\PlotFrameToPDF"
+(defun ae-reload-token-end (s / i n)
+  (setq i 1)
+  (setq n (strlen s))
+  (while (and (<= i n) (not (member (substr s i 1) '(" " ")"))))
+    (setq i (1+ i))
   )
+  (substr s 1 (1- i))
+)
+
+(defun ae-reload-plugin-defuns (path / f line name out)
+  ;; Имена (defun ...) из файла плагина; сам файл не интерпретируется.
+  (setq out '())
+  (if (setq f (open path "r"))
+    (progn
+      (while (setq line (read-line f))
+        (setq line (ae-settings-trim line))
+        (if (and (> (strlen line) 7) (= (strcase (substr line 1 7)) "(DEFUN "))
+          (progn
+            (setq name (ae-reload-token-end (substr line 8)))
+            (if (> (strlen name) 0)
+              (setq out (cons name out))
+            )
+          )
+        )
+      )
+      (close f)
+    )
+  )
+  out
+)
+
+(defun ae-reload-plugin-conflicts (path names taken / nm)
+  ;; Имена функций плагина, уже занятые проектом (по файлам этого прогона)
+  ;; или предыдущим плагином, - предупреждение в логе. Загрузка продолжается.
+  ;; Возвращает taken, пополненный именами этого плагина.
+  (foreach nm names
+    (if (member (strcase nm) taken)
+      (princ (strcat "\n[RELOAD][PLUGINS] ВНИМАНИЕ: функция " nm
+                     " уже определена (проект или другой плагин); плагин "
+                     path " её перезапишет"))
+    )
+  )
+  (append (mapcar 'strcase names) taken)
 )
 
 ;; ------------------------------------------------------------
@@ -132,24 +206,6 @@
         (close ff)))
     (if found (setq cnt (1+ cnt))))
   cnt)
-
-;; ------------------------------------------------------------
-;; Путь к плагину в каталоге разработки, если файл там есть.
-;; Первый найденный каталог выигрывает; nil - файла нет ни в одном.
-;; ------------------------------------------------------------
-(defun ae-reload-plugin-dev-path (name / d p hit)
-  (setq hit nil)
-  (foreach d *ae-reload-plugin-dev-dirs*
-    (if (null hit)
-      (progn
-        (setq p (strcat d "\\" name))
-        (if (findfile p)
-          (setq hit p))
-      )
-    )
-  )
-  hit
-)
 
 
 ;; ============================================================
@@ -390,10 +446,16 @@
            fullpath
            common-files
            extraction-files
-           plugins-dir
            plugin-items
-           plugin-cnt
-           dev-path
+           plugin-seen
+           plugin-rec
+           plugin-name
+           plugin-path
+           plugin-res
+           plugin-names
+           plugin-missing
+           plugin-resolved
+           plugin-taken
            it
            ok
            errors
@@ -459,10 +521,6 @@
 
       (setq extraction-dir
         (strcat root "\\Extraction\\")
-      )
-
-      (setq plugins-dir
-        (strcat root "\\Plugins\\")
       )
 
 
@@ -578,60 +636,76 @@
       ;; --------------------------------------------------------
       ;; PLUGINS (сторонние модули)
       ;; --------------------------------------------------------
-      ;; Плагин ищется сначала в каталогах разработки
-      ;; (*ae-reload-plugin-dev-dirs*), затем в Plugins\ проекта.
-      ;; Молча пропускаем то, чего нет нигде и для чего нет папки
-      ;; Plugins\: ни строки "НЕ НАЙДЕН", ни влияния на счётчики.
-      ;; Но если папка Plugins\ есть, а заявленного файла в ней нет -
-      ;; это честно попадает в missing (иначе потеря была бы невидимой).
+      ;; Реестр - секция [plugins] settings.ini. Пустой реестр - молча.
+      ;; Повтор имени - пропуск с записью. Путь задан, файла нет - НЕ НАЙДЕН.
+      ;; Имена функций проекта: сканируем файлы, которые RELOAD только что
+      ;; загрузил. Плагин, объявивший такое же имя, его перекроет.
+      (setq plugin-taken '())
+      (foreach f common-files
+        (setq plugin-taken
+          (append (mapcar 'strcase (ae-reload-plugin-defuns (strcat common f)))
+                  plugin-taken)))
+      (foreach f extraction-files
+        (setq plugin-taken
+          (append (mapcar 'strcase (ae-reload-plugin-defuns (strcat extraction-dir f)))
+                  plugin-taken)))
+      (setq plugin-taken
+        (append (mapcar 'strcase (ae-reload-plugin-defuns (strcat root "\\reload.lsp")))
+                plugin-taken))
+
       (setq plugin-items '())
-      (foreach f *ae-reload-plugin-files*
-
-        (setq dev-path (ae-reload-plugin-dev-path f))
-        (setq fullpath
-          (if dev-path
-            dev-path
-            (strcat plugins-dir f)
-          )
-        )
-
-        (if (or dev-path (vl-file-directory-p plugins-dir))
-          (setq plugin-items
-            (cons
-              (cons fullpath (if dev-path "разработка" nil))
-              plugin-items
-            )
-          )
+      (setq plugin-seen '())
+      (setq plugin-missing 0)
+      (setq plugin-resolved '())
+      (foreach plugin-rec (ae-reload-plugin-registry)
+        (setq plugin-name (car plugin-rec))
+        (setq plugin-path (cadr plugin-rec))
+        (cond
+          ((member (strcase plugin-name) plugin-seen)
+           (princ (strcat "\n[RELOAD][PLUGINS] повтор имени " plugin-name " - пропущен")))
+          (T
+           (setq plugin-seen (cons (strcase plugin-name) plugin-seen))
+           (if (and (> (strlen plugin-path) 0)
+                    (/= (strcase (vl-filename-base plugin-name))
+                        (strcase (vl-filename-base plugin-path))))
+             (princ (strcat "\n[RELOAD][PLUGINS] ВНИМАНИЕ: имя " plugin-name
+                            " не совпадает с файлом пути " plugin-path))
+           )
+           (setq plugin-items (cons (list plugin-name plugin-path) plugin-items)))
         )
       )
       (setq plugin-items (reverse plugin-items))
-      (setq plugin-cnt (length plugin-items))
 
-      (if (> plugin-cnt 0)
+      (if (> (length plugin-items) 0)
         (progn
+          (princ "\n")
+          (princ "\n--- PLUGINS ---")
 
-          (princ
-            "\n"
-          )
-          (princ
-            "\n--- PLUGINS ---"
-          )
-
-          (foreach it plugin-items
-
-            (setq fullpath (car it))
-
-            (if (ae-reload-load-file fullpath (cdr it))
-              (setq ok (1+ ok))
-              (if (findfile fullpath)
-                (setq errors (1+ errors))
-                (setq missing (1+ missing))
+          (foreach plugin-rec plugin-items
+            (setq plugin-res (ae-reload-plugin-resolve (car plugin-rec) (cadr plugin-rec)))
+            (if (null plugin-res)
+              (progn
+                (princ (strcat "\n[RELOAD][PLUGINS] НЕ НАЙДЕН по пути "
+                               (if (> (strlen (cadr plugin-rec)) 0)
+                                 (cadr plugin-rec)
+                                 (strcat "Plugins\\" (car plugin-rec)))
+                               " - плагин " (car plugin-rec) " не загружен"))
+                (setq plugin-missing (1+ plugin-missing))
+              )
+              (progn
+                (setq plugin-resolved (cons plugin-res plugin-resolved))
+                (setq plugin-names (ae-reload-plugin-defuns plugin-res))
+                (setq plugin-taken (ae-reload-plugin-conflicts plugin-res plugin-names plugin-taken))
+                (if (ae-reload-load-file plugin-res nil)
+                  (progn
+                    (setq ok (1+ ok)))
+                  (setq errors (1+ errors))
+                )
               )
             )
           )
         )
       )
-
 
       ;; --------------------------------------------------------
       ;; Итог
@@ -647,8 +721,8 @@
         (setq revpaths (cons (strcat common f) revpaths)))
       (foreach f extraction-files
         (setq revpaths (cons (strcat extraction-dir f) revpaths)))
-      (foreach it plugin-items
-        (setq revpaths (cons (car it) revpaths)))
+      (foreach it plugin-resolved
+        (setq revpaths (cons it revpaths)))
       (setq revcnt (ae-reload-rev-count revpaths))
 
       (princ
@@ -708,6 +782,12 @@
       (if (> errors 0)
         (princ
           "\nВНИМАНИЕ: имеются ошибки загрузки. См. строки выше."
+        )
+      )
+
+      (if (> plugin-missing 0)
+        (princ
+          "\nВНИМАНИЕ: плагины не найдены по пути из реестра (см. строки выше)."
         )
       )
 

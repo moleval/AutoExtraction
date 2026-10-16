@@ -139,7 +139,7 @@
   (princ)
 )
 
-(defun c:chkall ( / root d files f total p)
+(defun c:chkall ( / root d files f total p rec)
   (setq root
     (if (findfile "extraction.lsp")
       (vl-filename-directory
@@ -149,12 +149,8 @@
     (princ "\n[CHK] не найден корень проекта (extraction.lsp).")
     (progn
       (setq total 0)
-      ;; Plugins\ - сторонние модули (раздел плагинов RELOAD).
-      ;; Если папки нет, vl-directory-files вернёт nil - проверка
-      ;; ниже просто пропустит каталог.
       (foreach d (list (strcat root "\\common\\")
-                       (strcat root "\\Extraction\\")
-                       (strcat root "\\Plugins\\"))
+                       (strcat root "\\Extraction\\"))
         (setq files (vl-directory-files d "*.lsp" 1))
         (if files
           (foreach f files
@@ -162,15 +158,14 @@
           )
         )
       )
-      ;; Плагины в разработке: лежат вне проекта, но грузятся тем же
-      ;; RELOAD, поэтому проверяются здесь же. Путь берётся тем же
-      ;; резолвером, что и в RELOAD (ae-reload-plugin-dev-path из
-      ;; reload.lsp) - проверяем ровно тот файл, который будет загружен.
-      (if (and (boundp '*ae-reload-plugin-files*)
-               (member (type ae-reload-plugin-dev-path) '(SUBR USUBR)))
-        (foreach f *ae-reload-plugin-files*
-          (setq p (ae-reload-plugin-dev-path f))
-          (if (and p (findfile p))
+      ;; Плагины из реестра [plugins] settings.ini: тот же резолвер, что у
+      ;; RELOAD (ae-reload-plugin-resolve), - проверяется ровно тот файл,
+      ;; который будет загружен. Файла нет - пропуск, проверка не падает.
+      (if (and (member (type ae-reload-plugin-registry) '(SUBR USUBR))
+               (member (type ae-reload-plugin-resolve) '(SUBR USUBR)))
+        (foreach rec (ae-reload-plugin-registry)
+          (setq p (ae-reload-plugin-resolve (car rec) (cadr rec)))
+          (if p
             (setq total (+ total (chk-parens-scan p))))
         )
       )

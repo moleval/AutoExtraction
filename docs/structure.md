@@ -32,8 +32,8 @@ AutoExtraction/
 │   ├── txt-utils.lsp          # GAL для станка с ЧПУ (tx-)
 │   ├── table-utils.lsp        # Таблицы AutoCAD, разбиение строк (tc-, ts-ac-)
 │   └── perf-utils.lsp         # Замеры производительности (подключён, в задачах не используется)
-├── Plugins/                   # Принятые плагины проекта (папки в репозитории нет;
-│                              #   плагины в разработке грузятся из *ae-reload-plugin-dev-dirs*)
+├── Plugins/                   # Необязательная папка: плагины без пути в реестре [plugins]
+│                              #   settings.ini (в репозитории её нет; пути — в settings.ini)
 ├── tests/                     # Тесты: Python без AutoCAD и LSP для AutoCAD
 │   ├── static_check.py        # Статические проверки исходников (Python)
 │   ├── mark_logic_test.py     # Логика марок (Python)

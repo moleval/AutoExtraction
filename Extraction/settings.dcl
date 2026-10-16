@@ -95,6 +95,11 @@ settings_dialog : dialog {
     }
 
     : button {
+      key = "btn_plugins";
+      label = "Плагины…";
+    }
+
+    : button {
       key = "btn_save";
       label = "Сохранить";
       is_default = true;
@@ -102,6 +107,64 @@ settings_dialog : dialog {
 
     : button {
       key = "btn_cancel";
+      label = "Отмена";
+      is_cancel = true;
+    }
+  }
+}
+
+// Реестр плагинов (секция [plugins] settings.ini). Открывается из
+// settings_dialog; список редактируется в буфере до «Сохранить».
+plugins_dialog : dialog {
+  label = "Плагины AutoExtraction";
+
+  : boxed_column {
+    label = "Плагины (порядок загрузки - сверху вниз)";
+
+    : list_box {
+      key = "lst_plugins";
+      width = 80;
+      height = 12;
+      multiple_select = false;
+    }
+
+    : text {
+      key = "txt_plugin_status";
+      label = "";
+      width = 80;
+    }
+  }
+
+  : row {
+    alignment = centered;
+
+    : button {
+      key = "btn_plugin_add";
+      label = "Добавить…";
+    }
+
+    : button {
+      key = "btn_plugin_change";
+      label = "Изменить путь…";
+    }
+
+    : button {
+      key = "btn_plugin_remove";
+      label = "Удалить";
+    }
+  }
+
+  : row {
+    alignment = centered;
+
+    : button {
+      key = "btn_plugins_ok";
+      label = "ОК";
+      is_default = true;
+    }
+
+    : button {
+      key = "btn_plugins_cancel";
       label = "Отмена";
       is_cancel = true;
     }
