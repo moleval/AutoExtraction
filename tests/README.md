@@ -44,7 +44,7 @@
 | Источник | Счётчик в отчёте | Путь в сообщениях |
 |---|---|---|
 | `Plugins\` в проекте (принятые плагины) | `plugins=N` | относительно корня |
-| каталоги разработки `*ae-reload-plugin-dev-dirs*` | `plugins-dev=M` | абсолютный (`D:\PlotFrameToPDF\PlotFrameToPDF.lsp`) |
+| каталоги разработки `*ae-reload-plugin-dev-dirs*` | `plugins-dev=M` | абсолютный (`D:\PlotFrameToPDF\PlotFrame.lsp`) |
 
 Списки имён и каталогов `static_check.py` читает из `reload.lsp`, поэтому
 проверяется ровно тот файл, который будет загружен. Если каталога разработки

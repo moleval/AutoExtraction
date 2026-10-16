@@ -69,7 +69,7 @@
 ;; ------------------------------------------------------------
 (setq *ae-reload-plugin-files*
   '(
-    "PlotFrameToPDF.lsp"
+    "PlotFrame.lsp"
   )
 )
 
