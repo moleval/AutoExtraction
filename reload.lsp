@@ -71,7 +71,7 @@
   (cdr (assoc key items))
 )
 
-(defun ae-reload-plugin-registry (/ root path f line section parsed items out n i name ppath)
+(defun ae-reload-plugin-registry (/ root path f line section parsed items out n i name ppath ks it)
   (setq root (ae-reload-root))
   (setq path (if root (strcat root "\\settings.ini") nil))
   (setq items '())
@@ -88,12 +88,6 @@
       (close f)
     )
   )
-  ;; ¬–≈ћ≈ЌЌјя диагностика (убрать после поиска причины): что прочитано.
-  (setq *ae-reload-reg-diag*
-    (strcat "файл=" (if path path "нет") " открыт=" (if f "да" "нет")
-            " записей=" (itoa (length items))
-            " plugin.count=" (if (ae-reload-kv items "plugin.count")
-                               (ae-reload-kv items "plugin.count") "нет")))
   (setq items (reverse items))
   (setq n (atoi (ae-settings-trim (or (ae-reload-kv items "plugin.count") "0"))))
   (setq i 1)
@@ -106,6 +100,18 @@
     )
     (setq i (1+ i))
   )
+  ;; ¬–≈ћ≈ЌЌјя диагностика (убрать после поиска причины): ключи как прочитаны,
+  ;; длины, поиск plugin.1.name, сколько записей собрал цикл.
+  (setq ks "")
+  (foreach it items
+    (setq ks (strcat ks " <" (car it) ":" (itoa (strlen (car it))) ">")))
+  (setq *ae-reload-reg-diag*
+    (strcat "файл=" (if path path "нет") " открыт=" (if f "да" "нет")
+            " ключи:" ks
+            " | n=" (itoa n)
+            " | name1=" (if (ae-reload-kv items "plugin.1.name")
+                          (ae-reload-kv items "plugin.1.name") "Ќ≈“")
+            " | собрано=" (itoa (length out))))
   (reverse out)
 )
 
