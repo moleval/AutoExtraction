@@ -744,7 +744,7 @@
           "\n Маркер редакции: "
           (itoa revcnt)
           " из "
-          (itoa (+ (length common-files) (length extraction-files) plugin-cnt))
+          (itoa (+ (length common-files) (length extraction-files) (length plugin-items)))
           " модулей."
         )
       )

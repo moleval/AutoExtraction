@@ -281,7 +281,9 @@
 
 (defun ae-settings-ui-save ()
   (if (ae-settings-ui-save-task)
-    (if (ae-settings-write)
+    (if (progn
+          (ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)
+          (ae-settings-write))
       (progn
         (setq *AE-SETTINGS-UI-ACTION* 'SAVE)
         (done_dialog 1))

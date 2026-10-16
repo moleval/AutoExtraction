@@ -695,6 +695,8 @@ RELOAD_PLUGINS_FORBIDDEN = [
      "запоминания имён плагина между прогонами: проверка перекрытия идёт по именам проекта"),
     ("*ae-reload-plugin-own*",
      "списка имён плагинов между прогонами: он скрывал перекрытие при повторном RELOAD"),
+    ("plugin-cnt",
+     "переменной, которой уже нет в c:RELOAD: её чтение роняет итог прогона (numberp: nil)"),
     ("PlotFrame",
      "имени конкретного плагина в коде RELOAD: программа не знает содержимого плагинов"),
 ]
@@ -702,6 +704,32 @@ RELOAD_PLUGINS_FORBIDDEN = [
 PLUGIN_LOCALS = ("plugin-items", "plugin-seen", "plugin-rec", "plugin-name",
                  "plugin-path", "plugin-res", "plugin-names", "plugin-missing",
                  "plugin-resolved", "plugin-taken")
+
+
+SETTINGS_PLUGINS_MUST = [
+    ("(ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)",
+     "переноса буфера плагинов в память перед записью settings.ini (иначе «Сохранить» не пишет реестр)"),
+    ("(ae-settings-write))",
+     "записи settings.ini в ae-settings-ui-save"),
+    ('(action_tile "btn_plugins" "(ae-settings-ui-goto-plugins)")',
+     "кнопки «Плагины…» в окне настроек"),
+    ('(new_dialog "plugins_dialog" dcl-id)',
+     "открытия диалога плагинов"),
+]
+
+
+def check_settings_plugins_guard() -> list[str]:
+    """Окно настроек: буфер плагинов обязан попадать в settings.ini при «Сохранить»."""
+    path = ROOT / "Extraction" / "settings.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in SETTINGS_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: плагины в настройках: нет {what}")
+    return errors
 
 
 def check_reload_plugins_guard() -> list[str]:
@@ -1767,6 +1795,7 @@ def main() -> int:
     errors += check_cutsheet_wrap_guard()
     errors += check_reload_chkload_guard()
     errors += check_reload_plugins_guard()
+    errors += check_settings_plugins_guard()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
