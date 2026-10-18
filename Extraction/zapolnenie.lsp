@@ -1097,6 +1097,7 @@
 (defun c:ЗАПОЛНЕНИЕ () (c:zapolnenie))
 
 ;; ZAPOLNENIE.LSP загружен (ред. 30: припуск на раму из настроек; колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ
-(if (fboundp 'ae-banner-add)
-  (ae-banner-add "ZAPOLNENIE" '(("ZAPOLNENIE / ЗАПОЛНЕНИЕ" "заполнения: припуск на раму из настроек (ред. 30)"))))
+(if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
+  (ae-banner-add "ZAPOLNENIE" '(
+      ("ZAPOLNENIE / ЗАПОЛНЕНИЕ" "заполнения: припуск на раму из настроек (ред. 30)"))))
 (princ)

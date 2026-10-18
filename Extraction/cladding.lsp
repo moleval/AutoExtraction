@@ -1488,7 +1488,8 @@
 )
 
 ;; CLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 31: FAST_TABLES). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS
-(if (fboundp 'ae-banner-add)
-  (ae-banner-add "CLADDING" '(("CLADDING / ОБЛИЦОВКА" "облицовка К1-К3, Б1-Б4 (ред. 31)")
-                                  ("CLBLOCKS" "блоки облицовки"))))
+(if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
+  (ae-banner-add "CLADDING" '(
+      ("CLADDING / ОБЛИЦОВКА" "облицовка К1-К3, Б1-Б4 (ред. 31)")
+       ("CLBLOCKS" "блоки облицовки"))))
 (princ)
