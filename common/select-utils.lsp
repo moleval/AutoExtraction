@@ -761,5 +761,5 @@
   )
 )
 
-(princ "\nSELECT-UTILS.LSP загружен (ред. 4).")
+;; SELECT-UTILS.LSP загружен (ред. 4).
 (princ)

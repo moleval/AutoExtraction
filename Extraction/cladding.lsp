@@ -1487,5 +1487,8 @@
   )
 )
 
-(princ "\nCLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 31: FAST_TABLES). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS")
+;; CLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 31: FAST_TABLES). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS
+(if (fboundp 'ae-banner-add)
+  (ae-banner-add "CLADDING" '(("CLADDING / ОБЛИЦОВКА" "облицовка К1-К3, Б1-Б4 (ред. 31)")
+                                  ("CLBLOCKS" "блоки облицовки"))))
 (princ)

@@ -103,5 +103,5 @@
   )
 )
 
-(princ "\nTXT-UTILS.LSP загружен.")
+;; TXT-UTILS.LSP загружен.
 (princ)

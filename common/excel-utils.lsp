@@ -850,5 +850,5 @@
   (write-line "   </Row>" f)
   T)
 
-(princ "\nEXCEL-UTILS.LSP загружен.")
+;; EXCEL-UTILS.LSP загружен.
 (princ)

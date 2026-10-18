@@ -424,15 +424,17 @@
           nil
         )
         (progn
-          (princ
-            (strcat
-              "\nЗагружен: "
-              fullpath
-              (if note
-                (strcat "  [" note "]")
-                ""
+          (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
+            (princ
+              (strcat
+                "\nЗагружен: "
+                fullpath
+                (if note
+                  (strcat "  [" note "]")
+                  ""
+                )
               )
-            )
+          )
           )
           T
         )
@@ -441,6 +443,56 @@
   )
 )
 
+
+;; ------------------------------------------------------------
+;; Таблица команд при загрузке. Модуль регистрирует свои строки
+;; (ae-banner-add) в конце файла; RELOAD печатает таблицу после модулей.
+;; ------------------------------------------------------------
+(if (not (boundp '*ae-banner-items*))
+  (setq *ae-banner-items* '()))
+
+(defun ae-banner-add (module rows / keep it)
+  (setq keep '())
+  (foreach it *ae-banner-items*
+    (if (/= (car it) module)
+      (setq keep (cons it keep))))
+  (setq *ae-banner-items* (reverse (cons (cons module rows) keep)))
+)
+
+(defun ae-banner-rep (ch n / s)
+  (setq s "")
+  (repeat n (setq s (strcat s ch)))
+  s
+)
+
+(defun ae-banner-pad (s n)
+  (strcat s (ae-banner-rep " " (- n (strlen s))))
+)
+
+(defun ae-banner-print ( / rows w1 w2 sep r it)
+  (setq rows '())
+  (foreach it *ae-banner-items*
+    (foreach r (cdr it)
+      (setq rows (cons r rows))))
+  (setq rows (reverse rows))
+  (if rows
+    (progn
+      (setq w1 (max 7 (apply 'max (mapcar '(lambda (x) (strlen (car x))) rows))))
+      (setq w2 (max 10 (apply 'max (mapcar '(lambda (x) (strlen (cadr x))) rows))))
+      (setq sep (strcat "  +" (ae-banner-rep "-" (+ w1 2)) "+"
+                        (ae-banner-rep "-" (+ w2 2)) "+"))
+      (princ (strcat "\n" sep))
+      (princ (strcat "\n  | " (ae-banner-pad "КОМАНДА" w1)
+                     " | " (ae-banner-pad "ЧТО ДЕЛАЕТ" w2) " |"))
+      (princ (strcat "\n" sep))
+      (foreach r rows
+        (princ (strcat "\n  | " (ae-banner-pad (car r) w1)
+                       " | " (ae-banner-pad (cadr r) w2) " |")))
+      (princ (strcat "\n" sep))
+    )
+  )
+  (princ)
+)
 
 (defun c:RELOAD
        ( / root
@@ -466,6 +518,7 @@
            missing
            revcnt
            revpaths)
+  (setq *ae-banner-items* '())
 
   ;; ------------------------------------------------------------
   ;; Заголовок
@@ -585,9 +638,7 @@
       (princ
         "\n"
       )
-      (princ
-        "\n--- COMMON ---"
-      )
+      (setq *ae-reload-quiet* T)
 
 
       (foreach f common-files
@@ -616,9 +667,6 @@
       (princ
         "\n"
       )
-      (princ
-        "\n--- EXTRACTION ---"
-      )
 
 
       (foreach f extraction-files
@@ -636,6 +684,15 @@
         )
       )
 
+
+      ;; Модули проекта загружены тихо; печатаем таблицу команд.
+      (setq *ae-reload-quiet* nil)
+      (ae-banner-add "RELOAD" (list
+        (list "RELOAD" "перезагрузка модулей и плагинов")
+        (list "CHKALL" "проверка скобок всех модулей и плагинов")
+        (list "CHKFILE" "проверка одного файла")
+        (list "CHKLOAD" "поиск формы со сбоем загрузки")))
+      (ae-banner-print)
 
       ;; --------------------------------------------------------
       ;; PLUGINS (сторонние модули)

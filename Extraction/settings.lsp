@@ -539,5 +539,5 @@
     )
   )
 )
-(princ "\nSETTINGS.LSP загружен.")
+;; SETTINGS.LSP загружен.
 (princ)

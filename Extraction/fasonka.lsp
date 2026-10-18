@@ -451,5 +451,7 @@
   (princ)
 )
 
-(princ "\nFASONKA.LSP загружен (ред. 1: FAST_TABLES). Команды: FASONKA, ФАСОНКА")
+;; FASONKA.LSP загружен (ред. 1: FAST_TABLES). Команды: FASONKA, ФАСОНКА
+(if (fboundp 'ae-banner-add)
+  (ae-banner-add "FASONKA" '(("FASONKA / ФАСОНКА" "выборка фасонок в таблицу (ред. 1)"))))
 (princ)

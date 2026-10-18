@@ -32,5 +32,5 @@
           (princ (strcat "\n[PERF] " key ": " (itoa dt) " ms"))))))
   key)
 
-(princ "\nPERF-UTILS.LSP загружен.")
+;; PERF-UTILS.LSP загружен.
 (princ)

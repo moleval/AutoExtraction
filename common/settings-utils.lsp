@@ -526,5 +526,5 @@
   (vl-string-subst dwg "{DWG}" template)
 )
 
-(princ "\nSETTINGS-UTILS.LSP загружен.")
+;; SETTINGS-UTILS.LSP загружен.
 (princ)

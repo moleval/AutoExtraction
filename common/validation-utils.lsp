@@ -84,5 +84,5 @@
 (defun tu-valid-sheet-size-p (w h)
   (and (tu-valid-size-p w h) (<= w *tu-max-dim*) (<= h *tu-max-dim*)))
 
-(princ "\nVALIDATION-UTILS.LSP загружен.")
+;; VALIDATION-UTILS.LSP загружен.
 (princ)
