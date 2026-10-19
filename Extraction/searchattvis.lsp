@@ -643,9 +643,13 @@
   (ae-sv-run "attr")
 )
 
+(defun c:SEARCHATTR () (c:ПОИСКАТР))
+
 (defun c:ПОИСКВИД ()
   (ae-sv-run "vis")
 )
+
+(defun c:SEARCHVIS () (c:ПОИСКВИД))
 
 ;; ПОИСКСПИСОК: режим, затем условия. Пустое условие — без ограничения.
 (defun c:ПОИСКСПИСОК (/ kw qa qb)
@@ -668,8 +672,8 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
-        ("ПОИСКАТР" "поиск блоков по атрибутам (окно)")
-        ("ПОИСКВИД" "поиск блоков по видимостям (окно)")))
+        ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)")
+        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
