@@ -9,6 +9,7 @@ searchattvis_dialog : dialog {
   label = "Поиск по атрибутам и видимостям";
 
   : column {
+    alignment = left;
 
     : radio_row {
       key = "rb_mode";

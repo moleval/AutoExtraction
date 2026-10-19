@@ -1,6 +1,7 @@
 ;;; ============================================================
 ;;; Extraction/searchattvis.lsp — поиск по атрибутам и видимостям блоков
-;;; Команды: ПОИСКАТР (режим «Атрибуты»), ПОИСКВИД (режим «Видимость блока»)
+;;; Команды: ПОИСКАТР (режим «Атрибуты»), ПОИСКВИД (режим «Видимость блока»),
+;;; ПОИСКСПИСОК (без окна: перечень в командной строке)
 ;;; Окно: Extraction/searchattvis.dcl — одно на обе команды.
 ;;;
 ;;; Область: предварительное выделение (если есть) или весь чертёж.
@@ -423,34 +424,50 @@
       (reverse out)))
 )
 
-(defun ae-sv-run (mode / pre ens t0)
-  (setq t0 (getvar "millisecs"))
-  (setq *ae-sv-mode* mode)
-  (setq *ae-sv-result* nil)
+(defun ae-sv-load-scope (/ pre ens)
   (setq pre (ssget "_I"))
-  (setq ens
-    (if pre
-      (ae-sv-model-inserts pre)
-      (ae-sv-all-model-inserts)))
+  (setq ens (if pre (ae-sv-model-inserts pre) (ae-sv-all-model-inserts)))
   (cond
     ((and pre (null ens))
-     (princ "\nВ предварительном выделении нет вставок блоков. Поиск не запущен."))
+     (princ "\nВ предварительном выделении нет вставок блоков. Поиск не запущен.")
+     nil)
     ((null ens)
-     (princ "\nВ чертеже нет вставок блоков. Поиск не запущен."))
+     (princ "\nВ чертеже нет вставок блоков. Поиск не запущен.")
+     nil)
     (T
      (setq *ae-sv-scope-text*
        (strcat (if pre "выделенные" "весь чертёж")
                " (" (itoa (length ens)) " вставок)"))
      (setq *ae-sv-inserts* (ae-sv-collect ens))
-     (if (ae-sv-open)
-       (progn
-         (ae-sv-print-results)
-         (if *ae-sv-result*
-           (progn
-             (sssetfirst nil (nth 0 *ae-sv-result*))
-             (princ (strcat "\nВыбрано вставок: " (itoa (nth 2 *ae-sv-result*))
-                            " (строк: " (itoa (nth 1 *ae-sv-result*))
-                            "), пропущено: " (itoa (nth 3 *ae-sv-result*))))))))))
+     T))
+)
+
+(defun ae-sv-run (mode / )
+  (setq *ae-sv-mode* mode)
+  (setq *ae-sv-result* nil)
+  (if (and (ae-sv-load-scope) (ae-sv-open))
+    (progn
+      (ae-sv-print-results)
+      (if *ae-sv-result*
+        (progn
+          (sssetfirst nil (nth 0 *ae-sv-result*))
+          (princ (strcat "\nВыбрано вставок: " (itoa (nth 2 *ae-sv-result*))
+                         " (строк: " (itoa (nth 1 *ae-sv-result*))
+                         "), пропущено: " (itoa (nth 3 *ae-sv-result*))))))))
+  (princ)
+)
+
+;; Без окна: условия спрашиваются в командной строке, перечень печатается туда же
+(defun ae-sv-list-run (mode qa qb / rows)
+  (setq *ae-sv-mode* mode)
+  (if (ae-sv-load-scope)
+    (progn
+      (setq rows
+        (if (= mode "attr")
+          (ae-sv-rows-attr (ae-sv-norm qa) (ae-sv-norm qb))
+          (ae-sv-rows-vis (ae-sv-norm qa) (ae-sv-norm qb))))
+      (setq *ae-sv-rows* rows)
+      (ae-sv-print-results)))
   (princ)
 )
 
@@ -460,6 +477,22 @@
 
 (defun c:ПОИСКВИД ()
   (ae-sv-run "vis")
+)
+
+;; ПОИСКСПИСОК: режим, затем условия. Пустое условие — без ограничения.
+(defun c:ПОИСКСПИСОК (/ kw qa qb)
+  (initget "Атрибуты Видимость")
+  (setq kw (getkword "\nРежим [Атрибуты/Видимость] <Атрибуты>: "))
+  (if (= kw "Видимость")
+    (progn
+      (setq qa (getstring T "\nВидимость (пусто — любая): "))
+      (setq qb (getstring T "\nАтрибут-условие (пусто — без условия): "))
+      (ae-sv-list-run "vis" qa qb))
+    (progn
+      (setq qa (getstring T "\nТег атрибута (пусто — любой): "))
+      (setq qb (getstring T "\nЗначение (пусто — любое): "))
+      (ae-sv-list-run "attr" qa qb)))
+  (princ)
 )
 
 ;; SEARCHATTVIS.LSP — ред. 1: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД.
