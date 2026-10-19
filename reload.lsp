@@ -54,6 +54,7 @@
     "cutline.lsp"
     "cutsheet.lsp"
     "blockrename.lsp"
+    "searchattvis.lsp"
   )
 )
 

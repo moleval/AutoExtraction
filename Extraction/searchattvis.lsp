@@ -669,8 +669,7 @@
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
         ("ПОИСКАТР" "поиск блоков по атрибутам (окно)")
-        ("ПОИСКВИД" "поиск блоков по видимостям (окно)")
-        ("ПОИСКСПИСОК" "перечень найденного в командную строку")))
+        ("ПОИСКВИД" "поиск блоков по видимостям (окно)")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))

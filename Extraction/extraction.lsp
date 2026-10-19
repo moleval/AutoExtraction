@@ -1312,6 +1312,11 @@
   (done_dialog 1)
 )
 
+(defun extraction-search ()
+  (setq *EXTRACTION-ACTION* 'SEARCH)
+  (done_dialog 1)
+)
+
 
 (defun extraction-settings ()
   (setq *EXTRACTION-ACTION* 'SETTINGS)
@@ -1650,6 +1655,7 @@
 
               (extraction-sync-checks-from-layers)
 
+              (action_tile "btn_search" "(extraction-search)")
               (action_tile "btn_settings" "(extraction-settings)")
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
@@ -1703,6 +1709,14 @@
 
               ;; --- Обработка результата ---
               (cond
+
+                ((eq *EXTRACTION-ACTION* 'SEARCH)
+                 ;; Окно поиска открывается после закрытия диспетчера.
+                 ;; Диспетчер после поиска не открывается снова.
+                 (if (member (type c:ПОИСКАТР) '(SUBR USUBR))
+                   (c:ПОИСКАТР)
+                   (alert "Окно поиска недоступно."))
+                )
 
                 ((eq *EXTRACTION-ACTION* 'SETTINGS)
                  ;; Главное окно закрывается перед вторым модальным DCL.
