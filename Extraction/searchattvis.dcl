@@ -47,12 +47,37 @@ searchattvis_dialog : dialog {
       }
     }
 
-    : list_box {
-      key = "lst_result";
-      multiple_select = true;
-      width = 70;
-      height = 14;
-      fixed_height = true;
+    : row {
+      alignment = left;
+      children_alignment = left;
+
+      : column {
+        : text {
+          key = "txt_blocks_label";
+          label = "Блоки";
+        }
+        : list_box {
+          key = "lst_blocks";
+          multiple_select = true;
+          width = 35;
+          height = 14;
+          fixed_height = true;
+        }
+      }
+
+      : column {
+        : text {
+          key = "txt_items_label";
+          label = "Атрибуты";
+        }
+        : list_box {
+          key = "lst_items";
+          multiple_select = true;
+          width = 35;
+          height = 14;
+          fixed_height = true;
+        }
+      }
     }
 
     : text {

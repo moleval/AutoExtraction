@@ -15,6 +15,9 @@
 (setq *ae-sv-rows* nil)         ; строки списка: (текст . имена вставок)
 (setq *ae-sv-scope-text* "")    ; текст области для строки статуса
 (setq *ae-sv-result* nil)       ; (набор строк выбрано пропущено) после «Выбрать»
+(setq *ae-sv-entries* nil)     ; записи окна: (блок лейбл en)
+(setq *ae-sv-rows1* nil)       ; список блоков: (блок . вставки)
+(setq *ae-sv-rows2* nil)       ; список атрибутов/видимостей: (лейбл . вставки)
 
 ;; ============================================================
 ;; Строки
@@ -151,29 +154,44 @@
 )
 
 ;; Значение параметра видимости динамического блока (строка) или nil
-(defun ae-sv-visibility (vla / dynprops result prop pname val)
-  (setq result nil)
-  (setq dynprops (vl-catch-all-apply 'vlax-invoke (list vla 'GetDynamicBlockProperties)))
-  (if (not (vl-catch-all-error-p dynprops))
-    (foreach prop dynprops
-      (if (null result)
-        (progn
-          (setq pname (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
-          (if (and (not (vl-catch-all-error-p pname))
-                   (= (type pname) 'STR)
-                   (or (vl-string-search "VISIBILITY" (strcase pname))
-                       (vl-string-search "ВИДИМОСТЬ" (strcase pname))))
-            (progn
-              (setq val (vl-catch-all-apply 'vla-get-Value (list prop)))
-              (if (not (vl-catch-all-error-p val))
-                (progn
-                  (if (= (type val) 'VARIANT) (setq val (vlax-variant-value val)))
-                  (if val (setq result (vl-princ-to-string val)))))))))))
-  result
+(defun ae-sv-vis-name-p (pname)
+  (or (vl-string-search "VISIBILITY" (strcase pname))
+      (vl-string-search "ВИДИМОСТЬ" (strcase pname)))
 )
 
-;; Запись на вставку: (ename имя видимость атрибуты). Читается один раз.
-(defun ae-sv-collect (ens / out en vla name vis)
+;; Значение динамического свойства строкой
+(defun ae-sv-prop-str (val / r)
+  (setq r val)
+  (if (= (type val) 'VARIANT)
+    (setq r (vl-catch-all-apply 'vlax-variant-value (list val))))
+  (if (or (null r) (vl-catch-all-error-p r))
+    ""
+    (progn
+      (setq r (vl-catch-all-apply 'vl-princ-to-string (list r)))
+      (if (vl-catch-all-error-p r) "" (ae-sv-trim r))))
+)
+
+;; Динамические свойства блока: (значения параметров видимости . ((имя . значение) ...))
+(defun ae-sv-dyn-props (vla / props vis others prop pname val)
+  (setq vis '() others '())
+  (setq props (vl-catch-all-apply 'vlax-invoke (list vla 'GetDynamicBlockProperties)))
+  (if (and (not (vl-catch-all-error-p props)) (listp props))
+    (foreach prop props
+      (setq pname (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+      (setq val (vl-catch-all-apply 'vla-get-Value (list prop)))
+      (if (and (not (vl-catch-all-error-p pname))
+               (= (type pname) 'STR)
+               (not (vl-catch-all-error-p val)))
+        (if (ae-sv-vis-name-p pname)
+          (setq vis (cons (ae-sv-prop-str val) vis))
+          (setq others (cons (cons pname (ae-sv-prop-str val)) others))))))
+  (cons (reverse vis) (reverse others))
+)
+
+;; Запись на вставку: (ename имя видимость атрибуты значения_видимостей свойства).
+;; Поле 3 — первое значение видимости (для старой ПОИСКСПИСОК-выборки).
+;; Читается один раз; дальше фильтрация идёт по памяти.
+(defun ae-sv-collect (ens / out en vla name dyn)
   (setq out '())
   (foreach en ens
     (setq vla (vl-catch-all-apply 'vlax-ename->vla-object (list en)))
@@ -182,8 +200,13 @@
         (setq name (ae-sv-effname vla))
         (if (= name "")
           (setq name (ae-sv-str (cdr (assoc 2 (entget en))))))
-        (setq vis (ae-sv-visibility vla))
-        (setq out (cons (list en name vis (ae-sv-read-attrs vla)) out)))))
+        (setq dyn (ae-sv-dyn-props vla))
+        (setq out (cons (list en name
+                              (if (car dyn) (car (car dyn)) "")
+                              (ae-sv-read-attrs vla)
+                              (car dyn)
+                              (cdr dyn))
+                        out)))))
   (reverse out)
 )
 
@@ -286,34 +309,82 @@
   (princ)
 )
 
-(defun ae-sv-refresh (/ rows labels qtag qval ens)
-  (setq qtag (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
-  (setq qval (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
-  (if (= *ae-sv-mode* "attr")
-    (setq rows (ae-sv-rows-attr qtag qval))
-    (setq rows (ae-sv-rows-vis qtag qval)))
-  (setq *ae-sv-rows* rows)
-  (setq labels
-    (mapcar '(lambda (r) (strcat (car r) " | " (itoa (length (cdr r))) " шт."))
-            rows))
-  (start_list "lst_result")
-  (mapcar 'add_list labels)
-  (end_list)
-  (set_tile "lst_result" "")
-  (setq ens (ae-sv-unique (apply 'append (mapcar 'cdr rows))))
-  (set_tile "txt_status"
-    (strcat "Найдено: " (itoa (length rows)) " строк, " (itoa (length ens))
-            " вставок. Область: " *ae-sv-scope-text*))
-  T
+;; Записи окна: (блок лейбл en)
+;; Режим «Атрибуты»: лейбл — атрибут или «атрибут | значение» (если значение введено)
+(defun ae-sv-attr-entries (rec qtag qval / out a)
+  (setq out '())
+  (foreach a (nth 3 rec)
+    (if (and (ae-sv-match (car a) qtag) (ae-sv-match (cdr a) qval))
+      (setq out (cons (list (nth 1 rec)
+                            (if (= qval "")
+                              (car a)
+                              (strcat (car a) " | " (if (= (cdr a) "") "(пусто)" (cdr a))))
+                            (car rec))
+                      out))))
+  out
 )
 
-(defun ae-sv-on-mode (m)
-  (setq *ae-sv-mode* m)
-  (ae-sv-set-hints)
-  (ae-sv-refresh)
+;; Режим «Видимость»: поле «Видимость» — значения параметров видимости (любой параметр),
+;; поле «Значение» — значения остальных динамических свойств (любое свойство).
+;; Лейбл — состояние или «состояние | значение свойства» (если значение введено).
+(defun ae-sv-vis-entries (rec qvis qval / out states dvals s d)
+  (setq out '())
+  (setq states (vl-remove-if-not '(lambda (v) (ae-sv-match v qvis)) (nth 4 rec)))
+  (setq dvals
+    (if (= qval "")
+      '()
+      (mapcar 'cdr (vl-remove-if-not '(lambda (o) (ae-sv-match (cdr o) qval)) (nth 5 rec)))))
+  (if (and states (or (= qval "") dvals))
+    (if (= qval "")
+      (foreach s states
+        (setq out (cons (list (nth 1 rec) s (car rec)) out)))
+      (foreach s states
+        (foreach d dvals
+          (setq out (cons (list (nth 1 rec) (strcat s " | " d) (car rec)) out))))))
+  out
 )
 
-;; Индексы выбранных строк из строки list_box ("0 2 3")
+(defun ae-sv-entries (qa qb / out rec)
+  (setq out '())
+  (foreach rec *ae-sv-inserts*
+    (setq out
+      (append out
+        (if (= *ae-sv-mode* "attr")
+          (ae-sv-attr-entries rec qa qb)
+          (ae-sv-vis-entries rec qa qb)))))
+  out
+)
+
+;; Список 1 (блоки): если выбраны пункты списка 2 — только блоки с ними
+(defun ae-sv-list1 (entries sel-i / items)
+  (setq items
+    (vl-remove-if-not
+      '(lambda (e) (or (null sel-i) (member (cadr e) sel-i)))
+      entries))
+  (ae-sv-group (mapcar '(lambda (e) (list (car e) (caddr e))) items))
+)
+
+;; Список 2 (атрибуты или видимости): если выбраны блоки — только их
+(defun ae-sv-list2 (entries sel-b / items)
+  (setq items
+    (vl-remove-if-not
+      '(lambda (e) (or (null sel-b) (member (car e) sel-b)))
+      entries))
+  (ae-sv-group (mapcar '(lambda (e) (list (cadr e) (caddr e))) items))
+)
+
+;; Итог «Выбрать»: вставки, которые проходят и по выбранным блокам, и по выбранным пунктам
+(defun ae-sv-final (entries sel-b sel-i / ens)
+  (setq ens '())
+  (foreach e entries
+    (if (and (or (null sel-b) (member (car e) sel-b))
+             (or (null sel-i) (member (cadr e) sel-i))
+             (not (member (caddr e) ens)))
+      (setq ens (cons (caddr e) ens))))
+  ens
+)
+
+;; Индексы выбранных строк из строки list_box («0 2 3»)
 (defun ae-sv-indices (s / r)
   (if (and (= (type s) 'STR) (/= s ""))
     (progn
@@ -324,32 +395,115 @@
     nil)
 )
 
-;; Кнопка «Выбрать»: ничего не выбрано — окно остаётся, ничего не выбирается.
-;; Все вставки на замороженных/заблокированных слоях — окно остаётся.
-(defun ae-sv-on-pick (/ idxs ens ss sel-n skipped en)
-  (setq idxs (ae-sv-indices (get_tile "lst_result")))
-  (if (null idxs)
-    (set_tile "txt_status" "Не выбрано ни одной строки. Отметьте строки в списке.")
+;; Тексты выбранных пунктов списка (без счётчика)
+(defun ae-sv-selected (key rows / out)
+  (setq out '())
+  (foreach i (ae-sv-indices (get_tile key))
+    (if (and (>= i 0) (< i (length rows)))
+      (setq out (cons (car (nth i rows)) out))))
+  out
+)
+
+;; Выбор, который остался в обновлённом списке
+(defun ae-sv-keep (sel rows)
+  (vl-remove-if-not '(lambda (s) (assoc s rows)) sel)
+)
+
+(defun ae-sv-join-sp (lst / s)
+  (setq s "")
+  (foreach x lst
+    (setq s (if (= s "") x (strcat s " " x))))
+  s
+)
+
+;; Заполнить список строками «пункт (N)»; выбор восстанавливается по тексту пункта
+(defun ae-sv-fill (key rows sel / i idx)
+  (start_list key)
+  (foreach r rows
+    (add_list (strcat (car r) " (" (itoa (length (cdr r))) ")")))
+  (end_list)
+  (setq idx '() i 0)
+  (foreach r rows
+    (if (member (car r) sel) (setq idx (cons (itoa i) idx)))
+    (setq i (1+ i)))
+  (set_tile key (ae-sv-join-sp (reverse idx)))
+)
+
+;; Обновление обоих списков и статуса. Каждый список сужает другой.
+(defun ae-sv-refresh (/ qa qb sel-b sel-i entries rows1 rows2)
+  (setq qa (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
+  (setq qb (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
+  (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
+  (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))
+  (setq entries (ae-sv-entries qa qb))
+  (setq rows1 (ae-sv-list1 entries sel-i))
+  (setq rows2 (ae-sv-list2 entries sel-b))
+  (setq sel-b (ae-sv-keep sel-b rows1))
+  (setq sel-i (ae-sv-keep sel-i rows2))
+  (setq *ae-sv-entries* entries)
+  (setq *ae-sv-rows1* rows1)
+  (setq *ae-sv-rows2* rows2)
+  (set_tile "txt_items_label" (if (= *ae-sv-mode* "attr") "Атрибуты" "Видимости"))
+  (ae-sv-fill "lst_blocks" rows1 sel-b)
+  (ae-sv-fill "lst_items" rows2 sel-i)
+  (set_tile "txt_status"
+    (strcat "Блоков: " (itoa (length rows1)) ", "
+            (if (= *ae-sv-mode* "attr") "атрибутов: " "видимостей: ")
+            (itoa (length rows2)) ", вставок: "
+            (itoa (length (ae-sv-unique (mapcar 'caddr entries))))
+            ". Область: " *ae-sv-scope-text*))
+  T
+)
+
+;; Вывод в командную строку после закрытия окна: оба списка
+(defun ae-sv-print-lists ()
+  (if (null *ae-sv-entries*)
+    (princ "\nНичего не найдено.")
     (progn
-      (setq ens '())
-      (foreach i idxs
-        (if (and (>= i 0) (< i (length *ae-sv-rows*)))
-          (foreach en (cdr (nth i *ae-sv-rows*))
-            (if (not (member en ens)) (setq ens (cons en ens))))))
-      (setq ss (ssadd))
-      (setq sel-n 0 skipped 0)
-      (foreach en ens
-        (if (ae-sv-layer-skip-p en)
-          (setq skipped (1+ skipped))
-          (progn
-            (ssadd en ss)
-            (setq sel-n (1+ sel-n)))))
-      (if (= sel-n 0)
-        (set_tile "txt_status"
-          "Все вставки выбранных строк на замороженных, заблокированных или выключенных слоях.")
+      (princ (strcat "\nБлоки (" (itoa (length *ae-sv-rows1*)) "):"))
+      (foreach r *ae-sv-rows1*
+        (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))
+      (princ (strcat "\n" (if (= *ae-sv-mode* "attr") "Атрибуты" "Видимости")
+                     " (" (itoa (length *ae-sv-rows2*)) "):"))
+      (foreach r *ae-sv-rows2*
+        (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))
+      (princ (strcat "\nВставок: " (itoa (length (ae-sv-unique (mapcar 'caddr *ae-sv-entries*))))
+                     ". Область: " *ae-sv-scope-text*))))
+  (princ)
+)
+
+(defun ae-sv-on-mode (m)
+  (setq *ae-sv-mode* m)
+  (setq *ae-sv-rows1* nil *ae-sv-rows2* nil)
+  (ae-sv-set-hints)
+  (ae-sv-refresh)
+)
+
+;; Кнопка «Выбрать»: отмечены блоки и/или пункты второго списка
+(defun ae-sv-on-pick (/ sel-b sel-i ens ss sel-n skipped en)
+  (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
+  (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))
+  (if (and (null sel-b) (null sel-i))
+    (set_tile "txt_status" "Не выбрано ни одной строки. Отметьте блоки или пункты второго списка.")
+    (progn
+      (setq ens (ae-sv-final *ae-sv-entries* sel-b sel-i))
+      (if (null ens)
+        (set_tile "txt_status" "По выбранным строкам вставок нет.")
         (progn
-          (setq *ae-sv-result* (list ss (length idxs) sel-n skipped))
-          (done_dialog 1))))))
+          (setq ss (ssadd))
+          (setq sel-n 0 skipped 0)
+          (foreach en ens
+            (if (ae-sv-layer-skip-p en)
+              (setq skipped (1+ skipped))
+              (progn
+                (ssadd en ss)
+                (setq sel-n (1+ sel-n)))))
+          (if (= sel-n 0)
+            (set_tile "txt_status"
+              "Все вставки выбранных строк на замороженных, заблокированных или выключенных слоях.")
+            (progn
+              (setq *ae-sv-result* (list ss sel-n skipped))
+              (done_dialog 1))))))))
 
 (defun ae-sv-init ()
   (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
@@ -363,6 +517,8 @@
   (action_tile "rb_mode_vis" "(ae-sv-on-mode \"vis\")")
   (action_tile "edt_query" "(ae-sv-refresh)")
   (action_tile "edt_value" "(ae-sv-refresh)")
+  (action_tile "lst_blocks" "(ae-sv-refresh)")
+  (action_tile "lst_items" "(ae-sv-refresh)")
   (action_tile "btn_select" "(ae-sv-on-pick)")
   (action_tile "btn_cancel" "(done_dialog 0)")
 )
@@ -447,13 +603,12 @@
   (setq *ae-sv-result* nil)
   (if (and (ae-sv-load-scope) (ae-sv-open))
     (progn
-      (ae-sv-print-results)
+      (ae-sv-print-lists)
       (if *ae-sv-result*
         (progn
           (sssetfirst nil (nth 0 *ae-sv-result*))
-          (princ (strcat "\nВыбрано вставок: " (itoa (nth 2 *ae-sv-result*))
-                         " (строк: " (itoa (nth 1 *ae-sv-result*))
-                         "), пропущено: " (itoa (nth 3 *ae-sv-result*))))))))
+          (princ (strcat "\nВыбрано вставок: " (itoa (nth 1 *ae-sv-result*))
+                         ", пропущено (слои): " (itoa (nth 2 *ae-sv-result*))))))))
   (princ)
 )
 
