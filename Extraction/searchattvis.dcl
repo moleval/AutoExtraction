@@ -13,39 +13,51 @@ searchattvis_dialog : dialog {
   : column {
     children_alignment = left;
 
-    : radio_row {
-      key = "rb_mode";
-
-      : radio_button {
-        key = "rb_mode_attr";
-        label = "Атрибуты";
-        width = 62;
-        fixed_width = true;
-      }
-
-      : radio_button {
-        key = "rb_mode_vis";
-        label = "Видимость блока";
-      }
-    }
-
     : row {
       alignment = left;
       children_alignment = left;
       children_fixed_width = true;
 
-      : edit_box {
-        key = "edt_query";
-        edit_width = 58;
+      : boxed_column {
+        label = "";
         width = 62;
         fixed_width = true;
+        children_alignment = left;
+
+        : radio_row {
+          key = "rb_row_attr";
+
+          : radio_button {
+            key = "rb_mode_attr";
+            label = "Атрибуты";
+          }
+        }
+
+        : edit_box {
+          key = "edt_query";
+          edit_width = 54;
+        }
       }
 
-      : edit_box {
-        key = "edt_value";
-        edit_width = 58;
+      : boxed_column {
+        label = "";
         width = 62;
         fixed_width = true;
+        children_alignment = left;
+
+        : radio_row {
+          key = "rb_row_vis";
+
+          : radio_button {
+            key = "rb_mode_vis";
+            label = "Видимость блока";
+          }
+        }
+
+        : edit_box {
+          key = "edt_value";
+          edit_width = 54;
+        }
       }
     }
 

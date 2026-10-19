@@ -477,6 +477,8 @@
 
 (defun ae-sv-on-mode (m)
   (setq *ae-sv-mode* m)
+  (set_tile "rb_mode_attr" (if (= m "attr") "1" "0"))
+  (set_tile "rb_mode_vis" (if (= m "attr") "0" "1"))
   (setq *ae-sv-rows1* nil *ae-sv-rows2* nil)
   (ae-sv-set-hints)
   (ae-sv-refresh)
