@@ -517,6 +517,7 @@
            ok
            errors
            missing
+           ok-plugins
            revcnt
            revpaths)
   (setq *ae-banner-items* '())
@@ -611,6 +612,7 @@
       (setq ok 0)
       (setq errors 0)
       (setq missing 0)
+      (setq ok-plugins 0)
 
 
       ;; --------------------------------------------------------
@@ -760,7 +762,7 @@
                 (setq plugin-taken (ae-reload-plugin-conflicts plugin-res plugin-names plugin-taken))
                 (if (ae-reload-load-file plugin-res nil)
                   (progn
-                    (setq ok (1+ ok)))
+                    (setq ok-plugins (1+ ok-plugins)))
                   (setq errors (1+ errors))
                 )
               )
@@ -813,8 +815,14 @@
 
       (princ
         (strcat
-          "\n Успешно загружено: "
+          "\n Успешно загружено модулей: "
           (itoa ok)
+        )
+      )
+      (princ
+        (strcat
+          "\n Успешно загружено плагинов: "
+          (itoa ok-plugins)
         )
       )
 
