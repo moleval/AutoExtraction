@@ -326,21 +326,24 @@
 
 ;; –ежим Ђ¬идимостьї: поле Ђ¬идимостьї Ч значени€ параметров видимости (любой параметр),
 ;; поле Ђ«начениеї Ч значени€ остальных динамических свойств (любое свойство).
-;; Ћейбл Ч состо€ние или Ђсосто€ние | значение свойстваї (если значение введено).
+;; Ћейбл Ч состо€ние или Ђсосто€ние | значение (им€ свойства)ї (если значение введено).
 (defun ae-sv-vis-entries (rec qvis qval / out states dvals s d)
   (setq out '())
   (setq states (vl-remove-if-not '(lambda (v) (ae-sv-match v qvis)) (nth 4 rec)))
   (setq dvals
     (if (= qval "")
       '()
-      (mapcar 'cdr (vl-remove-if-not '(lambda (o) (ae-sv-match (cdr o) qval)) (nth 5 rec)))))
+      (vl-remove-if-not '(lambda (o) (ae-sv-match (cdr o) qval)) (nth 5 rec))))
   (if (and states (or (= qval "") dvals))
     (if (= qval "")
       (foreach s states
         (setq out (cons (list (nth 1 rec) s (car rec)) out)))
       (foreach s states
         (foreach d dvals
-          (setq out (cons (list (nth 1 rec) (strcat s " | " d) (car rec)) out))))))
+          (setq out (cons (list (nth 1 rec)
+                                (strcat s " | " (cdr d) " (" (car d) ")")
+                                (car rec))
+                          out))))))
   out
 )
 
