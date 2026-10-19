@@ -20,7 +20,7 @@ searchattvis_dialog : dialog {
 
       : boxed_column {
         label = "";
-        width = 62;
+        width = 60.4;
         fixed_width = true;
         children_alignment = left;
 
@@ -33,15 +33,23 @@ searchattvis_dialog : dialog {
           }
         }
 
-        : edit_box {
-          key = "edt_query";
-          edit_width = 54;
+        : row {
+          alignment = centered;
+
+          : edit_box {
+            key = "edt_query";
+            edit_width = 56;
+          }
+        }
+
+        : spacer {
+          height = 1.2;
         }
       }
 
       : boxed_column {
         label = "";
-        width = 62;
+        width = 60.4;
         fixed_width = true;
         children_alignment = left;
 
@@ -54,9 +62,17 @@ searchattvis_dialog : dialog {
           }
         }
 
-        : edit_box {
-          key = "edt_value";
-          edit_width = 54;
+        : row {
+          alignment = centered;
+
+          : edit_box {
+            key = "edt_value";
+            edit_width = 56;
+          }
+        }
+
+        : spacer {
+          height = 1.2;
         }
       }
     }
