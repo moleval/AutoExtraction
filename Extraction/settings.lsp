@@ -561,8 +561,7 @@
             (progn
               (ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)
               (if (not (ae-settings-write))
-                (alert "Не удалось записать AutoExtraction\\settings.ini.")
-)))))))
+                (alert "Не удалось записать AutoExtraction\\settings.ini."))))))))
   (princ)
 )
 
