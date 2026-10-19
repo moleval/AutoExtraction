@@ -539,5 +539,32 @@
     )
   )
 )
+;; Окно плагинов из диспетчера EXTRACTION (без окна настроек).
+;; ОК — список плагинов сохраняется в settings.ini, Отмена — ничего не меняется.
+(defun ae-settings-ui-plugins-open (/ root dcl-file dcl-id result)
+  (if (not *AE-SETTINGS-LOADED*) (ae-settings-load))
+  (setq *AE-SETTINGS-UI-PLUGINS* (ae-settings-plugin-list))
+  (setq root (ae-settings-root))
+  (setq dcl-file
+    (if root (findfile (strcat root "\\Extraction\\settings.dcl")) nil))
+  (if (null dcl-file) (setq dcl-file (findfile "settings.dcl")))
+  (if (null dcl-file)
+    (alert "Не найден Extraction\\settings.dcl.")
+    (progn
+      (setq dcl-id (load_dialog dcl-file))
+      (if (< dcl-id 0)
+        (alert "Не удалось загрузить settings.dcl.")
+        (progn
+          (setq result (ae-settings-ui-run-plugins dcl-id))
+          (unload_dialog dcl-id)
+          (if (= result 1)
+            (progn
+              (ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)
+              (if (not (ae-settings-write))
+                (alert "Не удалось записать AutoExtraction\\settings.ini.")
+)))))))
+  (princ)
+)
+
 ;; SETTINGS.LSP загружен.
 (princ)

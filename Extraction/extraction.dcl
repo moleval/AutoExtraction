@@ -568,6 +568,11 @@ extraction_dialog : dialog {
     }
 
     : button {
+      key = "btn_plugins";
+      label = "Плагины…";
+    }
+
+    : button {
       key = "btn_close";
       label = "Закрыть";
       is_cancel = true;

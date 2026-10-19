@@ -1318,6 +1318,11 @@
   (done_dialog 1)
 )
 
+(defun extraction-plugins ()
+  (setq *EXTRACTION-ACTION* 'PLUGINS)
+  (done_dialog 1)
+)
+
 
 ;; ============================================================
 ;; КНОПКИ
@@ -1649,6 +1654,7 @@
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
               (action_tile "btn_saveas" "(extraction-saveas)")
+              (action_tile "btn_plugins" "(extraction-plugins)")
               (action_tile "btn_close"  "(extraction-close)")
 
               (action_tile "btn_cutline"  "(extraction-cutline)")
@@ -1705,6 +1711,14 @@
                    (ae-settings-ui-open)
                  )
                  (extraction-apply-settings-defaults)
+                 (c:extraction)
+                )
+
+                ((eq *EXTRACTION-ACTION* 'PLUGINS)
+                 ;; Окно плагинов открывается после закрытия диспетчера, затем диспетчер снова
+                 (if (= (type ae-settings-ui-plugins-open) 'SUBR)
+                   (ae-settings-ui-plugins-open)
+                 )
                  (c:extraction)
                 )
 
