@@ -663,4 +663,18 @@
   (princ)
 )
 
-;; SEARCHATTVIS.LSP — ред. 1: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД.
+;; Таблица команд: при ручной загрузке печатается сразу; при RELOAD
+;; (тихая загрузка) строки регистрируются, а таблицу печатает RELOAD.
+(if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
+  (progn
+    (ae-banner-add "SEARCHATTVIS" '(
+        ("ПОИСКАТР" "поиск блоков по атрибутам (окно)")
+        ("ПОИСКВИД" "поиск блоков по видимостям (окно)")
+        ("ПОИСКСПИСОК" "перечень найденного в командную строку")))
+    (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
+      (progn
+        (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
+        (ae-banner-print)))))
+(princ)
+
+;; SEARCHATTVIS.LSP — ред. 2: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.
