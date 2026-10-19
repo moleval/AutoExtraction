@@ -9,7 +9,7 @@ searchattvis_dialog : dialog {
   label = "Поиск по атрибутам и видимостям";
 
   : column {
-    alignment = left;
+    children_alignment = left;
 
     : radio_row {
       key = "rb_mode";
@@ -27,6 +27,8 @@ searchattvis_dialog : dialog {
 
     : row {
       alignment = left;
+      children_alignment = left;
+      children_fixed_width = true;
 
       : edit_box {
         key = "edt_query";
@@ -36,6 +38,8 @@ searchattvis_dialog : dialog {
 
     : row {
       alignment = left;
+      children_alignment = left;
+      children_fixed_width = true;
 
       : edit_box {
         key = "edt_value";
