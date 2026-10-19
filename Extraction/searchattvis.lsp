@@ -342,13 +342,17 @@
 ;; Без ssget "_X": тот читает весь чертёж (включая определения блоков)
 ;; и на больших чертежах занимает десятки секунд.
 (defun ae-sv-all-model-inserts ( / blk e out)
-  (setq out '())
-  (setq blk (tblobjname "BLOCK" "*Model_Space*"))
-  (setq e (if blk (entnext blk) nil))
-  (while e
-    (if (ae-sv-model-insert-p e) (setq out (cons e out)))
-    (setq e (entnext e)))
-  (reverse out)
+  (setq blk (tblobjname "BLOCK" "*Model_Space"))
+  (if (null blk)
+    ;; Запасной путь: блок не найден — обычный фильтр (медленнее)
+    (ae-sv-model-inserts (ssget "_X" '((0 . "INSERT") (410 . "Model"))))
+    (progn
+      (setq out '())
+      (setq e (entnext blk))
+      (while e
+        (if (ae-sv-model-insert-p e) (setq out (cons e out)))
+        (setq e (entnext e)))
+      (reverse out)))
 )
 
 (defun ae-sv-run (mode / pre ens t0)
