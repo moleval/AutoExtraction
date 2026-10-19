@@ -478,7 +478,6 @@
       (ae-settings-ui-load-task)
       (action_tile "popup_task" "(ae-settings-ui-task-changed $value)")
       (action_tile "btn_defaults" "(ae-settings-ui-reset-task)")
-      (action_tile "btn_plugins" "(ae-settings-ui-goto-plugins)")
       (action_tile "btn_save" "(ae-settings-ui-save)")
       (action_tile "btn_cancel" "(ae-settings-ui-cancel)")
       (setq result (start_dialog))
@@ -491,17 +490,7 @@
   )
 )
 
-(defun ae-settings-ui-goto-plugins ()
-  ;; ѕравки полей перенос€тс€ в пам€ть, затем окно закрываетс€ с кодом 2.
-  (if (ae-settings-ui-save-task)
-    (progn
-      (setq *AE-SETTINGS-UI-ACTION* 'PLUGINS)
-      (done_dialog 2))
-    (alert "Ќужно задать хот€ бы одну маску в каждом активном поле.")
-  )
-)
-
-(defun ae-settings-ui-open (/ root dcl-file dcl-id result again)
+(defun ae-settings-ui-open (/ root dcl-file dcl-id result)
   (if (not *AE-SETTINGS-LOADED*) (ae-settings-load))
   (setq *AE-SETTINGS-UI-ACTION* 'CANCEL)
   (setq *AE-SETTINGS-UI-SNAPSHOT* *AE-SETTINGS-DATA*)
@@ -520,16 +509,7 @@
       (if (< dcl-id 0)
         (progn (alert "Ќе удалось загрузить settings.dcl.") nil)
         (progn
-          ;; ÷икл: окно настроек <-> диалог плагинов (вложенные диалоги
-          ;; AutoCAD не поддерживает, поэтому окна открываютс€ по очереди).
-          (setq again T)
-          (while again
-            (setq result (ae-settings-ui-run-settings dcl-id))
-            (if (= result 2)
-              (ae-settings-ui-run-plugins dcl-id)
-              (setq again nil)
-            )
-          )
+          (setq result (ae-settings-ui-run-settings dcl-id))
           (unload_dialog dcl-id)
           (if (/= *AE-SETTINGS-UI-ACTION* 'SAVE)
             (setq *AE-SETTINGS-DATA* *AE-SETTINGS-UI-SNAPSHOT*))

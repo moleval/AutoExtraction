@@ -95,11 +95,6 @@ settings_dialog : dialog {
     }
 
     : button {
-      key = "btn_plugins";
-      label = "Плагины…";
-    }
-
-    : button {
       key = "btn_save";
       label = "Сохранить";
       is_default = true;

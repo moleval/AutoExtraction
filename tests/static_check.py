@@ -711,8 +711,6 @@ SETTINGS_PLUGINS_MUST = [
      "переноса буфера плагинов в память перед записью settings.ini (иначе «Сохранить» не пишет реестр)"),
     ("(ae-settings-write))",
      "записи settings.ini в ae-settings-ui-save"),
-    ('(action_tile "btn_plugins" "(ae-settings-ui-goto-plugins)")',
-     "кнопки «Плагины…» в окне настроек"),
     ('(new_dialog "plugins_dialog" dcl-id)',
      "открытия диалога плагинов"),
 ]
