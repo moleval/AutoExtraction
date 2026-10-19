@@ -338,14 +338,28 @@
 ;; Команда
 ;; ============================================================
 
-(defun ae-sv-run (mode / pre ens)
+;; Вставки пространства модели: обход цепочки объектов от блока *Model_Space*.
+;; Без ssget "_X": тот читает весь чертёж (включая определения блоков)
+;; и на больших чертежах занимает десятки секунд.
+(defun ae-sv-all-model-inserts ( / blk e out)
+  (setq out '())
+  (setq blk (tblobjname "BLOCK" "*Model_Space*"))
+  (setq e (if blk (entnext blk) nil))
+  (while e
+    (if (ae-sv-model-insert-p e) (setq out (cons e out)))
+    (setq e (entnext e)))
+  (reverse out)
+)
+
+(defun ae-sv-run (mode / pre ens t0)
+  (setq t0 (getvar "millisecs"))
   (setq *ae-sv-mode* mode)
   (setq *ae-sv-result* nil)
   (setq pre (ssget "_I"))
   (setq ens
     (if pre
       (ae-sv-model-inserts pre)
-      (ae-sv-model-inserts (ssget "_X" '((0 . "INSERT") (410 . "Model"))))))
+      (ae-sv-all-model-inserts)))
   (cond
     ((and pre (null ens))
      (princ "\nВ предварительном выделении нет вставок блоков. Поиск не запущен."))
