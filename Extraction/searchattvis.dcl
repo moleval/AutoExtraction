@@ -25,14 +25,22 @@ searchattvis_dialog : dialog {
       }
     }
 
-    : edit_box {
-      key = "edt_query";
-      edit_width = 50;
+    : row {
+      alignment = left;
+
+      : edit_box {
+        key = "edt_query";
+        edit_width = 50;
+      }
     }
 
-    : edit_box {
-      key = "edt_value";
-      edit_width = 50;
+    : row {
+      alignment = left;
+
+      : edit_box {
+        key = "edt_value";
+        edit_width = 50;
+      }
     }
 
     : list_box {
