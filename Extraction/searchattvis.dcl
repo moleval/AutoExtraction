@@ -19,6 +19,8 @@ searchattvis_dialog : dialog {
       : radio_button {
         key = "rb_mode_attr";
         label = "Атрибуты";
+        width = 62;
+        fixed_width = true;
       }
 
       : radio_button {
@@ -35,11 +37,15 @@ searchattvis_dialog : dialog {
       : edit_box {
         key = "edt_query";
         edit_width = 58;
+        width = 62;
+        fixed_width = true;
       }
 
       : edit_box {
         key = "edt_value";
         edit_width = 58;
+        width = 62;
+        fixed_width = true;
       }
     }
 
