@@ -512,6 +512,13 @@
   (ae-sv-refresh)
 )
 
+;; —брос выбора в обоих списках (кнопка и Esc); окно не закрываетс€
+(defun ae-sv-reset ()
+  (set_tile "lst_blocks" "")
+  (set_tile "lst_items" "")
+  (ae-sv-refresh)
+)
+
 (defun ae-sv-wire ()
   (action_tile "rb_mode_attr" "(ae-sv-on-mode \"attr\")")
   (action_tile "rb_mode_vis" "(ae-sv-on-mode \"vis\")")
@@ -520,6 +527,7 @@
   (action_tile "lst_blocks" "(ae-sv-refresh)")
   (action_tile "lst_items" "(ae-sv-refresh)")
   (action_tile "btn_select" "(ae-sv-on-pick)")
+  (action_tile "btn_reset" "(ae-sv-reset)")
   (action_tile "btn_cancel" "(done_dialog 0)")
 )
 

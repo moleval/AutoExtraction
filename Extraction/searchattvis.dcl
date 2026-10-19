@@ -96,9 +96,16 @@ searchattvis_dialog : dialog {
       }
 
       : button {
+        key = "btn_reset";
+        label = "—бросить выбор";
+        is_cancel = true;
+        fixed_width = true;
+        width = 18;
+      }
+
+      : button {
         key = "btn_cancel";
         label = "ќтменить";
-        is_cancel = true;
         fixed_width = true;
         width = 16;
       }
