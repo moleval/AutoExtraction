@@ -24,19 +24,9 @@ searchattvis_dialog : dialog {
       }
     }
 
-    : text {
-      key = "txt_query_label";
-      label = "Поиск (тег, по Enter):";
-    }
-
     : edit_box {
       key = "edt_query";
       edit_width = 50;
-    }
-
-    : text {
-      key = "txt_value_label";
-      label = "Значение (по Enter):";
     }
 
     : edit_box {

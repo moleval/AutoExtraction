@@ -240,20 +240,54 @@
 ;; Окно: обновление списка и статуса
 ;; ============================================================
 
-(defun ae-sv-set-labels ()
+;; Подсказки внутри полей (как в панелях «Блоки» и «Слои»)
+(defun ae-sv-hints ()
   (if (= *ae-sv-mode* "attr")
+    (list "Поиск (тег, по Enter):" "Значение (по Enter):")
+    (list "Поиск (видимость, по Enter):" "Значение атрибута (по Enter):"))
+)
+
+(defun ae-sv-set-hints (/ h)
+  (setq h (ae-sv-hints))
+  (set_tile "edt_query" (car h))
+  (set_tile "edt_value" (cadr h))
+)
+
+;; Текст поля без подсказки: подсказка вырезается из любой позиции,
+;; набранный до неё или после неё текст сохраняется
+(defun ae-sv-clean (v hint / p)
+  (cond
+    ((= v hint) "")
+    ((setq p (vl-string-search hint v))
+     (strcat (substr v 1 p) (substr v (+ p (strlen hint) 1))))
+    (T v))
+)
+
+;; Значение поля с подсказкой; пустое поле снова показывает подсказку
+(defun ae-sv-field (key hint / raw clean)
+  (setq raw (ae-sv-str (get_tile key)))
+  (setq clean (ae-sv-clean raw hint))
+  (if (or (/= clean raw) (= clean ""))
+    (set_tile key (if (= clean "") hint clean)))
+  clean
+)
+
+;; Вывод найденного в командную строку (после закрытия окна)
+(defun ae-sv-print-results (/ ens)
+  (if (null *ae-sv-rows*)
+    (princ "\nНичего не найдено.")
     (progn
-      (set_tile "txt_query_label" "Поиск (тег, по Enter):")
-      (set_tile "txt_value_label" "Значение (по Enter):"))
-    (progn
-      (set_tile "txt_query_label" "Поиск (видимость, по Enter):")
-      (set_tile "txt_value_label" "Значение атрибута (по Enter):"))
-  )
+      (setq ens (ae-sv-unique (apply 'append (mapcar 'cdr *ae-sv-rows*))))
+      (princ (strcat "\nНайдено: " (itoa (length *ae-sv-rows*)) " строк, "
+                     (itoa (length ens)) " вставок. Область: " *ae-sv-scope-text*))
+      (foreach r *ae-sv-rows*
+        (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))))
+  (princ)
 )
 
 (defun ae-sv-refresh (/ rows labels qtag qval ens)
-  (setq qtag (ae-sv-norm (get_tile "edt_query")))
-  (setq qval (ae-sv-norm (get_tile "edt_value")))
+  (setq qtag (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
+  (setq qval (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
   (if (= *ae-sv-mode* "attr")
     (setq rows (ae-sv-rows-attr qtag qval))
     (setq rows (ae-sv-rows-vis qtag qval)))
@@ -274,9 +308,7 @@
 
 (defun ae-sv-on-mode (m)
   (setq *ae-sv-mode* m)
-  (set_tile "edt_query" "")
-  (set_tile "edt_value" "")
-  (ae-sv-set-labels)
+  (ae-sv-set-hints)
   (ae-sv-refresh)
 )
 
@@ -321,9 +353,7 @@
 (defun ae-sv-init ()
   (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
   (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "attr") "0" "1"))
-  (ae-sv-set-labels)
-  (set_tile "edt_query" "")
-  (set_tile "edt_value" "")
+  (ae-sv-set-hints)
   (ae-sv-refresh)
 )
 
@@ -412,12 +442,15 @@
        (strcat (if pre "выделенные" "весь чертёж")
                " (" (itoa (length ens)) " вставок)"))
      (setq *ae-sv-inserts* (ae-sv-collect ens))
-     (if (and (ae-sv-open) *ae-sv-result*)
+     (if (ae-sv-open)
        (progn
-         (sssetfirst nil (nth 0 *ae-sv-result*))
-         (princ (strcat "\nВыбрано вставок: " (itoa (nth 2 *ae-sv-result*))
-                        " (строк: " (itoa (nth 1 *ae-sv-result*))
-                        "), пропущено: " (itoa (nth 3 *ae-sv-result*))))))))
+         (ae-sv-print-results)
+         (if *ae-sv-result*
+           (progn
+             (sssetfirst nil (nth 0 *ae-sv-result*))
+             (princ (strcat "\nВыбрано вставок: " (itoa (nth 2 *ae-sv-result*))
+                            " (строк: " (itoa (nth 1 *ae-sv-result*))
+                            "), пропущено: " (itoa (nth 3 *ae-sv-result*))))))))))
   (princ)
 )
 
