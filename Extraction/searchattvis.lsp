@@ -244,8 +244,8 @@
 ;; ѕодсказки внутри полей (как в панел€х ЂЅлокиї и Ђ—лоиї)
 (defun ae-sv-hints ()
   (if (= *ae-sv-mode* "attr")
-    (list "“ег (по Enter):" "«начение (по Enter):")
-    (list "¬идимость (по Enter):" "«начение атрибута (по Enter):"))
+    (list "јтрибут (по Enter):" "«начение (по Enter):")
+    (list "¬идимость (по Enter):" "«начение (по Enter):"))
 )
 
 (defun ae-sv-set-hints (/ h)
@@ -486,10 +486,10 @@
   (if (= kw "¬идимость")
     (progn
       (setq qa (getstring T "\n¬идимость (пусто Ч люба€): "))
-      (setq qb (getstring T "\nјтрибут-условие (пусто Ч без услови€): "))
+      (setq qb (getstring T "\n«начение (пусто Ч без услови€): "))
       (ae-sv-list-run "vis" qa qb))
     (progn
-      (setq qa (getstring T "\n“ег атрибута (пусто Ч любой): "))
+      (setq qa (getstring T "\nјтрибут (пусто Ч любой): "))
       (setq qb (getstring T "\n«начение (пусто Ч любое): "))
       (ae-sv-list-run "attr" qa qb)))
   (princ)
