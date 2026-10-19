@@ -138,6 +138,39 @@
   (reverse out)
 )
 
+;; »м€ блока (эффективное дл€ динамического блока). —во€ копи€ логики
+;; из common/select-utils.lsp: модуль не должен зависеть от загрузки общих модулей.
+(defun ae-sv-effname (vla / r)
+  (setq r (vl-catch-all-apply 'vla-get-EffectiveName (list vla)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (setq r (vl-catch-all-apply 'vla-get-Name (list vla)))
+      (if (vl-catch-all-error-p r) "" (ae-sv-str r)))
+    (ae-sv-str r))
+)
+
+;; «начение параметра видимости динамического блока (строка) или nil
+(defun ae-sv-visibility (vla / dynprops result prop pname val)
+  (setq result nil)
+  (setq dynprops (vl-catch-all-apply 'vlax-invoke (list vla 'GetDynamicBlockProperties)))
+  (if (not (vl-catch-all-error-p dynprops))
+    (foreach prop dynprops
+      (if (null result)
+        (progn
+          (setq pname (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+          (if (and (not (vl-catch-all-error-p pname))
+                   (= (type pname) 'STR)
+                   (or (vl-string-search "VISIBILITY" (strcase pname))
+                       (vl-string-search "¬»ƒ»ћќ—“№" (strcase pname))))
+            (progn
+              (setq val (vl-catch-all-apply 'vla-get-Value (list prop)))
+              (if (not (vl-catch-all-error-p val))
+                (progn
+                  (if (= (type val) 'VARIANT) (setq val (vlax-variant-value val)))
+                  (if val (setq result (vl-princ-to-string val)))))))))))
+  result
+)
+
 ;; «апись на вставку: (ename им€ видимость атрибуты). „итаетс€ один раз.
 (defun ae-sv-collect (ens / out en vla name vis)
   (setq out '())
@@ -145,11 +178,10 @@
     (setq vla (vl-catch-all-apply 'vlax-ename->vla-object (list en)))
     (if (not (vl-catch-all-error-p vla))
       (progn
-        (setq name (ae-sv-str (vl-catch-all-apply 'su-get-effective-name (list vla))))
+        (setq name (ae-sv-effname vla))
         (if (= name "")
           (setq name (ae-sv-str (cdr (assoc 2 (entget en))))))
-        (setq vis (vl-catch-all-apply 'su-get-visibility (list vla)))
-        (if (/= (type vis) 'STR) (setq vis nil))
+        (setq vis (ae-sv-visibility vla))
         (setq out (cons (list en name vis (ae-sv-read-attrs vla)) out)))))
   (reverse out)
 )
@@ -307,7 +339,13 @@
 ;; ќткрывает окно. T Ч диалог отработал, nil Ч окно не открылось.
 (defun ae-sv-open (/ root dcl-file dcl-id)
   (setq root (if (= (type ae-settings-root) 'SUBR) (ae-settings-root) nil))
-  (setq dcl-file (findfile "searchattvis.dcl"))
+  ;; ƒо регистрации в reload.lsp можно указать папку вручную:
+  ;; (setq *ae-sv-dcl-dir* "D:\\autoextraction\\Extraction\\")
+  (setq dcl-file nil)
+  (if (and (boundp '*ae-sv-dcl-dir*) (= (type *ae-sv-dcl-dir*) 'STR))
+    (setq dcl-file (findfile (strcat *ae-sv-dcl-dir* "searchattvis.dcl"))))
+  (if (null dcl-file)
+    (setq dcl-file (findfile "searchattvis.dcl")))
   (if (null dcl-file)
     (setq dcl-file (findfile "Extraction\\searchattvis.dcl")))
   (if (and (null dcl-file) root)
