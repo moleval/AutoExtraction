@@ -674,6 +674,7 @@
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
+        (princ "\nAutoExtraction Ч модульна€ система AutoLISP дл€ AutoCAD: извлечение данных из чертежей, подсчЄт материалов, раскрой хлыстов и листов.")
         (ae-banner-print)))))
 (princ)
 
