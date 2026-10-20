@@ -462,7 +462,6 @@
               (itoa (length rows2)) ", вставок: "
               (itoa (length (ae-sv-unique (mapcar 'caddr entries))))
               ". Область: " *ae-sv-scope-text*)))
-  (ae-sv-panel-update sel-b sel-i)
   T
 )
 
@@ -522,8 +521,6 @@
   (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
   (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "attr") "0" "1"))
   (ae-sv-set-hints)
-  (set_tile "tgl_count" (if *ae-sv-count-on* "1" "0"))
-  (ae-sv-count-mode)
   (if *ae-sv-restore*
     (progn
       (setq r *ae-sv-restore*)
@@ -549,15 +546,13 @@
   (action_tile "lst_blocks" "(ae-sv-refresh)")
   (action_tile "lst_items" "(ae-sv-refresh)")
   (action_tile "btn_select" "(ae-sv-on-pick)")
-  (action_tile "tgl_count" "(ae-sv-on-toggle)")
-  (action_tile "btn_copy" "(ae-sv-cnt-copy)")
-  (action_tile "btn_acad" "(ae-sv-on-acad)")
+  (action_tile "btn_count" "(ae-sv-on-count)")
   (action_tile "btn_reset" "(ae-sv-reset)")
   (action_tile "btn_cancel" "(done_dialog 0)")
 )
 
 ;; Открывает окно. T — диалог отработал, nil — окно не открылось.
-(defun ae-sv-open (/ root dcl-file dcl-id)
+(defun ae-sv-dcl-file (/ root dcl-file)
   (setq root (if (= (type ae-settings-root) 'SUBR) (ae-settings-root) nil))
   ;; До регистрации в reload.lsp можно указать папку вручную:
   ;; (setq *ae-sv-dcl-dir* "D:\\autoextraction\\Extraction\\")
@@ -570,6 +565,11 @@
     (setq dcl-file (findfile "Extraction\\searchattvis.dcl")))
   (if (and (null dcl-file) root)
     (setq dcl-file (findfile (strcat root "\\Extraction\\searchattvis.dcl"))))
+  dcl-file
+)
+
+(defun ae-sv-open (/ dcl-file dcl-id)
+  (setq dcl-file (ae-sv-dcl-file))
   (if (null dcl-file)
     (progn
       (alert "Не найден файл Extraction\\searchattvis.dcl.")
@@ -586,11 +586,10 @@
             (ae-sv-wire)
             (start_dialog)
             (unload_dialog dcl-id)
-            (if (equal *ae-sv-next* "acad")
+            (if (equal *ae-sv-next* "count")
               (progn
                 (setq *ae-sv-next* nil)
-                (ae-sv-acad-tables)
-                (ae-sv-open)))
+                (ae-sv-count-flow)))
             T)
           (progn
             (unload_dialog dcl-id)
@@ -598,18 +597,18 @@
             nil))))))
 
 ;; ============================================================
-;; Подсчёт: погонаж (м.п.) и площадь (м2) — панель внутри окна поиска
+;; Подсчёт: погонаж (м.п.) и площадь (м2) — отдельное окно «Подсчёт»
 ;; Погонаж — свойство «Длина» (без номера). Площадь — «Высота» и «Ширина»
 ;; (без номера); если «Ширины» нет, берётся «Длина». Регистр не важен.
 ;; Размеры округляются до миллиметров; группы — по размерам и марке.
 ;; ============================================================
 
-(setq *ae-sv-next* nil)         ; "acad" — таблица AutoCAD (после закрытия окна поиска)
+(setq *ae-sv-next* nil)         ; "count" — открыть «Подсчёт»; "table" — таблица; "close" — назад
 (setq *ae-sv-restore* nil)      ; (блоки пункты запрос1 запрос2) — восстановить после закрытия
 (setq *ae-sv-pend* nil)         ; (блоки пункты) — применить при следующем обновлении
-(setq *ae-sv-count-on* nil)     ; галочка «Подсчёт»
-(setq *ae-sv-panel-secs* nil)   ; разделы панели: (заголовок строки)
-(setq *ae-sv-panel-rows* nil)   ; строки панели (списки полей) — для копирования
+(setq *ae-sv-count-sel* nil)    ; (блоки пункты) — выбор для окна «Подсчёт»
+(setq *ae-sv-cnt-secs* nil)     ; разделы: (заголовок строки)
+(setq *ae-sv-cnt-rows* nil)     ; строки списка окна «Подсчёт» (списки полей)
 
 ;; Значение динамического свойства с точным именем (без учёта регистра) или nil
 (defun ae-sv-prop-exact (rec name / hit)
@@ -765,7 +764,7 @@
   s
 )
 
-;; Полный текст выбранных строк (с количеством) для строки состояния
+;; Полный текст выбранных строк (с количеством) для строки состояния окна поиска
 (defun ae-sv-status-text (sel-b sel-i rows1 rows2 / out)
   (setq out '())
   (foreach s sel-b
@@ -775,48 +774,34 @@
   (ae-sv-join-sep (reverse out) "; ")
 )
 
-;; Строка панели: поля через табуляцию (колонки списка lst_count)
+;; Строка таблицы подсчёта: поля через табуляцию (колонки списка lst_count)
 (defun ae-sv-row-tab (fields)
   (ae-sv-join-sep fields (chr 9))
 )
 
-;; Панель подсчёта под списками. Выбор блока сужает данные; галочка выключена — заглушка
-(defun ae-sv-panel-update (sel-b sel-i / rows secs)
+;; Полный текст строки для строки состояния окна «Подсчёт»: пустые поля пропускаются
+(defun ae-sv-row-text (fields)
+  (ae-sv-join-sep (vl-remove-if '(lambda (x) (= x "")) fields) " | ")
+)
+
+;; Данные окна «Подсчёт» по выбранным блокам (и пунктам): строки списка и разделы
+(defun ae-sv-cnt-data (sel-b sel-i / rows secs)
   (setq rows '() secs '())
-  (cond
-    ((null *ae-sv-count-on*)
-     (setq rows (list (list "Подсчёт выключен"))))
-    ((null sel-b)
-     (setq rows (list (list "Выберите блок в списке слева"))))
-    (T
-     (setq secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)))
-     (if (null secs)
-       (setq rows (list (list (if (= (length sel-b) 1)
-                                (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
-                                "У выбранных блоков нет погонажа или площади"))))
-       (foreach sec secs
-         (setq rows (append rows (list (list (car sec))) (cadr sec)))))))
-  (setq *ae-sv-panel-secs* secs)
-  (setq *ae-sv-panel-rows* rows)
-  (start_list "lst_count")
-  (foreach r rows (add_list (ae-sv-row-tab r)))
-  (end_list)
+  (if (null sel-b)
+    (setq rows (list (list "Выберите блок в списке слева")))
+    (progn
+      (setq secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)))
+      (if (null secs)
+        (setq rows (list (list (if (= (length sel-b) 1)
+                                 (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
+                                 "У выбранных блоков нет погонажа или площади"))))
+        (foreach sec secs
+          (setq rows (append rows (list (list (car sec))) (cadr sec)))))))
+  (setq *ae-sv-cnt-secs* secs)
+  (setq *ae-sv-cnt-rows* rows)
 )
 
-;; Режим кнопок копирования и таблицы: доступны только при включённом подсчёте
-(defun ae-sv-count-mode ()
-  (mode_tile "btn_copy" (if *ae-sv-count-on* 0 1))
-  (mode_tile "btn_acad" (if *ae-sv-count-on* 0 1))
-)
-
-(defun ae-sv-on-toggle ()
-  (setq *ae-sv-count-on* (= (get_tile "tgl_count") "1"))
-  (ae-sv-count-mode)
-  (ae-sv-panel-update (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
-                      (ae-sv-selected "lst_items" *ae-sv-rows2*))
-)
-
-;; Запомнить выбор и запрос перед закрытием окна (для таблицы и восстановления)
+;; Запомнить выбор и запрос перед закрытием окна поиска
 (defun ae-sv-snapshot ()
   (list (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
         (ae-sv-selected "lst_items" *ae-sv-rows2*)
@@ -824,13 +809,22 @@
         (ae-sv-field "edt_value" (cadr (ae-sv-hints))))
 )
 
-(defun ae-sv-on-acad ()
+;; Кнопка «Подсчёт» в окне поиска: закрыть поиск и открыть окно «Подсчёт»
+(defun ae-sv-on-count ()
   (setq *ae-sv-restore* (ae-sv-snapshot))
-  (setq *ae-sv-next* "acad")
-  (done_dialog 3)
+  (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
+  (setq *ae-sv-next* "count")
+  (done_dialog 4)
 )
 
-;; Текст панели для буфера обмена: строки через CRLF, поля через табуляцию
+;; Выбор строки окна «Подсчёт»: полный текст в строке состояния окна
+(defun ae-sv-cnt-pick (/ idx)
+  (setq idx (car (ae-sv-indices (get_tile "lst_count"))))
+  (if (and idx (< idx (length *ae-sv-cnt-rows*)))
+    (set_tile "txt_count_status" (ae-sv-row-text (nth idx *ae-sv-cnt-rows*))))
+)
+
+;; Текст строк для буфера обмена: строки через CRLF, поля через табуляцию
 (defun ae-sv-cnt-text (rows / out)
   (setq out "")
   (foreach r rows
@@ -847,13 +841,44 @@
 )
 
 (defun ae-sv-cnt-copy (/ r)
-  (if (null *ae-sv-panel-secs*)
-    (set_tile "txt_status" "Нет данных для копирования.")
+  (if (null *ae-sv-cnt-secs*)
+    (set_tile "txt_count_status" "Нет данных для копирования.")
     (progn
-      (setq r (vl-catch-all-apply 'ae-sv-clip (list (ae-sv-cnt-text *ae-sv-panel-rows*))))
-      (if (and (not (vl-catch-all-error-p r)) r)
-        (set_tile "txt_status" "Подсчёт скопирован в буфер обмена (вставьте в Excel: Ctrl+V).")
-        (set_tile "txt_status" "Буфер обмена недоступен."))))
+      (setq r (vl-catch-all-apply 'ae-sv-clip (list (ae-sv-cnt-text *ae-sv-cnt-rows*))))
+      (set_tile "txt_count_status"
+        (if (and (not (vl-catch-all-error-p r)) r)
+          "Скопировано в буфер обмена (вставьте в Excel: Ctrl+V)."
+          "Буфер обмена недоступен.")))
+  )
+)
+
+;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
+(defun ae-sv-count-dialog (/ dcl-file dcl-id)
+  (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
+  (setq *ae-sv-next* "close")
+  (setq dcl-file (ae-sv-dcl-file))
+  (if (null dcl-file)
+    (alert "Не найден файл Extraction\\searchattvis.dcl.")
+    (progn
+      (setq dcl-id (load_dialog dcl-file))
+      (if (< dcl-id 0)
+        (alert "Не удалось загрузить окно подсчёта.")
+        (if (new_dialog "searchattvis_count" dcl-id)
+          (progn
+            (start_list "lst_count")
+            (foreach r *ae-sv-cnt-rows* (add_list (ae-sv-row-tab r)))
+            (end_list)
+            (set_tile "txt_count_status" "")
+            (action_tile "lst_count" "(ae-sv-cnt-pick)")
+            (action_tile "btn_copy" "(ae-sv-cnt-copy)")
+            (action_tile "btn_acad" "(progn (setq *ae-sv-next* \"table\") (done_dialog 3))")
+            (action_tile "btn_count_close" "(progn (setq *ae-sv-next* \"close\") (done_dialog 0))")
+            (start_dialog)
+            (unload_dialog dcl-id))
+          (progn
+            (unload_dialog dcl-id)
+            (alert "Не удалось открыть окно подсчёта."))))))
+  T
 )
 
 ;; Ширина колонки по самой длинной строке
@@ -866,8 +891,8 @@
 
 ;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая
 (defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot)
-  (if (null *ae-sv-panel-secs*)
-    (princ "\nНет данных для таблицы: выберите блоки с погонажом или площадью.")
+  (if (null *ae-sv-cnt-secs*)
+    (alert "Нет данных для таблицы: выберите блоки с погонажом или площадью.")
     (progn
       (setq pt (getpoint "\nТочка вставки таблицы подсчёта: "))
       (if pt
@@ -876,7 +901,7 @@
           (setq doc (vla-get-activedocument (vlax-get-acad-object)))
           (setq space (vla-get-modelspace doc))
           (vla-startundomark doc)
-          (foreach sec *ae-sv-panel-secs*
+          (foreach sec *ae-sv-cnt-secs*
             (if pt
               (progn
                 (setq rows (cadr sec)
@@ -912,6 +937,17 @@
           (vla-endundomark doc)
           (princ "\nТаблица подсчёта создана.")))))
   (princ)
+)
+
+;; Цикл окна «Подсчёт»: «Таблица AutoCAD» строит таблицу и снова показывает окно;
+;; «Закрыть» или Esc возвращают окно поиска с сохранённым выбором
+(defun ae-sv-count-flow ()
+  (setq *ae-sv-next* "table")
+  (while (equal *ae-sv-next* "table")
+    (ae-sv-count-dialog)
+    (if (equal *ae-sv-next* "table") (ae-sv-acad-tables)))
+  (setq *ae-sv-next* nil)
+  (ae-sv-open)
 )
 
 ;; ============================================================
@@ -1023,4 +1059,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP — ред. 3: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.
+;; SEARCHATTVIS.LSP — ред. 2: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.

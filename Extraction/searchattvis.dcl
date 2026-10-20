@@ -92,7 +92,7 @@ searchattvis_dialog : dialog {
           key = "lst_blocks";
           multiple_select = true;
           width = 62;
-          height = 12;
+          height = 14;
           fixed_width = true;
           fixed_height = true;
         }
@@ -109,33 +109,16 @@ searchattvis_dialog : dialog {
           key = "lst_items";
           multiple_select = true;
           width = 62;
-          height = 12;
+          height = 14;
           fixed_width = true;
           fixed_height = true;
         }
       }
     }
 
-    : row {
-      alignment = left;
-      : text {
-        key = "txt_status";
-        label = "";
-        width = 100;
-        fixed_width = true;
-      }
-      : toggle {
-        key = "tgl_count";
-        label = "Подсчёт";
-      }
-    }
-    : list_box {
-      key = "lst_count";
-      width = 124;
-      height = 6;
-      fixed_width = true;
-      fixed_height = true;
-      tabs = "10 32 54 76 100";
+    : text {
+      key = "txt_status";
+      label = "";
     }
 
     : row {
@@ -148,16 +131,10 @@ searchattvis_dialog : dialog {
         width = 16;
       }
       : button {
-        key = "btn_copy";
-        label = "Копировать";
+        key = "btn_count";
+        label = "Подсчёт";
         fixed_width = true;
-        width = 16;
-      }
-      : button {
-        key = "btn_acad";
-        label = "Таблица AutoCAD";
-        fixed_width = true;
-        width = 22;
+        width = 14;
       }
 
       : button {
@@ -178,3 +155,51 @@ searchattvis_dialog : dialog {
   }
 }
 
+searchattvis_count : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 124;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "10 32 54 76 100";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 124;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
