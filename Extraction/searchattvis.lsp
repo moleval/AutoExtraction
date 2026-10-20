@@ -811,8 +811,8 @@
 (defun ae-sv-build-sections (recs / c groups lin area secs)
   (setq c (ae-sv-calc recs) groups (car c) secs '())
   (setq lin (ae-sv-sorted groups "L") area (ae-sv-sorted groups "A"))
-  (if lin (setq secs (cons (ae-sv-section "Погонаж, м.п." lin "L") secs)))
-  (if area (setq secs (cons (ae-sv-section "Площадь, м2" area "A") secs)))
+  (if lin (setq secs (cons (ae-sv-section "м.п." lin "L") secs)))
+  (if area (setq secs (cons (ae-sv-section "м2" area "A") secs)))
   (reverse secs)
 )
 
@@ -991,7 +991,7 @@
                     (setq pt nil))
                   (progn
                     (ts-ac-fast-begin tbl)
-                    (ts-ac-title tbl 0 (car sec) nc)
+                    (ts-ac-title tbl 0 (strcat "{\\fArial|b1|i0|c0|p34;" (car sec) "}") nc)
                     (ts-ac-header tbl 1 (car rows))
                     (setq tot (last rows))
                     (setq k 2)
