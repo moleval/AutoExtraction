@@ -39,6 +39,7 @@ AutoExtraction/
 │   ├── mark_logic_test.py     # Логика марок (Python)
 │   ├── layer_filter_logic_test.py  # Логика фильтров слоёв (Python)
 │   ├── fill_allowance_test.py # Признак блока заполнения и припуск (Python)
+│   ├── search_count_test.py   # Размеры «в свету» и припуск в Подсчёте поиска (Python)
 │   ├── nesting_benchmark.py   # Сверка качества раскроя с независимым раскладчиком (Python)
 │   ├── unit-tests.lsp         # Unit-тесты в AutoCAD (AE_TEST)
 │   ├── validation-test.lsp    # Парсер и предикаты валидации (V1/V2)

@@ -598,8 +598,10 @@
 
 ;; ============================================================
 ;; Подсчёт: погонаж (м.п.) и площадь (м2) — отдельное окно «Подсчёт»
-;; Погонаж — свойство «Длина» (без номера). Площадь — «Высота» и «Ширина»
-;; (без номера); если «Ширины» нет, берётся «Длина». Регистр не важен.
+;; Погонаж — свойство «Длина» (без номера). Площадь — «Высота в свету» и «Ширина в свету»,
+;; затем «Высота» и «Ширина» (без номера); если «Ширины» нет, берётся «Длина».
+;; Блоки с именем по маскам «Заполнени*», «Стекло*» получают припуск на раму (настройка).
+;; Регистр не важен.
 ;; Размеры округляются до миллиметров; группы — по размерам и марке.
 ;; ============================================================
 
@@ -644,13 +646,53 @@
     nil)
 )
 
-;; Размер вставки: ("A" высота ширина) — площадь; ("L" длина nil) — погонаж; nil — размера нет
-(defun ae-sv-size-of (rec / h w l)
-  (setq h (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Высота")))
-        w (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Ширина")))
+;; Ключи размеров для площади — цепочка ЗАПОЛНЕНИЯ (zapolnenie.lsp): сначала размер «в свету»,
+;; затем обычные параметры. Совпадение точное, регистр не важен: «Высота1» не берётся.
+(setq *ae-sv-height-keys* (quote ("Высота в свету" "Высота")))
+(setq *ae-sv-width-keys*  (quote ("Ширина в свету" "Ширина" "Длина")))
+;; Блоки, к размерам которых добавляется припуск на раму (маски, регистр не важен)
+(setq *ae-sv-frame-masks* (quote ("Заполнени*" "Стекло*")))
+(setq *ae-sv-allowance-default* 26)
+
+;; Припуск на раму: настройка task.ZAPOLNENIE / input.frame.allowance, иначе 26
+(defun ae-sv-allowance (/ v)
+  (setq v (if (= (type ae-settings-frame-allowance) (quote SUBR))
+            (ae-settings-frame-allowance)
+            nil))
+  (if (and (numberp v) (>= v 0)) v *ae-sv-allowance-default*)
+)
+
+;; Имя блока (эффективное) подходит под одну из масок припуска
+(defun ae-sv-frame-p (rec / hit)
+  (setq hit nil)
+  (foreach m *ae-sv-frame-masks*
+    (if (and (null hit) (ae-sv-match (nth 1 rec) m))
+      (setq hit T)))
+  hit
+)
+
+;; Первый положительный размер в миллиметрах по списку ключей, либо nil
+(defun ae-sv-dim-of (rec keys / hit)
+  (setq hit nil)
+  (foreach k keys
+    (if (null hit)
+      (setq hit (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec k))))))
+  hit
+)
+
+;; Размер вставки: ("A" высота ширина) — площадь; ("L" длина nil) — погонаж; nil — размера нет.
+;; Припуск добавляется к высоте и ширине блоков по маскам, только для площади.
+(defun ae-sv-size-of (rec / h w l add)
+  (setq h (ae-sv-dim-of rec *ae-sv-height-keys*)
+        w (ae-sv-dim-of rec *ae-sv-width-keys*)
         l (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Длина"))))
+  (if (and h (ae-sv-frame-p rec))
+    (progn
+      (setq add (ae-sv-allowance))
+      (setq h (+ h add))
+      (if w (setq w (+ w add)))))
   (cond
-    ((and h (or w l)) (list "A" h (if w w l)))
+    ((and h w) (list "A" h w))
     (l (list "L" l nil))
     (T nil))
 )

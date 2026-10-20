@@ -1669,6 +1669,36 @@ def check_fill_allowance() -> list[str]:
     return errors
 
 
+def check_search_count() -> list[str]:
+    """Подсчёт окна поиска: размеры «в свету» и припуск по маскам.
+
+    Инварианты:
+    1. площадь берёт «Высота в свету» / «Ширина в свету» раньше обычных
+       имён — та же цепочка, что у ЗАПОЛНЕНИЯ;
+    2. припуск берётся из настроек задачи ЗАПОЛНЕНИЕ (ae-settings-frame-allowance)
+       и применяется только к блокам по маскам «Заполнени*», «Стекло*»;
+    3. размеры считаются через общую функцию ae-sv-size-of, которую используют
+       и таблица, и окно «Подсчёт».
+    """
+    errors: list[str] = []
+    sv = ROOT / "Extraction/searchattvis.lsp"
+    if not sv.exists():
+        return errors
+    text = read_text(sv)
+    for need, what in (
+        ('(quote ("Высота в свету" "Высота"))', "нет приоритета «Высота в свету» для площади"),
+        ('(quote ("Ширина в свету" "Ширина" "Длина"))', "нет приоритета «Ширина в свету» для площади"),
+        ('(quote ("Заполнени*" "Стекло*"))', "нет масок припуска «Заполнени*», «Стекло*»"),
+        ("(defun ae-sv-allowance", "нет доступа к припуску"),
+        ("(ae-settings-frame-allowance)", "припуск не берётся из настроек задачи ЗАПОЛНЕНИЕ"),
+        ("(defun ae-sv-frame-p", "нет проверки имени блока по маскам припуска"),
+        ("(ae-sv-frame-p rec)", "припуск не применяется в ae-sv-size-of"),
+    ):
+        if need not in text:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+    return errors
+
+
 def check_summary_marks() -> list[str]:
     """Колонка «Марка» в перечне изделий не меняет геометрию отчётов.
 
@@ -1834,6 +1864,7 @@ def main() -> int:
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
     errors += check_fill_allowance()
+    errors += check_search_count()
     errors += check_summary_marks()
     errors += check_xls_marks_guard()
 
@@ -1853,7 +1884,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
-        f" / mark-labels / fill-allowance / summary-marks"
+        f" / mark-labels / fill-allowance / search-count / summary-marks"
     )
     print("RESULT: PASS")
     return 0
