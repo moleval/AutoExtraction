@@ -436,8 +436,13 @@
 (defun ae-sv-refresh (/ qa qb sel-b sel-i entries rows1 rows2)
   (setq qa (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
   (setq qb (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
-  (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
-  (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))
+  (if *ae-sv-pend*
+    (progn
+      (setq sel-b (car *ae-sv-pend*) sel-i (cadr *ae-sv-pend*))
+      (setq *ae-sv-pend* nil))
+    (progn
+      (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
+      (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))))
   (setq entries (ae-sv-entries qa qb))
   (setq rows1 (ae-sv-list1 entries sel-i))
   (setq rows2 (ae-sv-list2 entries sel-b))
@@ -450,11 +455,14 @@
   (ae-sv-fill "lst_blocks" rows1 sel-b)
   (ae-sv-fill "lst_items" rows2 sel-i)
   (set_tile "txt_status"
-    (strcat "Блоков: " (itoa (length rows1)) ", "
-            (if (= *ae-sv-mode* "attr") "атрибутов: " "видимостей: ")
-            (itoa (length rows2)) ", вставок: "
-            (itoa (length (ae-sv-unique (mapcar 'caddr entries))))
-            ". Область: " *ae-sv-scope-text*))
+    (if (or sel-b sel-i)
+      (ae-sv-status-text sel-b sel-i rows1 rows2)
+      (strcat "Блоков: " (itoa (length rows1)) ", "
+              (if (= *ae-sv-mode* "attr") "атрибутов: " "видимостей: ")
+              (itoa (length rows2)) ", вставок: "
+              (itoa (length (ae-sv-unique (mapcar 'caddr entries))))
+              ". Область: " *ae-sv-scope-text*)))
+  (ae-sv-panel-update sel-b sel-i)
   T
 )
 
@@ -510,10 +518,19 @@
               (setq *ae-sv-result* (list ss sel-n skipped))
               (done_dialog 1))))))))
 
-(defun ae-sv-init ()
+(defun ae-sv-init (/ r)
   (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
   (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "attr") "0" "1"))
   (ae-sv-set-hints)
+  (set_tile "tgl_count" (if *ae-sv-count-on* "1" "0"))
+  (ae-sv-count-mode)
+  (if *ae-sv-restore*
+    (progn
+      (setq r *ae-sv-restore*)
+      (if (/= (caddr r) "") (set_tile "edt_query" (caddr r)))
+      (if (/= (cadddr r) "") (set_tile "edt_value" (cadddr r)))
+      (setq *ae-sv-pend* (list (car r) (cadr r)))
+      (setq *ae-sv-restore* nil)))
   (ae-sv-refresh)
 )
 
@@ -532,6 +549,9 @@
   (action_tile "lst_blocks" "(ae-sv-refresh)")
   (action_tile "lst_items" "(ae-sv-refresh)")
   (action_tile "btn_select" "(ae-sv-on-pick)")
+  (action_tile "tgl_count" "(ae-sv-on-toggle)")
+  (action_tile "btn_copy" "(ae-sv-cnt-copy)")
+  (action_tile "btn_acad" "(ae-sv-on-acad)")
   (action_tile "btn_reset" "(ae-sv-reset)")
   (action_tile "btn_cancel" "(done_dialog 0)")
 )
@@ -566,11 +586,333 @@
             (ae-sv-wire)
             (start_dialog)
             (unload_dialog dcl-id)
+            (if (equal *ae-sv-next* "acad")
+              (progn
+                (setq *ae-sv-next* nil)
+                (ae-sv-acad-tables)
+                (ae-sv-open)))
             T)
           (progn
             (unload_dialog dcl-id)
             (alert "Не удалось открыть окно поиска.")
             nil))))))
+
+;; ============================================================
+;; Подсчёт: погонаж (м.п.) и площадь (м2) — панель внутри окна поиска
+;; Погонаж — свойство «Длина» (без номера). Площадь — «Высота» и «Ширина»
+;; (без номера); если «Ширины» нет, берётся «Длина». Регистр не важен.
+;; Размеры округляются до миллиметров; группы — по размерам и марке.
+;; ============================================================
+
+(setq *ae-sv-next* nil)         ; "acad" — таблица AutoCAD (после закрытия окна поиска)
+(setq *ae-sv-restore* nil)      ; (блоки пункты запрос1 запрос2) — восстановить после закрытия
+(setq *ae-sv-pend* nil)         ; (блоки пункты) — применить при следующем обновлении
+(setq *ae-sv-count-on* nil)     ; галочка «Подсчёт»
+(setq *ae-sv-panel-secs* nil)   ; разделы панели: (заголовок строки)
+(setq *ae-sv-panel-rows* nil)   ; строки панели (списки полей) — для копирования
+
+;; Значение динамического свойства с точным именем (без учёта регистра) или nil
+(defun ae-sv-prop-exact (rec name / hit)
+  (setq hit nil)
+  (foreach p (nth 5 rec)
+    (if (and (null hit) (= (strcase (ae-sv-trim (car p))) (strcase name)))
+      (setq hit (cdr p))))
+  hit
+)
+
+;; Значение атрибута «Марка» (без учёта регистра) или ""
+(defun ae-sv-marka (rec / hit)
+  (setq hit nil)
+  (foreach a (nth 3 rec)
+    (if (and (null hit) (= (strcase (ae-sv-trim (car a))) (strcase "Марка")))
+      (setq hit (cdr a))))
+  (if hit (ae-sv-trim hit) "")
+)
+
+;; Число из строки или nil
+(defun ae-sv-num (s)
+  (if (and (= (type s) 'STR) (/= s ""))
+    (distof s 2)
+    nil)
+)
+
+;; Округление до миллиметров; 0, отрицательные и nil — nil
+(defun ae-sv-mm (v / r)
+  (if v
+    (progn
+      (setq r (fix (+ v 0.5)))
+      (if (> r 0) r nil))
+    nil)
+)
+
+;; Размер вставки: ("A" высота ширина) — площадь; ("L" длина nil) — погонаж; nil — размера нет
+(defun ae-sv-size-of (rec / h w l)
+  (setq h (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Высота")))
+        w (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Ширина")))
+        l (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Длина"))))
+  (cond
+    ((and h (or w l)) (list "A" h (if w w l)))
+    (l (list "L" l nil))
+    (T nil))
+)
+
+;; Группы: ((вид марка размер1 размер2) . количество); nosize — вставки без размера
+(defun ae-sv-calc (recs / groups nosize sz key hit)
+  (setq groups '() nosize 0)
+  (foreach r recs
+    (setq sz (ae-sv-size-of r))
+    (if (null sz)
+      (setq nosize (1+ nosize))
+      (progn
+        (setq key (list (car sz) (ae-sv-marka r) (cadr sz) (caddr sz)))
+        (setq hit (assoc key groups))
+        (if hit
+          (setq groups (subst (cons key (1+ (cdr hit))) hit groups))
+          (setq groups (cons (cons key 1) groups))))))
+  (list groups nosize)
+)
+
+;; Размер группы для сортировки: длина (мм) или площадь (мм2)
+(defun ae-sv-gsize (key)
+  (if (= (car key) "A")
+    (* (caddr key) (cadddr key))
+    (caddr key))
+)
+
+;; Группы одного вида по убыванию размера; при равенстве — по марке, затем по количеству
+(defun ae-sv-sorted (groups kind)
+  (vl-sort
+    (vl-remove-if-not '(lambda (g) (= (car (car g)) kind)) groups)
+    '(lambda (a b / sa sb)
+       (setq sa (ae-sv-gsize (car a)) sb (ae-sv-gsize (car b)))
+       (cond
+         ((/= sa sb) (> sa sb))
+         ((/= (strcase (cadr (car a))) (strcase (cadr (car b))))
+          (< (strcase (cadr (car a))) (strcase (cadr (car b)))))
+         (T (> (cdr a) (cdr b)))))
+  )
+)
+
+(defun ae-sv-blanks (n / out)
+  (setq out '())
+  (repeat n (setq out (cons "" out)))
+  out
+)
+
+;; Строка «Всего:»: подпись в первой колонке, количество и сумма — в последних двух
+(defun ae-sv-total-row (cols cnt sum)
+  (append (list "Всего:") (ae-sv-blanks (- (length cols) 3))
+          (list (itoa cnt) (rtos sum 2 2)))
+)
+
+;; Раздел: (заголовок строки). Строки: заголовок колонок, «Всего», позиции.
+;; Колонки: № | [Марка] | Длина, мм | Кол-во | Сумма, м.п.  или  № | [Марка] | Высота | Ширина | Кол-во | Сумма, м2
+(defun ae-sv-section (title sorted kind / mk cols rows i cnt sum g n d1 d2 m)
+  (setq mk nil cnt 0 sum 0.0 i 0 rows '())
+  (foreach g sorted
+    (if (/= (cadr (car g)) "") (setq mk T))
+    (setq n (cdr g) d1 (caddr (car g)) d2 (cadddr (car g)))
+    (setq cnt (+ cnt n))
+    (setq sum (+ sum (if (= kind "A") (/ (* d1 d2 n) 1000000.0) (/ (* d1 n) 1000.0)))))
+  (setq cols
+    (if (= kind "A")
+      (if mk
+        (list "№" "Марка" "Высота" "Ширина" "Кол-во" "Сумма, м2")
+        (list "№" "Высота" "Ширина" "Кол-во" "Сумма, м2"))
+      (if mk
+        (list "№" "Марка" "Длина, мм" "Кол-во" "Сумма, м.п.")
+        (list "№" "Длина, мм" "Кол-во" "Сумма, м.п."))))
+  (setq rows (list cols (ae-sv-total-row cols cnt sum)))
+  (foreach g sorted
+    (setq i (1+ i) m (cadr (car g)) d1 (caddr (car g)) d2 (cadddr (car g)) n (cdr g))
+    (setq rows
+      (append rows
+        (list
+          (if (= kind "A")
+            (append (list (itoa i)) (if mk (list m) '())
+                    (list (itoa d1) (itoa d2) (itoa n) (rtos (/ (* d1 d2 n) 1000000.0) 2 2)))
+            (append (list (itoa i)) (if mk (list m) '())
+                    (list (itoa d1) (itoa n) (rtos (/ (* d1 n) 1000.0) 2 2))))))))
+  (list title rows)
+)
+
+;; Разделы по данным вставок: сначала погонаж, затем площадь
+(defun ae-sv-build-sections (recs / c groups lin area secs)
+  (setq c (ae-sv-calc recs) groups (car c) secs '())
+  (setq lin (ae-sv-sorted groups "L") area (ae-sv-sorted groups "A"))
+  (if lin (setq secs (cons (ae-sv-section "Погонаж, м.п." lin "L") secs)))
+  (if area (setq secs (cons (ae-sv-section "Площадь, м2" area "A") secs)))
+  (reverse secs)
+)
+
+(defun ae-sv-skip-rec (r) (ae-sv-layer-skip-p (car r)))
+
+;; Вставки выбора: пересечение выбранных блоков и пунктов; замороженные/выключенные слои — нет
+(defun ae-sv-count-recs (sel-b sel-i / ens ss)
+  (setq ens (if (or sel-b sel-i) (ae-sv-final *ae-sv-entries* sel-b sel-i) nil))
+  (setq ss (ssadd))
+  (foreach en ens (ssadd en ss))
+  (vl-remove-if 'ae-sv-skip-rec
+    (vl-remove-if-not '(lambda (r) (ssmemb (car r) ss)) *ae-sv-inserts*))
+)
+
+(defun ae-sv-join-sep (lst sep / s first)
+  (setq s "" first T)
+  (foreach x lst
+    (if first
+      (setq s x first nil)
+      (setq s (strcat s sep x))))
+  s
+)
+
+;; Полный текст выбранных строк (с количеством) для строки состояния
+(defun ae-sv-status-text (sel-b sel-i rows1 rows2 / out)
+  (setq out '())
+  (foreach s sel-b
+    (setq out (cons (strcat s " (" (itoa (length (cdr (assoc s rows1)))) ")") out)))
+  (foreach s sel-i
+    (setq out (cons (strcat s " (" (itoa (length (cdr (assoc s rows2)))) ")") out)))
+  (ae-sv-join-sep (reverse out) "; ")
+)
+
+;; Строка панели: поля через табуляцию (колонки списка lst_count)
+(defun ae-sv-row-tab (fields)
+  (ae-sv-join-sep fields (chr 9))
+)
+
+;; Панель подсчёта под списками. Выбор блока сужает данные; галочка выключена — заглушка
+(defun ae-sv-panel-update (sel-b sel-i / rows secs)
+  (setq rows '() secs '())
+  (cond
+    ((null *ae-sv-count-on*)
+     (setq rows (list (list "Подсчёт выключен"))))
+    ((null sel-b)
+     (setq rows (list (list "Выберите блок в списке слева"))))
+    (T
+     (setq secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)))
+     (if (null secs)
+       (setq rows (list (list (if (= (length sel-b) 1)
+                                (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
+                                "У выбранных блоков нет погонажа или площади"))))
+       (foreach sec secs
+         (setq rows (append rows (list (list (car sec))) (cadr sec)))))))
+  (setq *ae-sv-panel-secs* secs)
+  (setq *ae-sv-panel-rows* rows)
+  (start_list "lst_count")
+  (foreach r rows (add_list (ae-sv-row-tab r)))
+  (end_list)
+)
+
+;; Режим кнопок копирования и таблицы: доступны только при включённом подсчёте
+(defun ae-sv-count-mode ()
+  (mode_tile "btn_copy" (if *ae-sv-count-on* 0 1))
+  (mode_tile "btn_acad" (if *ae-sv-count-on* 0 1))
+)
+
+(defun ae-sv-on-toggle ()
+  (setq *ae-sv-count-on* (= (get_tile "tgl_count") "1"))
+  (ae-sv-count-mode)
+  (ae-sv-panel-update (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
+                      (ae-sv-selected "lst_items" *ae-sv-rows2*))
+)
+
+;; Запомнить выбор и запрос перед закрытием окна (для таблицы и восстановления)
+(defun ae-sv-snapshot ()
+  (list (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
+        (ae-sv-selected "lst_items" *ae-sv-rows2*)
+        (ae-sv-field "edt_query" (car (ae-sv-hints)))
+        (ae-sv-field "edt_value" (cadr (ae-sv-hints))))
+)
+
+(defun ae-sv-on-acad ()
+  (setq *ae-sv-restore* (ae-sv-snapshot))
+  (setq *ae-sv-next* "acad")
+  (done_dialog 3)
+)
+
+;; Текст панели для буфера обмена: строки через CRLF, поля через табуляцию
+(defun ae-sv-cnt-text (rows / out)
+  (setq out "")
+  (foreach r rows
+    (setq out (strcat out (ae-sv-row-tab r) (chr 13) (chr 10))))
+  out
+)
+
+;; Запись в буфер обмена через htmlfile (COM, без внешних программ)
+(defun ae-sv-clip (txt / ie win)
+  (setq ie (vlax-create-object "htmlfile"))
+  (setq win (vlax-get ie 'parentWindow))
+  (vlax-invoke (vlax-get win 'clipboardData) 'setData "Text" txt)
+  T
+)
+
+(defun ae-sv-cnt-copy (/ r)
+  (if (null *ae-sv-panel-secs*)
+    (set_tile "txt_status" "Нет данных для копирования.")
+    (progn
+      (setq r (vl-catch-all-apply 'ae-sv-clip (list (ae-sv-cnt-text *ae-sv-panel-rows*))))
+      (if (and (not (vl-catch-all-error-p r)) r)
+        (set_tile "txt_status" "Подсчёт скопирован в буфер обмена (вставьте в Excel: Ctrl+V).")
+        (set_tile "txt_status" "Буфер обмена недоступен."))))
+)
+
+;; Ширина колонки по самой длинной строке
+(defun ae-sv-colw (rows c / w)
+  (setq w 0)
+  (foreach r rows
+    (if (and (nth c r) (> (strlen (nth c r)) w)) (setq w (strlen (nth c r)))))
+  (+ 6.0 (* 2.2 w))
+)
+
+;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая
+(defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot)
+  (if (null *ae-sv-panel-secs*)
+    (princ "\nНет данных для таблицы: выберите блоки с погонажом или площадью.")
+    (progn
+      (setq pt (getpoint "\nТочка вставки таблицы подсчёта: "))
+      (if pt
+        (progn
+          (vl-load-com)
+          (setq doc (vla-get-activedocument (vlax-get-acad-object)))
+          (setq space (vla-get-modelspace doc))
+          (vla-startundomark doc)
+          (foreach sec *ae-sv-panel-secs*
+            (if pt
+              (progn
+                (setq rows (cadr sec)
+                      nr (1+ (length rows))
+                      nc (length (car rows)))
+                (setq tbl (vl-catch-all-apply 'vla-addtable
+                            (list space (vlax-3d-point (trans pt 1 0)) nr nc 10.0 50.0)))
+                (if (vl-catch-all-error-p tbl)
+                  (progn
+                    (princ (strcat "\nОшибка создания таблицы: " (vl-catch-all-error-message tbl)))
+                    (setq pt nil))
+                  (progn
+                    (ts-ac-fast-begin tbl)
+                    (ts-ac-title tbl 0 (car sec) nc)
+                    (ts-ac-header tbl 1 (car rows))
+                    (setq tot (cadr rows))
+                    (ts-ac-total tbl 2 (car tot) 0 (- nc 3) 4)
+                    (vla-SetText tbl 2 (- nc 2) (nth (- nc 2) tot))
+                    (vla-SetText tbl 2 (- nc 1) (nth (- nc 1) tot))
+                    (setq k 3)
+                    (foreach r (cddr rows)
+                      (setq c 0)
+                      (foreach f r
+                        (vla-SetText tbl k c f)
+                        (setq c (1+ c)))
+                      (setq k (1+ k)))
+                    (setq c 0)
+                    (repeat nc
+                      (vla-SetColumnWidth tbl c (ae-sv-colw rows c))
+                      (setq c (1+ c)))
+                    (ts-ac-fast-end tbl)
+                    (setq pt (tu-next-table-point pt nr 10.0 10.0)))))))
+          (vla-endundomark doc)
+          (princ "\nТаблица подсчёта создана.")))))
+  (princ)
+)
 
 ;; ============================================================
 ;; Команда
@@ -681,4 +1023,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP — ред. 2: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.
+;; SEARCHATTVIS.LSP — ред. 3: поиск по атрибутам и видимостям. Команды: ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.

@@ -92,7 +92,7 @@ searchattvis_dialog : dialog {
           key = "lst_blocks";
           multiple_select = true;
           width = 62;
-          height = 14;
+          height = 12;
           fixed_width = true;
           fixed_height = true;
         }
@@ -109,16 +109,33 @@ searchattvis_dialog : dialog {
           key = "lst_items";
           multiple_select = true;
           width = 62;
-          height = 14;
+          height = 12;
           fixed_width = true;
           fixed_height = true;
         }
       }
     }
 
-    : text {
-      key = "txt_status";
-      label = "";
+    : row {
+      alignment = left;
+      : text {
+        key = "txt_status";
+        label = "";
+        width = 100;
+        fixed_width = true;
+      }
+      : toggle {
+        key = "tgl_count";
+        label = "Подсчёт";
+      }
+    }
+    : list_box {
+      key = "lst_count";
+      width = 124;
+      height = 6;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "10 32 54 76 100";
     }
 
     : row {
@@ -129,6 +146,18 @@ searchattvis_dialog : dialog {
         label = "Выбрать";
         fixed_width = true;
         width = 16;
+      }
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
       }
 
       : button {
