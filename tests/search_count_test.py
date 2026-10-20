@@ -170,6 +170,62 @@ def scenario_rounding():
           size_of("Заполнение в витраж", props) == ("A", 776, 1001))
 
 
+# ---------------------------------------------------------------
+# Порт: раздел таблицы («Всего» последней строкой) и строка состояния
+# ---------------------------------------------------------------
+
+def section_rows(title, positions):
+    """ae-sv-section: [заголовок, позиции..., «Всего»]; positions — (марка, d1, d2, n)."""
+    area = "м2" in title
+    cnt = sum(p[3] for p in positions)
+    if area:
+        total_sum = sum(p[1] * p[2] * p[3] / 1000000.0 for p in positions)
+        head = ["№", "Высота", "Ширина", "Кол-во", "Сумма, м2"]
+    else:
+        total_sum = sum(p[1] * p[3] / 1000.0 for p in positions)
+        head = ["№", "Длина, мм", "Кол-во", "Сумма, м.п."]
+    rows = [head]
+    for i, p in enumerate(positions, 1):
+        if area:
+            rows.append([str(i), str(p[1]), str(p[2]), str(p[3]), "%.2f" % (p[1] * p[2] * p[3] / 1000000.0)])
+        else:
+            rows.append([str(i), str(p[1]), str(p[3]), "%.2f" % (p[1] * p[3] / 1000.0)])
+    total = ["Всего:"] + [""] * (len(head) - 3) + [str(cnt), "%.2f" % total_sum]
+    rows.append(total)
+    return rows
+
+
+def totals_text(sections):
+    """ae-sv-totals-text: «Всего: N шт. S м.п.» / «... S м2», разделы через «; »."""
+    if not sections:
+        return "Всего: 0 шт."
+    out = ""
+    for title, rows in sections:
+        tot = rows[-1]
+        unit = "м.п." if "м.п." in title else "м2"
+        out += ("Всего: " if out == "" else "; ") + tot[-2] + " шт. " + tot[-1] + " " + unit
+    return out
+
+
+def scenario_layout():
+    print("\n--- Подсчёт: «Всего» внизу, строка состояния — итоги ---")
+    lin = section_rows("Погонаж, м.п.", [("", 1500, 0, 6), ("", 900, 0, 8)])
+    check("«Всего:» — последняя строка раздела",
+          lin[-1][0] == "Всего:" and lin[0][0] == "№")
+    check("позиции нумеруются с 1, «Всего» без номера",
+          [r[0] for r in lin[1:-1]] == ["1", "2"] and lin[-1][0] == "Всего:")
+    area = section_rows("Площадь, м2", [("", 1200, 600, 5)])
+    check("площадь: «Всего» последней, сумма 3.60",
+          area[-1][-1] == "3.60" and area[-1][-2] == "5")
+    check("строка состояния: итоги погонажа",
+          totals_text([("Погонаж, м.п.", lin)]) == "Всего: 14 шт. 16.20 м.п.")
+    check("строка состояния: погонаж и площадь через «; »",
+          totals_text([("Погонаж, м.п.", lin), ("Площадь, м2", area)])
+          == "Всего: 14 шт. 16.20 м.п.; 5 шт. 3.60 м2")
+    check("строка состояния без данных — «Всего: 0 шт.»",
+          totals_text([]) == "Всего: 0 шт.")
+
+
 def main():
     print("=== Тест размеров «Подсчёта» (поиск) ===")
     scenario_inch_glass()
@@ -180,6 +236,7 @@ def main():
     scenario_no_mask_no_allowance()
     scenario_mask_case()
     scenario_rounding()
+    scenario_layout()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[SEARCH][OK]")

@@ -746,7 +746,7 @@
           (list (itoa cnt) (rtos sum 2 2)))
 )
 
-;; Раздел: (заголовок строки). Строки: заголовок колонок, «Всего», позиции.
+;; Раздел: (заголовок строки). Строки: заголовок колонок, позиции, «Всего» последней.
 ;; Колонки: № | [Марка] | Длина, мм | Кол-во | Сумма, м.п.  или  № | [Марка] | Высота | Ширина | Кол-во | Сумма, м2
 (defun ae-sv-section (title sorted kind / mk cols rows i cnt sum g n d1 d2 m)
   (setq mk nil cnt 0 sum 0.0 i 0 rows '())
@@ -763,7 +763,7 @@
       (if mk
         (list "№" "Марка" "Длина, мм" "Кол-во" "Сумма, м.п.")
         (list "№" "Длина, мм" "Кол-во" "Сумма, м.п."))))
-  (setq rows (list cols (ae-sv-total-row cols cnt sum)))
+  (setq rows (list cols))
   (foreach g sorted
     (setq i (1+ i) m (cadr (car g)) d1 (caddr (car g)) d2 (cadddr (car g)) n (cdr g))
     (setq rows
@@ -774,6 +774,7 @@
                     (list (itoa d1) (itoa d2) (itoa n) (rtos (/ (* d1 d2 n) 1000000.0) 2 2)))
             (append (list (itoa i)) (if mk (list m) '())
                     (list (itoa d1) (itoa n) (rtos (/ (* d1 n) 1000.0) 2 2))))))))
+  (setq rows (append rows (list (ae-sv-total-row cols cnt sum))))
   (list title rows)
 )
 
@@ -821,11 +822,6 @@
   (ae-sv-join-sep fields (chr 9))
 )
 
-;; Полный текст строки для строки состояния окна «Подсчёт»: пустые поля пропускаются
-(defun ae-sv-row-text (fields)
-  (ae-sv-join-sep (vl-remove-if '(lambda (x) (= x "")) fields) " | ")
-)
-
 ;; Данные окна «Подсчёт» по выбранным блокам (и пунктам): строки списка и разделы
 (defun ae-sv-cnt-data (sel-b sel-i / rows secs)
   (setq rows '() secs '())
@@ -843,6 +839,21 @@
   (setq *ae-sv-cnt-rows* rows)
 )
 
+;; Строка состояния окна «Подсчёт»: итоги разделов — «Всего: N шт. S м.п.» или «... S м2»;
+;; при двух разделах — через «; ». Без данных — «Всего: 0 шт.»
+(defun ae-sv-totals-text (secs / out tot)
+  (if (null secs)
+    "Всего: 0 шт."
+    (progn
+      (setq out "")
+      (foreach sec secs
+        (setq tot (last (cadr sec)))
+        (setq out (strcat out (if (= out "") "Всего: " "; ")
+                          (nth (- (length tot) 2) tot) " шт. "
+                          (last tot) " "
+                          (if (vl-string-search "м.п." (car sec)) "м.п." "м2"))))
+      out)))
+
 ;; Запомнить выбор и запрос перед закрытием окна поиска
 (defun ae-sv-snapshot ()
   (list (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
@@ -857,13 +868,6 @@
   (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
   (setq *ae-sv-next* "count")
   (done_dialog 4)
-)
-
-;; Выбор строки окна «Подсчёт»: полный текст в строке состояния окна
-(defun ae-sv-cnt-pick (/ idx)
-  (setq idx (car (ae-sv-indices (get_tile "lst_count"))))
-  (if (and idx (< idx (length *ae-sv-cnt-rows*)))
-    (set_tile "txt_count_status" (ae-sv-row-text (nth idx *ae-sv-cnt-rows*))))
 )
 
 ;; Текст строк для буфера обмена: строки через CRLF, поля через табуляцию
@@ -884,14 +888,13 @@
 
 (defun ae-sv-cnt-copy (/ r)
   (if (null *ae-sv-cnt-secs*)
-    (set_tile "txt_count_status" "Нет данных для копирования.")
+    (princ "\nПодсчёт: нет данных для копирования.")
     (progn
       (setq r (vl-catch-all-apply 'ae-sv-clip (list (ae-sv-cnt-text *ae-sv-cnt-rows*))))
-      (set_tile "txt_count_status"
-        (if (and (not (vl-catch-all-error-p r)) r)
-          "Скопировано в буфер обмена (вставьте в Excel: Ctrl+V)."
-          "Буфер обмена недоступен.")))
-  )
+      (princ (if (and (not (vl-catch-all-error-p r)) r)
+               "\nПодсчёт: скопировано в буфер обмена (вставьте в Excel: Ctrl+V)."
+               "\nПодсчёт: буфер обмена недоступен."))))
+  (princ)
 )
 
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
@@ -910,8 +913,7 @@
             (start_list "lst_count")
             (foreach r *ae-sv-cnt-rows* (add_list (ae-sv-row-tab r)))
             (end_list)
-            (set_tile "txt_count_status" "")
-            (action_tile "lst_count" "(ae-sv-cnt-pick)")
+            (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))
             (action_tile "btn_copy" "(ae-sv-cnt-copy)")
             (action_tile "btn_acad" "(progn (setq *ae-sv-next* \"table\") (done_dialog 3))")
             (action_tile "btn_count_close" "(progn (setq *ae-sv-next* \"close\") (done_dialog 0))")
@@ -959,17 +961,17 @@
                     (ts-ac-fast-begin tbl)
                     (ts-ac-title tbl 0 (car sec) nc)
                     (ts-ac-header tbl 1 (car rows))
-                    (setq tot (cadr rows))
-                    (ts-ac-total tbl 2 (car tot) 0 (- nc 3) 4)
-                    (vla-SetText tbl 2 (- nc 2) (nth (- nc 2) tot))
-                    (vla-SetText tbl 2 (- nc 1) (nth (- nc 1) tot))
-                    (setq k 3)
-                    (foreach r (cddr rows)
+                    (setq tot (last rows))
+                    (setq k 2)
+                    (foreach r (reverse (cdr (reverse (cdr rows))))
                       (setq c 0)
                       (foreach f r
                         (vla-SetText tbl k c f)
                         (setq c (1+ c)))
                       (setq k (1+ k)))
+                    (ts-ac-total tbl (1- nr) (car tot) 0 (- nc 3) 4)
+                    (vla-SetText tbl (1- nr) (- nc 2) (nth (- nc 2) tot))
+                    (vla-SetText tbl (1- nr) (- nc 1) (nth (- nc 1) tot))
                     (setq c 0)
                     (repeat nc
                       (vla-SetColumnWidth tbl c (ae-sv-colw rows c))
