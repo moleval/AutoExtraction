@@ -958,15 +958,26 @@
 )
 
 ;; Ширина колонки по самой длинной строке
+;; Ширина колонки по самой длинной строке, с запасом (текст не переносится)
 (defun ae-sv-colw (rows c / w)
   (setq w 0)
   (foreach r rows
     (if (and (nth c r) (> (strlen (nth c r)) w)) (setq w (strlen (nth c r)))))
-  (+ 6.0 (* 2.2 w))
+  (+ 8.0 (* 2.8 w))
 )
 
-;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая
-(defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot made)
+;; Выравнивание колонки по тексту заголовка: числа — по центру (5), сумма — вправо (6).
+;; nil — колонка остаётся как есть (№, Марка)
+(defun ae-sv-col-align (head)
+  (cond
+    ((wcmatch head "Сумма*") 6)
+    ((member head (quote ("Высота" "Ширина" "Кол-во" "Длина, мм"))) 5)
+    (T nil))
+)
+
+;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая.
+;; Строка 0 — шапка (без подписи раздела), далее позиции и «Всего:» последней строкой
+(defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot made h al r)
   (if (null *ae-sv-cnt-secs*)
     (alert "Нет данных для таблицы: выберите блоки с погонажом или площадью.")
     (progn
@@ -981,7 +992,7 @@
             (if pt
               (progn
                 (setq rows (cadr sec)
-                      nr (1+ (length rows))
+                      nr (length rows)
                       nc (length (car rows)))
                 (setq tbl (vl-catch-all-apply 'vla-addtable
                             (list space (vlax-3d-point (trans pt 1 0)) nr nc 10.0 50.0)))
@@ -991,10 +1002,9 @@
                     (setq pt nil))
                   (progn
                     (ts-ac-fast-begin tbl)
-                    (ts-ac-title tbl 0 (strcat "{\\fArial|b1|i0|c0|p34;" (car sec) "}") nc)
-                    (ts-ac-header tbl 1 (car rows))
+                    (ts-ac-header tbl 0 (car rows))
                     (setq tot (last rows))
-                    (setq k 2)
+                    (setq k 1)
                     (foreach r (reverse (cdr (reverse (cdr rows))))
                       (setq c 0)
                       (foreach f r
@@ -1004,6 +1014,18 @@
                     (ts-ac-total tbl (1- nr) (car tot) 0 (- nc 3) 4)
                     (vla-SetText tbl (1- nr) (- nc 2) (nth (- nc 2) tot))
                     (vla-SetText tbl (1- nr) (- nc 1) (nth (- nc 1) tot))
+                    ;; выравнивание колонок; в «Всего:» объединены все, кроме последних двух ячеек
+                    (setq c 0)
+                    (foreach h (car rows)
+                      (setq al (ae-sv-col-align h))
+                      (if al
+                        (progn
+                          (setq r 0)
+                          (repeat nr
+                            (if (or (< r (1- nr)) (>= c (- nc 2)))
+                              (vla-SetCellAlignment tbl r c al))
+                            (setq r (1+ r)))))
+                      (setq c (1+ c)))
                     (setq c 0)
                     (repeat nc
                       (vla-SetColumnWidth tbl c (ae-sv-colw rows c))
