@@ -129,24 +129,37 @@
   (substr s 1 (1- i))
 )
 
-(defun ae-reload-plugin-defuns (path / f line name out)
-  ;; Имена (defun ...) из файла плагина; сам файл не интерпретируется.
-  (setq out '())
+(defun ae-reload-plugin-defuns (path / f line lines depths depth name out)
+  ;; Имена (defun ...) верхнего уровня из файла плагина; сам файл не
+  ;; интерпретируется. Вложенные defun (локальные обработчики *error*
+  ;; внутри команд) объявлениями плагина не считаются: для каждой строки
+  ;; проверяется глубина скобок, накопленная к её началу.
+  (setq out '() lines '())
   (if (setq f (open path "r"))
     (progn
       (while (setq line (read-line f))
-        (setq line (ae-settings-trim line))
-        (if (and (> (strlen line) 7) (= (strcase (substr line 1 7)) "(DEFUN "))
-          (progn
-            (setq name (ae-reload-token-end (substr line 8)))
-            (if (> (strlen name) 0)
-              (setq out (cons name out))
-            )
-          )
-        )
+        (setq lines (cons line lines))
       )
       (close f)
     )
+  )
+  (setq lines (reverse lines))
+  (setq depths (ae-reload-line-balances lines))
+  (setq depth 0)
+  (foreach line lines
+    (setq line (ae-settings-trim line))
+    (if (and (= depth 0)
+             (> (strlen line) 7)
+             (= (strcase (substr line 1 7)) "(DEFUN "))
+      (progn
+        (setq name (ae-reload-token-end (substr line 8)))
+        (if (> (strlen name) 0)
+          (setq out (cons name out))
+        )
+      )
+    )
+    (setq depth (car depths))
+    (setq depths (cdr depths))
   )
   out
 )
