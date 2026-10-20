@@ -226,6 +226,47 @@ def scenario_layout():
           totals_text([]) == "Всего: 0 шт.")
 
 
+# ---------------------------------------------------------------
+# Порт: сортировка групп (марка естественно, затем высота и ширина)
+# ---------------------------------------------------------------
+
+def nat_key(mark):
+    """ae-sv-nat-key: цифровые участки дополняются нулями, регистр не важен."""
+    out, run = "", ""
+    for ch in mark.lower():
+        if ch.isdigit():
+            run += ch
+        else:
+            out += (run.zfill(10) if run else "") + ch
+            run = ""
+    return out + (run.zfill(10) if run else "")
+
+
+def sort_area(groups):
+    """ae-sv-sorted для площади: (марка, высота, ширина) по возрастанию."""
+    return sorted(groups, key=lambda g: (nat_key(g[0]), g[1], g[2]))
+
+
+def sort_lin(groups):
+    """ae-sv-sorted для погонажа: (марка, длина) по возрастанию."""
+    return sorted(groups, key=lambda g: (nat_key(g[0]), g[1]))
+
+
+def scenario_sort():
+    print("\n--- Сортировка: марка, затем высота и ширина ---")
+    area = [("М10", 1200, 600), ("М2", 900, 800), ("М2", 900, 500),
+            ("М2", 600, 900), ("", 1000, 1000), ("М1", 2000, 300)]
+    check("площадь: М1, М2 (по высоте, затем ширине), М10; без марки — первой",
+          sort_area(area) == [("", 1000, 1000), ("М1", 2000, 300),
+                              ("М2", 600, 900), ("М2", 900, 500),
+                              ("М2", 900, 800), ("М10", 1200, 600)])
+    lin = [("М10", 1500), ("М2", 900), ("М2", 600)]
+    check("погонаж: М2 (по длине), затем М10",
+          sort_lin(lin) == [("М2", 600), ("М2", 900), ("М10", 1500)])
+    check("«М2» идёт раньше «М10» (не лексикографически)",
+          nat_key("М2") < nat_key("М10"))
+
+
 def main():
     print("=== Тест размеров «Подсчёта» (поиск) ===")
     scenario_inch_glass()
@@ -237,6 +278,7 @@ def main():
     scenario_mask_case()
     scenario_rounding()
     scenario_layout()
+    scenario_sort()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[SEARCH][OK]")

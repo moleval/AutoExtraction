@@ -602,12 +602,13 @@
 ;; затем «Высота» и «Ширина» (без номера); если «Ширины» нет, берётся «Длина».
 ;; Блоки с именем по маскам «Заполнени*», «Стекло*» получают припуск на раму (настройка).
 ;; Регистр не важен.
-;; Размеры округляются до миллиметров; группы — по размерам и марке.
+;; Размеры округляются до миллиметров; группы — по марке, затем по размерам.
 ;; ============================================================
 
 (setq *ae-sv-next* nil)         ; "count" — открыть «Подсчёт»; "table" — таблица; "close" — назад
 (setq *ae-sv-restore* nil)      ; (блоки пункты запрос1 запрос2) — восстановить после закрытия
 (setq *ae-sv-pend* nil)         ; (блоки пункты) — применить при следующем обновлении
+(setq *ae-sv-finished* nil)    ; T — таблица или копирование выполнены: все окна закрыты
 (setq *ae-sv-count-sel* nil)    ; (блоки пункты) — выбор для окна «Подсчёт»
 (setq *ae-sv-cnt-secs* nil)     ; разделы: (заголовок строки)
 (setq *ae-sv-cnt-rows* nil)     ; строки списка окна «Подсчёт» (списки полей)
@@ -713,24 +714,52 @@
   (list groups nosize)
 )
 
-;; Размер группы для сортировки: длина (мм) или площадь (мм2)
-(defun ae-sv-gsize (key)
-  (if (= (car key) "A")
-    (* (caddr key) (cadddr key))
-    (caddr key))
+;; Лексикографическое сравнение строк по кодам символов (AutoLISP сравнивает числа)
+(defun ae-sv-str-less (a b / i na nb res ca cb)
+  (setq na (strlen a) nb (strlen b) i 1 res nil)
+  (while (and (null res) (<= i na) (<= i nb))
+    (setq ca (ascii (substr a i 1)) cb (ascii (substr b i 1)))
+    (cond
+      ((< ca cb) (setq res (quote lt)))
+      ((> ca cb) (setq res (quote gt))))
+    (setq i (1+ i)))
+  (if res (= res (quote lt)) (< na nb))
 )
 
-;; Группы одного вида по убыванию размера; при равенстве — по марке, затем по количеству
+;; Ключ марки для естественного порядка: цифровые участки дополняются нулями,
+;; регистр не важен, поэтому «М2» идёт раньше «М10»
+(defun ae-sv-pad-digits (run)
+  (if (= run "")
+    ""
+    (strcat (substr "0000000000" 1 (max 0 (- 10 (strlen run)))) run))
+)
+
+(defun ae-sv-nat-key (s / out run ch i)
+  (setq s (strcase (ae-sv-str s)) out "" run "" i 1)
+  (while (<= i (strlen s))
+    (setq ch (substr s i 1))
+    (if (and (>= (ascii ch) 48) (<= (ascii ch) 57))
+      (setq run (strcat run ch))
+      (progn
+        (setq out (strcat out (ae-sv-pad-digits run) ch))
+        (setq run "")))
+    (setq i (1+ i)))
+  (strcat out (ae-sv-pad-digits run))
+)
+
+;; Группы одного вида: по марке (естественный порядок), затем по высоте и ширине
+;; (по возрастанию; для погонажа — по длине). Ключ группы: (вид марка размер1 размер2)
 (defun ae-sv-sorted (groups kind)
   (vl-sort
     (vl-remove-if-not '(lambda (g) (= (car (car g)) kind)) groups)
-    '(lambda (a b / sa sb)
-       (setq sa (ae-sv-gsize (car a)) sb (ae-sv-gsize (car b)))
+    '(lambda (a b / ka kb)
+       (setq ka (ae-sv-nat-key (cadr (car a))) kb (ae-sv-nat-key (cadr (car b))))
        (cond
-         ((/= sa sb) (> sa sb))
-         ((/= (strcase (cadr (car a))) (strcase (cadr (car b))))
-          (< (strcase (cadr (car a))) (strcase (cadr (car b)))))
-         (T (> (cdr a) (cdr b)))))
+         ((not (= ka kb)) (ae-sv-str-less ka kb))
+         ((/= (caddr (car a)) (caddr (car b))) (< (caddr (car a)) (caddr (car b))))
+         ((/= (or (cadddr (car a)) 0) (or (cadddr (car b)) 0))
+          (< (or (cadddr (car a)) 0) (or (cadddr (car b)) 0)))
+         (T (ae-sv-str-less (cadr (car a)) (cadr (car b))))))
   )
 )
 
@@ -891,9 +920,12 @@
     (princ "\nПодсчёт: нет данных для копирования.")
     (progn
       (setq r (vl-catch-all-apply 'ae-sv-clip (list (ae-sv-cnt-text *ae-sv-cnt-rows*))))
-      (princ (if (and (not (vl-catch-all-error-p r)) r)
-               "\nПодсчёт: скопировано в буфер обмена (вставьте в Excel: Ctrl+V)."
-               "\nПодсчёт: буфер обмена недоступен."))))
+      (if (and (not (vl-catch-all-error-p r)) r)
+        (progn
+          (princ "\nПодсчёт: скопировано в буфер обмена (вставьте в Excel: Ctrl+V).")
+          (setq *ae-sv-next* "done")
+          (done_dialog 0))
+        (princ "\nПодсчёт: буфер обмена недоступен."))))
   (princ)
 )
 
@@ -934,7 +966,7 @@
 )
 
 ;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая
-(defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot)
+(defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot made)
   (if (null *ae-sv-cnt-secs*)
     (alert "Нет данных для таблицы: выберите блоки с погонажом или площадью.")
     (progn
@@ -977,8 +1009,10 @@
                       (vla-SetColumnWidth tbl c (ae-sv-colw rows c))
                       (setq c (1+ c)))
                     (ts-ac-fast-end tbl)
+                    (setq made T)
                     (setq pt (tu-next-table-point pt nr 10.0 10.0)))))))
           (vla-endundomark doc)
+          (if made (setq *ae-sv-next* "done"))
           (princ "\nТаблица подсчёта создана.")))))
   (princ)
 )
@@ -990,8 +1024,14 @@
   (while (equal *ae-sv-next* "table")
     (ae-sv-count-dialog)
     (if (equal *ae-sv-next* "table") (ae-sv-acad-tables)))
-  (setq *ae-sv-next* nil)
-  (ae-sv-open)
+  (if (equal *ae-sv-next* "done")
+    (progn
+      ;; Таблица или копирование выполнены: окна «Подсчёт» и «Поиск» не открываются снова
+      (setq *ae-sv-next* nil *ae-sv-restore* nil *ae-sv-pend* nil *ae-sv-count-sel* nil)
+      (setq *ae-sv-finished* T))
+    (progn
+      (setq *ae-sv-next* nil)
+      (ae-sv-open)))
 )
 
 ;; ============================================================
@@ -1036,9 +1076,10 @@
 (defun ae-sv-run (mode / )
   (setq *ae-sv-mode* mode)
   (setq *ae-sv-result* nil)
+  (setq *ae-sv-finished* nil)
   (if (and (ae-sv-load-scope) (ae-sv-open))
     (progn
-      (ae-sv-print-lists)
+      (if (not *ae-sv-finished*) (ae-sv-print-lists))
       (if *ae-sv-result*
         (progn
           (sssetfirst nil (nth 0 *ae-sv-result*))
