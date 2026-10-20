@@ -863,7 +863,7 @@
                                  (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
                                  "У выбранных блоков нет погонажа или площади"))))
         (foreach sec secs
-          (setq rows (append rows (list (list (car sec))) (cadr sec)))))))
+          (setq rows (append rows (cadr sec)))))))
   (setq *ae-sv-cnt-secs* secs)
   (setq *ae-sv-cnt-rows* rows)
 )
@@ -958,6 +958,14 @@
 )
 
 ;; Ширина колонки по самой длинной строке
+;; Название выбранных динамических блоков для заголовка таблицы: через «, »
+(defun ae-sv-block-title (names / out)
+  (setq out "")
+  (foreach n names
+    (setq out (strcat out (if (= out "") "" ", ") n)))
+  out
+)
+
 ;; Ширина колонки по самой длинной строке, с запасом (текст не переносится)
 (defun ae-sv-colw (rows c / w)
   (setq w 0)
@@ -976,7 +984,8 @@
 )
 
 ;; Таблица AutoCAD: разделы друг под другом, точка вставки — первая.
-;; Строка 0 — шапка (без подписи раздела), далее позиции и «Всего:» последней строкой
+;; Строка 0 — название блока (жирным), строка 1 — шапка колонок,
+;; далее позиции и «Всего:» последней строкой
 (defun ae-sv-acad-tables (/ pt doc space sec rows nr nc tbl k c tot made h al r)
   (if (null *ae-sv-cnt-secs*)
     (alert "Нет данных для таблицы: выберите блоки с погонажом или площадью.")
@@ -992,7 +1001,7 @@
             (if pt
               (progn
                 (setq rows (cadr sec)
-                      nr (length rows)
+                      nr (1+ (length rows))
                       nc (length (car rows)))
                 (setq tbl (vl-catch-all-apply 'vla-addtable
                             (list space (vlax-3d-point (trans pt 1 0)) nr nc 10.0 50.0)))
@@ -1002,9 +1011,12 @@
                     (setq pt nil))
                   (progn
                     (ts-ac-fast-begin tbl)
-                    (ts-ac-header tbl 0 (car rows))
+                    (ts-ac-title tbl 0
+                      (strcat "{\\fArial|b1|i0|c0|p34;" (ae-sv-block-title (car *ae-sv-count-sel*)) "}")
+                      nc)
+                    (ts-ac-header tbl 1 (car rows))
                     (setq tot (last rows))
-                    (setq k 1)
+                    (setq k 2)
                     (foreach r (reverse (cdr (reverse (cdr rows))))
                       (setq c 0)
                       (foreach f r
@@ -1014,23 +1026,24 @@
                     (ts-ac-total tbl (1- nr) (car tot) 0 (- nc 3) 4)
                     (vla-SetText tbl (1- nr) (- nc 2) (nth (- nc 2) tot))
                     (vla-SetText tbl (1- nr) (- nc 1) (nth (- nc 1) tot))
-                    ;; выравнивание колонок; в «Всего:» объединены все, кроме последних двух ячеек
-                    (setq c 0)
-                    (foreach h (car rows)
-                      (setq al (ae-sv-col-align h))
-                      (if al
-                        (progn
-                          (setq r 0)
-                          (repeat nr
-                            (if (or (< r (1- nr)) (>= c (- nc 2)))
-                              (vla-SetCellAlignment tbl r c al))
-                            (setq r (1+ r)))))
-                      (setq c (1+ c)))
                     (setq c 0)
                     (repeat nc
                       (vla-SetColumnWidth tbl c (ae-sv-colw rows c))
                       (setq c (1+ c)))
                     (ts-ac-fast-end tbl)
+                    ;; выравнивание — уже после снятия подавления перерисовки, по строкам 1..n
+                    ;; (шапка и позиции); в «Всего:» объединены все, кроме последних двух ячеек
+                    (setq c 0)
+                    (foreach h (car rows)
+                      (setq al (ae-sv-col-align h))
+                      (if al
+                        (progn
+                          (setq r 1)
+                          (repeat (1- nr)
+                            (if (or (< r (1- nr)) (>= c (- nc 2)))
+                              (vla-SetCellAlignment tbl r c al))
+                            (setq r (1+ r)))))
+                      (setq c (1+ c)))
                     (setq made T)
                     (setq pt (tu-next-table-point pt nr 10.0 10.0)))))))
           (vla-endundomark doc)
