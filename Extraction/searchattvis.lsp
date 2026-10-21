@@ -929,10 +929,137 @@
   (princ)
 )
 
+;; ============================================================
+;; Окно «Подсчёт»: список — сетка ячеек. Один список для погонажа и площади:
+;;   без марок:  № | Размер 1 | Размер 2 | Кол-во | Сумма
+;;   с марками:  № | Марка | Размер 1 | Размер 2 | Кол-во | Сумма
+;; Размер 1 — «Длина, мм» (погонаж) или «Высота» (площадь); Размер 2 — «Ширина»
+;; (у погонажа пустой). Ширина поля F, символов: ключ n_s / m_s — компактно,
+;; n_l / m_l — широко. Диалог searchattvis_count_<ключ> в DCL задаёт ширину окна и
+;; позиции табуляции по тем же F; сверку делает tests/static_check.py.
+;; ============================================================
+(setq *ae-sv-cnt-fields*
+  (quote (("n_s" 6 9 8 6 11)
+          ("n_l" 7 11 10 8 13)
+          ("m_s" 6 8 9 8 6 11)
+          ("m_l" 7 14 11 10 8 13))))
+
+(defun ae-sv-spaces (n / s)
+  (setq s "")
+  (repeat (max 0 n) (setq s (strcat s " ")))
+  s
+)
+
+;; Номер колонки сетки по заголовку (nil — такой колонки нет)
+(defun ae-sv-cnt-slot (h marks)
+  (cond
+    ((= h "№") 0)
+    ((and marks (= h "Марка")) 1)
+    ((member h (quote ("Длина, мм" "Высота"))) (if marks 2 1))
+    ((= h "Ширина") (if marks 3 2))
+    ((= h "Кол-во") (if marks 4 3))
+    ((wcmatch h "Сумма*") (if marks 5 4))
+    (T nil))
+)
+
+;; Выравнивание колонки: 0 — влево, 1 — по центру, 2 — вправо.
+;; Шапка по центру, кроме «Сумма» (вправо); данные: № и Марка — влево, сумма — вправо.
+(defun ae-sv-cnt-align (slot marks header-p)
+  (cond
+    ((and (not header-p) (or (= slot 0) (and marks (= slot 1)))) 0)
+    ((= slot (if marks 5 4)) 2)
+    (T 1))
+)
+
+;; Ячейка: «| » и текст, выровненный пробелами внутри ширины w
+(defun ae-sv-cnt-field (text w al / n pad)
+  (setq n (strlen text))
+  (setq pad (cond ((= al 1) (/ (- w n) 2)) ((= al 2) (- w n)) (T 0)))
+  (strcat "| " (ae-sv-spaces pad) text)
+)
+
+(defun ae-sv-cnt-put (lst idx val / k out)
+  (setq k 0 out '())
+  (foreach x lst
+    (setq out (cons (if (= k idx) val x) out))
+    (setq k (1+ k)))
+  (reverse out)
+)
+
+;; Строка списка: ячейки по колонкам сетки; разделитель — табуляция; в конце «|»
+(defun ae-sv-cnt-line (cols cells marks key header-p / fw out i k lst slot)
+  (setq fw (cdr (assoc key *ae-sv-cnt-fields*)))
+  (setq out (ae-sv-blanks (length fw)))
+  (setq i 0)
+  (foreach h cols
+    (setq slot (ae-sv-cnt-slot h marks))
+    (if slot (setq out (ae-sv-cnt-put out slot (or (nth i cells) ""))))
+    (setq i (1+ i)))
+  (setq lst '() k 0)
+  (foreach text out
+    (setq lst (cons (strcat (ae-sv-cnt-field text (nth k fw) (ae-sv-cnt-align k marks header-p))
+                            (if (= k (1- (length fw))) " |" ""))
+                    lst))
+    (setq k (1+ k)))
+  (ae-sv-join-sep (reverse lst) (chr 9))
+)
+
+;; Горизонтальная линия по ширине сетки
+(defun ae-sv-cnt-dash (key / fw n s)
+  (setq fw (cdr (assoc key *ae-sv-cnt-fields*)))
+  (setq n (+ 2 (apply '+ (mapcar '(lambda (f) (+ f 2)) fw))))
+  (setq s "")
+  (repeat n (setq s (strcat s "-")))
+  s
+)
+
+(defun ae-sv-cnt-marks-p (secs / hit)
+  (setq hit nil)
+  (foreach sec secs
+    (if (member "Марка" (car (cadr sec))) (setq hit T)))
+  hit
+)
+
+;; Поля всех строк помещаются в поля варианта size (s или l)
+(defun ae-sv-cnt-fits (secs marks size / fw ok cols i slot)
+  (setq fw (cdr (assoc (strcat (if marks "m" "n") "_" size) *ae-sv-cnt-fields*)))
+  (setq ok T)
+  (foreach sec secs
+    (setq cols (car (cadr sec)))
+    (foreach row (cadr sec)
+      (setq i 0)
+      (foreach h cols
+        (setq slot (ae-sv-cnt-slot h marks))
+        (if (and slot (> (strlen (or (nth i row) "")) (nth slot fw))) (setq ok nil))
+        (setq i (1+ i)))))
+  ok
+)
+
+;; Ключ варианта окна: n/m (без марок / с марками) + s/l (компактно / широко)
+(defun ae-sv-cnt-key (secs / marks)
+  (setq marks (ae-sv-cnt-marks-p secs))
+  (strcat (if marks "m" "n") "_" (if (ae-sv-cnt-fits secs marks "s") "s" "l"))
+)
+
+;; Строки сетки: линия сверху, шапка, линия, строки, линия; между разделами — пустая строка
+(defun ae-sv-cnt-display (key / marks dash out cols first)
+  (setq marks (= (substr key 1 1) "m"))
+  (setq dash (ae-sv-cnt-dash key) out (list dash) first T)
+  (foreach sec *ae-sv-cnt-secs*
+    (setq cols (car (cadr sec)))
+    (if (not first) (setq out (append out (list ""))))
+    (setq first nil)
+    (setq out (append out (list (ae-sv-cnt-line cols cols marks key T) dash)))
+    (foreach row (cdr (cadr sec))
+      (setq out (append out (list (ae-sv-cnt-line cols row marks key nil) dash)))))
+  out
+)
+
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
-(defun ae-sv-count-dialog (/ dcl-file dcl-id)
+(defun ae-sv-count-dialog (/ dcl-file dcl-id key)
   (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
   (setq *ae-sv-next* "close")
+  (setq key (ae-sv-cnt-key *ae-sv-cnt-secs*))
   (setq dcl-file (ae-sv-dcl-file))
   (if (null dcl-file)
     (alert "Не найден файл Extraction\\searchattvis.dcl.")
@@ -940,10 +1067,11 @@
       (setq dcl-id (load_dialog dcl-file))
       (if (< dcl-id 0)
         (alert "Не удалось загрузить окно подсчёта.")
-        (if (new_dialog "searchattvis_count" dcl-id)
+        (if (new_dialog (strcat "searchattvis_count_" key) dcl-id)
           (progn
             (start_list "lst_count")
-            (foreach r *ae-sv-cnt-rows* (add_list (ae-sv-row-tab r)))
+            (foreach s (if *ae-sv-cnt-secs* (ae-sv-cnt-display key) (mapcar (quote car) *ae-sv-cnt-rows*))
+              (add_list s))
             (end_list)
             (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))
             (action_tile "btn_copy" "(ae-sv-cnt-copy)")

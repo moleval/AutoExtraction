@@ -155,7 +155,7 @@ searchattvis_dialog : dialog {
   }
 }
 
-searchattvis_count : dialog {
+searchattvis_count_n_s : dialog {
 
   label = "Подсчёт";
 
@@ -164,17 +164,168 @@ searchattvis_count : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 124;
+      width = 216;
       height = 14;
       fixed_width = true;
       fixed_height = true;
-      tabs = "10 32 54 76 100";
+      tabs = "32 76 116 148";
+      tab_truncate = true;
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 124;
+      width = 216;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_n_l : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 252;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "36 88 136 176";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 252;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_m_s : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 256;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "32 72 116 156 188";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 256;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_m_l : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 316;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "36 100 152 200 240";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 316;
       fixed_width = true;
     }
 
