@@ -944,17 +944,33 @@
           (if recs (ae-sv-prop-list-text (nth 5 (car recs))) "нет"))
 )
 
+;; Раздел окна: (заголовок таблица названия) — названия идут в заголовок таблицы
+(defun ae-sv-tag-secs (secs names / out)
+  (setq out '())
+  (foreach s secs
+    (setq out (cons (append s (list names)) out)))
+  (reverse out)
+)
+
 (defun ae-sv-cnt-data (sel-b sel-i / rows secs recs)
   (setq rows '() secs '())
   (if (null sel-b)
     (setq rows (list (list "Выберите блок в списке слева")))
     (progn
-      (setq recs (ae-sv-count-recs sel-b sel-i))
-      (setq secs (ae-sv-build-sections recs))
+      ;; выбрано две и более видимости — отдельная таблица на каждую видимость
+      (if (and (equal *ae-sv-mode* "vis") (> (length sel-i) 1))
+        (foreach st sel-i
+          (setq secs (append secs
+                             (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b (list st)))
+                                             (list st)))))
+        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) sel-b)))
       (if (null secs)
-        (setq rows (list (list (ae-sv-nosize-text sel-b sel-i recs))))
+        (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
-          (setq rows (append rows (cadr sec)))))))
+          (setq rows (append rows
+                             (if rows (list (list "")) '())
+                             (list (list (ae-sv-block-title (caddr sec))))
+                             (cadr sec)))))))
   (setq *ae-sv-cnt-secs* secs)
   (setq *ae-sv-cnt-rows* rows)
 )
@@ -1204,7 +1220,7 @@
               body (cdr (cadr sec))
               items (reverse (cdr (reverse body))))
         (if out (setq out (append out (list ""))))
-        (setq out (append out (ae-sv-cnt-title-rows (car *ae-sv-count-sel*) total)))
+        (setq out (append out (ae-sv-cnt-title-rows (caddr sec) total)))
         (setq out (append out
                           (list (ae-sv-cnt-line widths)
                                 (ae-sv-cnt-row heads (ae-sv-cnt-head-aligns marks) widths)
@@ -1312,7 +1328,7 @@
                   (progn
                     (ts-ac-fast-begin tbl)
                     (ts-ac-title tbl 0
-                      (strcat "{\\fArial|b1|i0|c0|p34;" (ae-sv-block-title (car *ae-sv-count-sel*)) "}")
+                      (strcat "{\\fArial|b1|i0|c0|p34;" (ae-sv-block-title (caddr sec)) "}")
                       nc)
                     (ts-ac-header tbl 1 (car rows))
                     (setq tot (last rows))
