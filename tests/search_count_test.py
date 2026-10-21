@@ -269,11 +269,14 @@ def scenario_sort():
 
 
 # ----------------------------------------------------------------------
-# Карточки окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
+# Таблица окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
 # ----------------------------------------------------------------------
 
-LIST_WIDTH_UNITS = 96   # ширина списка в DCL; ~4 единицы на символ
-MAX_LINE_CHARS = 22     # 22 символа × 4 + запас = 96
+WIDTHS = {"n": [3, 8, 6, 9], "m": [3, 6, 8, 6, 9]}   # *ae-sv-cnt-widths* в lsp
+HEADS = {"n": ["№", "Размеры", "Кол-во", "Всего"],
+         "m": ["№", "Марка", "Размеры", "Кол-во", "Всего"]}
+ALIGNS = {"n": ["l", "c", "c", "r"], "m": ["l", "l", "c", "c", "r"]}
+HEAD_ALIGNS = {"n": ["c", "c", "c", "r"], "m": ["c", "c", "c", "c", "r"]}
 
 
 def cnt_cell(cols, row, name):
@@ -284,72 +287,122 @@ def cnt_unit(cols):
     return "м.п." if "м.п." in cols[-1] else "м2"
 
 
-def cnt_item(cols, row):
-    no = cnt_cell(cols, row, "№")
-    mk = cnt_cell(cols, row, "Марка")
+def cnt_size(cols, row):
     if "Высота" in cols:
-        size = cnt_cell(cols, row, "Высота") + "x" + cnt_cell(cols, row, "Ширина") + " мм"
-    else:
-        size = cnt_cell(cols, row, "Длина, мм") + " мм"
-    first = no + "  " + (mk + "  " if mk else "") + size
-    second = "   " + row[-2] + " шт.  " + row[-1] + " " + cnt_unit(cols)
-    return [first, second]
+        return cnt_cell(cols, row, "Высота") + "x" + cnt_cell(cols, row, "Ширина")
+    return cnt_cell(cols, row, "Длина, мм")
 
 
-def cnt_total(cols, row):
-    return "Всего: " + row[-2] + " шт. " + row[-1] + " " + cnt_unit(cols)
+def cnt_item(cols, row, marks):
+    cells = [cnt_cell(cols, row, "№")]
+    if marks:
+        cells.append(cnt_cell(cols, row, "Марка"))
+    cells += [cnt_size(cols, row), row[-2] + " шт.", row[-1] + " " + cnt_unit(cols)]
+    return cells
+
+
+def cnt_total(cols, row, marks):
+    cells = [""] + ([""] if marks else []) + ["Всего:", row[-2] + " шт.", row[-1] + " " + cnt_unit(cols)]
+    return cells
+
+
+def cnt_pad(text, w, al):
+    n = len(text)
+    pad = (w - n) // 2 if al == "c" else (w - n if al == "r" else 0)
+    return " " * max(0, pad) + text
+
+
+def cnt_row(cells, aligns, widths):
+    parts = ["| " + cnt_pad(c, w, al) for c, al, w in zip(cells, aligns, widths)]
+    return "\t".join(parts + ["|"])
+
+
+def cnt_line(widths):
+    return "\t".join(["+" + "-" * (w + 1) for w in widths] + ["+"])
+
+
+def cnt_marks(secs):
+    return any("Марка" in cols for cols, _ in secs)
 
 
 def cnt_display(secs):
-    out = []
+    marks = cnt_marks(secs)
+    key = "m" if marks else "n"
+    widths = WIDTHS[key]
+    out = [cnt_line(widths)]
     for idx, (cols, rows) in enumerate(secs):
         if idx:
             out.append("")
         body = rows[1:]
-        for row in body[:-1]:
-            out.extend(cnt_item(cols, row))
-        out.append(cnt_total(cols, body[-1]))
+        items, tot = body[:-1], body[-1]
+        out.append(cnt_row(HEADS[key], HEAD_ALIGNS[key], widths))
+        out.append(cnt_line(widths))
+        for row in items:
+            out.append(cnt_row(cnt_item(cols, row, marks), ALIGNS[key], widths))
+        out.append(cnt_line(widths))
+        out.append(cnt_row(cnt_total(cols, tot, marks), ALIGNS[key], widths))
+        out.append(cnt_line(widths))
     return out
 
 
-def scenario_cards():
-    print("\n-- Карточки «Подсчёт»: две строки на позицию, итог, ширина --")
-    lin_cols = ["№", "Длина, мм", "Кол-во", "Сумма, м.п."]
+def scenario_table():
+    print("\n-- Таблица «Подсчёт»: рамка, колонки, итог, размеры окна --")
     area_cols = ["№", "Марка", "Высота", "Ширина", "Кол-во", "Сумма, м2"]
-    lin = (lin_cols, [lin_cols,
-                      ["1", "1500", "2", "3.00"],
-                      ["2", "900", "1", "0.90"],
-                      ["Всего:", "", "3", "3.90"]])
+    lin_cols = ["№", "Длина, мм", "Кол-во", "Сумма, м.п."]
     area = (area_cols, [area_cols,
                         ["1", "М1", "2100", "900", "2", "3.78"],
-                        ["2", "М10", "1200", "600", "1", "0.72"],
-                        ["Всего:", "", "", "", "3", "4.50"]])
+                        ["2", "М122", "2100", "900", "10", "123.78"],
+                        ["Всего:", "", "", "", "12", "127.56"]])
+    lin = (lin_cols, [lin_cols,
+                      ["1", "1500", "2", "3.00"],
+                      ["Всего:", "", "2", "3.00"]])
 
-    lines = cnt_display([lin])
-    check("погонаж: «1  1500 мм» и «   2 шт.  3.00 м.п.»",
-          lines[0] == "1  1500 мм" and lines[1] == "   2 шт.  3.00 м.п.")
-    check("погонаж: итог «Всего: 3 шт. 3.90 м.п.»",
-          lines[-1] == "Всего: 3 шт. 3.90 м.п.")
+    def cells(line):
+        return [c.strip() for c in line.split("\t")[:-1]]
+
     lines = cnt_display([area])
-    check("площадь с маркой: «1  М1  2100x900 мм», «   2 шт.  3.78 м2»",
-          lines[0] == "1  М1  2100x900 мм" and lines[1] == "   2 шт.  3.78 м2")
-    check("площадь: позиции в порядке таблицы (М1 перед М10)",
-          lines[2].startswith("2  М10") and lines[-1] == "Всего: 3 шт. 4.50 м2")
-    check("между разделами одна пустая строка",
-          cnt_display([lin, area]).count("") == 1)
-    check("в списке нет табуляций и линий",
-          all("\t" not in ln and "|" not in ln and not set(ln) <= set("-") or ln == ""
-              for ln in cnt_display([lin, area])))
-    typical = cnt_display([lin, area])
-    check("типичные строки не длиннее %d символов (окно %d единиц)" % (MAX_LINE_CHARS, LIST_WIDTH_UNITS),
-          all(len(ln) <= MAX_LINE_CHARS for ln in typical))
-    from pathlib import Path
-    dcl = (Path(__file__).resolve().parent.parent / "Extraction" / "searchattvis.dcl").read_text(encoding="cp1251")
-    width = int(re.search(r'key = "lst_count";\s*width = (\d+);', dcl).group(1))
-    check("ширина списка в DCL = %d единиц (прежний максимум 252: не шире ~ трети)" % width,
-          width == LIST_WIDTH_UNITS and 252 / width >= 2.5)
-    check("высота списка 28 строк — вдвое больше 14",
-          28 == 2 * 14)
+    row_m1 = [ln for ln in lines if "М1" in ln][0]
+    check("позиция М1: «1 | М1 | 2100x900 | 2 шт. | 3.78 м2» (как в примере)",
+          cells(row_m1) == ["| 1", "| М1", "| 2100x900", "| 2 шт.", "| 3.78 м2"]
+          or [c.lstrip("| ").strip() for c in cells(row_m1)] == ["1", "М1", "2100x900", "2 шт.", "3.78 м2"])
+    total = [ln for ln in lines if "Всего:" in ln][0]
+    check("итог: «Всего:», 12 шт., 127.56 м2 (сумма групп)",
+          "12 шт." in total and "127.56 м2" in total)
+    dash_lines = [ln for ln in lines if set(ln.replace("\t", "")) <= set("+-") and ln]
+    check("рамка: линия над шапкой, после шапки, после позиций, после итога (4 линии)",
+          len(dash_lines) == 4 and lines[0] == dash_lines[0] and lines[-1] == dash_lines[0])
+    check("последняя строка раздела — «Всего:», перед ней линия",
+          "Всего:" in lines[-2] and lines[-3] == dash_lines[0])
+    lin_lines = cnt_display([lin])
+    row_1 = [ln for ln in lin_lines if "1500" in ln][0]
+    check("погонаж без марок: «1 | 1500 | 2 шт. | 3.00 м.п.»",
+          [c.lstrip("| ").strip() for c in cells(row_1)] == ["1", "1500", "2 шт.", "3.00 м.п."])
+    check("погонаж: «Всего:» есть, колонка марки отсутствует",
+          any("Всего:" in ln for ln in lin_lines) and len(cells(row_1)) == len(WIDTHS["n"]))
+    check("без марок — вариант n: 4 колонки; с марками — m: 5 колонок",
+          len(WIDTHS["n"]) == 4 and len(WIDTHS["m"]) == 5)
+    for name, secs in (("n", [lin]), ("m", [area]), ("m+n", [area, lin])):
+        key = "m" if cnt_marks(secs) else "n"
+        widths = WIDTHS[key]
+        out = cnt_display(secs)
+        rows = [ln for ln in out if "\t" in ln]
+        check("%s: каждая строка — %d ячеек и закрывающая «|»" % (name, len(widths)),
+              all(len(ln.split("\t")) == len(widths) + 1 for ln in rows))
+        fits = True
+        for ln in rows:
+            for part, w in zip(ln.split("\t")[:-1], widths):
+                if len(part) - 2 > w:
+                    fits = False
+        check("%s: все ячейки помещаются в ширину колонок" % name, fits)
+    check("раздел отделён одной пустой строкой (погонаж + площадь)",
+          cnt_display([area, lin]).count("") == 1)
+    head = [ln for ln in lines if "Размеры" in ln][0]
+    check("шапка с «Всего» — подпись прижата вправо",
+          cells(head)[-1].endswith("Всего"))
+    widths_m = sum(w + 2 for w in WIDTHS["m"]) * 4 + 8
+    widths_n = sum(w + 2 for w in WIDTHS["n"]) * 4 + 8
+    check("ширина: без марок %d, с марками %d единиц" % (widths_n, widths_m),
+          widths_n == 144 and widths_m == 176)
 
 
 
@@ -365,7 +418,7 @@ def main():
     scenario_rounding()
     scenario_layout()
     scenario_sort()
-    scenario_cards()
+    scenario_table()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[SEARCH][OK]")

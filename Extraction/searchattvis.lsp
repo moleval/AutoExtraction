@@ -931,11 +931,28 @@
 )
 
 ;; ============================================================
-;; Окно «Подсчёт»: список из карточек — две строки на позицию, без табуляций и линий:
-;;   1  М1  2100x900 мм
-;;      2 шт.  3.78 м2
-;; Итог раздела — «Всего: N шт. S ед.». Ширина окна 96 единиц, высота 28 строк (DCL).
+;; Окно «Подсчёт»: таблица с рамкой (вид как в примере пользователя).
+;;   без марок: | № | Размеры | Кол-во | Всего |
+;;   с марками: | № | Марка | Размеры | Кол-во | Всего |
+;; Ширина колонок W, символов: по ним DCL задаёт табуляции и ширину списка
+;; (проверка — tests/static_check.py, check_search_count_window). Вариант — по данным.
+;; Строки: линия над шапкой, шапка, линия, позиции, линия, «Всего:», линия.
 ;; ============================================================
+(setq *ae-sv-cnt-widths*
+  (quote (("n" 3 8 6 9)
+          ("m" 3 6 8 6 9))))
+
+(defun ae-sv-spaces (n / s)
+  (setq s "")
+  (repeat (max 0 n) (setq s (strcat s " ")))
+  s
+)
+
+(defun ae-sv-dashes (n / s)
+  (setq s "")
+  (repeat (max 0 n) (setq s (strcat s "-")))
+  s
+)
 
 ;; Значение колонки по заголовку (пусто, если колонки нет)
 (defun ae-sv-cnt-cell (cols row name / i)
@@ -948,40 +965,114 @@
   (if (vl-string-search "м.п." (last cols)) "м.п." "м2")
 )
 
-;; Две строки позиции: «№  [Марка]  размер» и «   количество шт.  сумма ед.»
-(defun ae-sv-cnt-item (cols row / no mk size)
-  (setq no (ae-sv-cnt-cell cols row "№")
-        mk (ae-sv-cnt-cell cols row "Марка"))
-  (setq size
-    (if (vl-position "Высота" cols)
-      (strcat (ae-sv-cnt-cell cols row "Высота") "x" (ae-sv-cnt-cell cols row "Ширина") " мм")
-      (strcat (ae-sv-cnt-cell cols row "Длина, мм") " мм")))
-  (list
-    (strcat no "  " (if (= mk "") "" (strcat mk "  ")) size)
-    (strcat "   " (nth (- (length row) 2) row) " шт.  " (last row) " " (ae-sv-cnt-unit cols)))
+(defun ae-sv-cnt-marks-p (secs / hit)
+  (setq hit nil)
+  (foreach sec secs
+    (if (member "Марка" (car (cadr sec))) (setq hit T)))
+  hit
 )
 
-;; Итог раздела — та же форма, что строка состояния
-(defun ae-sv-cnt-total (cols row)
-  (strcat "Всего: " (nth (- (length row) 2) row) " шт. " (last row) " " (ae-sv-cnt-unit cols))
+;; Размер: погонаж — длина; площадь — высота x ширина
+(defun ae-sv-cnt-size (cols row)
+  (if (vl-position "Высота" cols)
+    (strcat (ae-sv-cnt-cell cols row "Высота") "x" (ae-sv-cnt-cell cols row "Ширина"))
+    (ae-sv-cnt-cell cols row "Длина, мм"))
 )
 
-;; Строки списка: позиции каждого раздела, итог раздела последним; между разделами — пустая строка
-(defun ae-sv-cnt-display (/ out first body items cols)
+;; Ячейки позиции (порядок колонок таблицы)
+(defun ae-sv-cnt-item-cells (cols row marks)
+  (append (list (ae-sv-cnt-cell cols row "№"))
+          (if marks (list (ae-sv-cnt-cell cols row "Марка")) '())
+          (list (ae-sv-cnt-size cols row)
+                (strcat (nth (- (length row) 2) row) " шт.")
+                (strcat (last row) " " (ae-sv-cnt-unit cols))))
+)
+
+;; Ячейки итога раздела: подпись «Всего:» в колонке размеров
+(defun ae-sv-cnt-total-cells (cols row marks)
+  (append (list "")
+          (if marks (list "") '())
+          (list "Всего:"
+                (strcat (nth (- (length row) 2) row) " шт.")
+                (strcat (last row) " " (ae-sv-cnt-unit cols))))
+)
+
+;; Заголовки колонок
+(defun ae-sv-cnt-heads (marks)
+  (if marks
+    (list "№" "Марка" "Размеры" "Кол-во" "Всего")
+    (list "№" "Размеры" "Кол-во" "Всего"))
+)
+
+;; Выравнивание: l — влево, c — по центру, r — вправо
+(defun ae-sv-cnt-aligns (marks)
+  (if marks (quote ("l" "l" "c" "c" "r")) (quote ("l" "c" "c" "r")))
+)
+
+(defun ae-sv-cnt-head-aligns (marks)
+  (if marks (quote ("c" "c" "c" "c" "r")) (quote ("c" "c" "c" "r")))
+)
+
+;; Текст в ячейке ширины w с выравниванием пробелами слева
+(defun ae-sv-cnt-pad (text w al / n pad)
+  (setq n (strlen text))
+  (setq pad (cond ((= al "c") (/ (- w n) 2)) ((= al "r") (- w n)) (T 0)))
+  (strcat (ae-sv-spaces pad) text)
+)
+
+;; Строка таблицы: «| ячейка» на каждой позиции табуляции, в конце «|»
+(defun ae-sv-cnt-row (cells aligns widths / parts)
+  (setq parts
+    (mapcar '(lambda (c al w) (strcat "| " (ae-sv-cnt-pad c w al))) cells aligns widths))
+  (ae-sv-join-sep (append parts (list "|")) (chr 9))
+)
+
+;; Линия таблицы: «+» на каждой позиции табуляции, между ними — дефисы
+(defun ae-sv-cnt-line (widths)
+  (ae-sv-join-sep
+    (append (mapcar '(lambda (w) (strcat "+" (ae-sv-dashes (1+ w)))) widths) (list "+"))
+    (chr 9))
+)
+
+;; Ширины по варианту таблицы (n — без марок, m — с марками)
+(defun ae-sv-cnt-widths-of (marks)
+  (cdr (assoc (if marks "m" "n") *ae-sv-cnt-widths*))
+)
+
+;; Строки списка «Подсчёт»: разделы подряд, между разделами — пустая строка
+(defun ae-sv-cnt-display (/ marks widths out first cols body items heads)
   (if (null *ae-sv-cnt-secs*)
     (mapcar 'car *ae-sv-cnt-rows*)
     (progn
-      (setq out '() first T)
+      (setq marks (ae-sv-cnt-marks-p *ae-sv-cnt-secs*)
+            widths (ae-sv-cnt-widths-of marks)
+            heads (ae-sv-cnt-heads marks)
+            out (list (ae-sv-cnt-line widths))
+            first T)
       (foreach sec *ae-sv-cnt-secs*
         (setq cols (car (cadr sec))
               body (cdr (cadr sec))
               items (reverse (cdr (reverse body))))
         (if (not first) (setq out (append out (list ""))))
         (setq first nil)
+        (setq out (append out
+                          (list (ae-sv-cnt-row heads (ae-sv-cnt-head-aligns marks) widths)
+                                (ae-sv-cnt-line widths))))
         (foreach row items
-          (setq out (append out (ae-sv-cnt-item cols row))))
-        (setq out (append out (list (ae-sv-cnt-total cols (last body))))))
+          (setq out (append out
+                            (list (ae-sv-cnt-row (ae-sv-cnt-item-cells cols row marks)
+                                                 (ae-sv-cnt-aligns marks) widths)))))
+        (setq out (append out
+                          (list (ae-sv-cnt-line widths)
+                                (ae-sv-cnt-row (ae-sv-cnt-total-cells cols (last body) marks)
+                                               (ae-sv-cnt-aligns marks) widths)
+                                (ae-sv-cnt-line widths)))))
       out))
+)
+
+;; Имя диалога: с марками — searchattvis_count_m, без — searchattvis_count_n
+(defun ae-sv-cnt-dialog-name ()
+  (if (ae-sv-cnt-marks-p *ae-sv-cnt-secs*) "searchattvis_count_m" "searchattvis_count_n")
 )
 
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
@@ -995,7 +1086,7 @@
       (setq dcl-id (load_dialog dcl-file))
       (if (< dcl-id 0)
         (alert "Не удалось загрузить окно подсчёта.")
-        (if (new_dialog "searchattvis_count" dcl-id)
+        (if (new_dialog (ae-sv-cnt-dialog-name) dcl-id)
           (progn
             (start_list "lst_count")
             (foreach s (ae-sv-cnt-display)

@@ -155,7 +155,7 @@ searchattvis_dialog : dialog {
   }
 }
 
-searchattvis_count : dialog {
+searchattvis_count_n : dialog {
 
   label = "Подсчёт";
 
@@ -164,16 +164,66 @@ searchattvis_count : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 96;
-      height = 28;
+      width = 144;
+      height = 40;
       fixed_width = true;
       fixed_height = true;
+      tabs = "20 60 92 136";
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 96;
+      width = 144;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_m : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 176;
+      height = 40;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "20 52 92 124 168";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 176;
       fixed_width = true;
     }
 
