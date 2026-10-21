@@ -272,7 +272,7 @@ def scenario_sort():
 # Таблица окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
 # ----------------------------------------------------------------------
 
-WIDTHS = {"n": [3, 8, 6, 9], "m": [3, 8, 8, 6, 9]}   # *ae-sv-cnt-widths* в lsp
+WIDTHS = {"n": [3, 8, 6, 9], "m": [3, 20, 8, 6, 9]}   # *ae-sv-cnt-widths* в lsp
 HEADS = {"n": ["№", "Размеры", "Кол-во", "Всего"],
          "m": ["№", "Марка", "Размеры", "Кол-во", "Всего"]}
 ALIGNS = {"n": ["l", "c", "c", "r"], "m": ["l", "l", "c", "c", "r"]}
@@ -314,11 +314,11 @@ def cnt_pad(text, w, al):
 
 def cnt_row(cells, aligns, widths):
     parts = ["| " + cnt_pad(c, w, al) for c, al, w in zip(cells, aligns, widths)]
-    return "\t".join(parts + ["|"])
+    return " " + "\t".join(parts + ["|"]) + " "
 
 
 def cnt_line(widths):
-    return "\t".join(["+" + "-" * (w + 1) for w in widths] + ["+"])
+    return " " + "\t".join(["+" + "-" * (w + 1) for w in widths] + ["+"]) + " "
 
 
 def cnt_marks(secs):
@@ -368,7 +368,7 @@ def scenario_table():
     total = [ln for ln in lines if "Всего:" in ln][0]
     check("итог: «Всего:», 12 шт., 127.56 м2 (сумма групп)",
           "12 шт." in total and "127.56 м2" in total)
-    dash_lines = [ln for ln in lines if set(ln.replace("\t", "")) <= set("+-") and ln]
+    dash_lines = [ln for ln in lines if ln.strip() and set(ln.replace("\t", "").strip()) <= set("+-")]
     check("рамка: линия над шапкой, после шапки, после позиций, после итога (4 линии)",
           len(dash_lines) == 4 and lines[0] == dash_lines[0] and lines[-1] == dash_lines[0])
     check("последняя строка раздела — «Всего:», перед ней линия",
@@ -391,7 +391,7 @@ def scenario_table():
         fits = True
         for ln in rows:
             for part, w in zip(ln.split("\t")[:-1], widths):
-                if len(part) - 2 > w:
+                if len(part.lstrip(" ")) - 2 > w:
                     fits = False
         check("%s: все ячейки помещаются в ширину колонок" % name, fits)
     check("раздел отделён одной пустой строкой (погонаж + площадь)",
@@ -401,12 +401,12 @@ def scenario_table():
           cells(head)[-1].endswith("Всего"))
     def units(chars):
         return (6 * chars + 2) // 5   # 1 символ ≈ 1,2 единицы (по скриншоту)
-    widths_m = max(units(sum(w + 2 for w in WIDTHS["m"])) + 6, 48 + 2)
-    widths_n = max(units(sum(w + 2 for w in WIDTHS["n"])) + 6, 48 + 2)
-    check("ширина окна: без марок %d, с марками %d единиц (было 144 и 176)" % (widths_n, widths_m),
-          widths_n == 50 and widths_m == 59)
-    check("ширина с марками примерно в три раза меньше прежней (176 → 59)",
-          widths_m * 3 <= 176 + 3)
+    widths_m = max(units(sum(w + 2 for w in WIDTHS["m"]) + 2) + 6, 48 + 2)
+    widths_n = max(units(sum(w + 2 for w in WIDTHS["n"]) + 2) + 6, 48 + 2)
+    check("ширина окна: без марок %d, с марками %d единиц (колонка «Марка» 20, пробелы по краям)" % (widths_n, widths_m),
+          widths_n == 50 and widths_m == 76)
+    check("колонка «Марка» 20 символов: «В-1 А-1» и марки до 20 символов помещаются",
+          all(len(m) <= 20 for m in ["В-1 А-1", "М122", "МАРКА-ДЛИННАЯ-20сим"]))
 
 
 

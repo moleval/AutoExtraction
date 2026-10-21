@@ -940,7 +940,7 @@
 ;; ============================================================
 (setq *ae-sv-cnt-widths*
   (quote (("n" 3 8 6 9)
-          ("m" 3 8 8 6 9))))
+          ("m" 3 20 8 6 9))))
 
 (defun ae-sv-spaces (n / s)
   (setq s "")
@@ -1024,14 +1024,16 @@
 (defun ae-sv-cnt-row (cells aligns widths / parts)
   (setq parts
     (mapcar '(lambda (c al w) (strcat "| " (ae-sv-cnt-pad c w al))) cells aligns widths))
-  (ae-sv-join-sep (append parts (list "|")) (chr 9))
+  (strcat " " (ae-sv-join-sep (append parts (list "|")) (chr 9)) " ")
 )
 
 ;; Ћини€ таблицы: Ђ+ї на каждой позиции табул€ции, между ними Ч дефисы
 (defun ae-sv-cnt-line (widths)
-  (ae-sv-join-sep
-    (append (mapcar '(lambda (w) (strcat "+" (ae-sv-dashes (1+ w)))) widths) (list "+"))
-    (chr 9))
+  (strcat " "
+    (ae-sv-join-sep
+      (append (mapcar '(lambda (w) (strcat "+" (ae-sv-dashes (1+ w)))) widths) (list "+"))
+      (chr 9))
+    " ")
 )
 
 ;; Ўирины по варианту таблицы (n Ч без марок, m Ч с марками)

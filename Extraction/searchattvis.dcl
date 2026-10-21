@@ -168,7 +168,7 @@ searchattvis_count_n : dialog {
       height = 40;
       fixed_width = true;
       fixed_height = true;
-      tabs = "6 18 28 41";
+      tabs = "7 19 29 42";
     }
 
     : text {
@@ -213,17 +213,17 @@ searchattvis_count_m : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 59;
+      width = 76;
       height = 40;
       fixed_width = true;
       fixed_height = true;
-      tabs = "6 18 30 40 53";
+      tabs = "7 34 46 55 68";
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 59;
+      width = 76;
       fixed_width = true;
     }
 
