@@ -312,13 +312,31 @@ def cnt_pad(text, w, al):
     return " " * max(0, pad) + text
 
 
+def cnt_units(chars):
+    return (6 * chars + 2) // 5   # 1 символ примерно 1,2 единицы (как в табуляциях DCL)
+
+
+def cnt_bounds(widths):
+    acc, out = 0, []
+    for w in widths:
+        out.append(cnt_units(1 + acc))
+        acc += w + 2
+    out.append(cnt_units(1 + acc))
+    return out
+
+
 def cnt_row(cells, aligns, widths):
     parts = ["| " + cnt_pad(c, w, al) for c, al, w in zip(cells, aligns, widths)]
-    return " " + "\t".join(parts + ["|"]) + " "
+    return " " + "\t".join(parts) + " "
+
+
+def cnt_dashes(gap):
+    return 2 * gap - 3   # дефис 0,5 единицы, «+» 1 единица, запас 3 дефиса
 
 
 def cnt_line(widths):
-    return " " + "\t".join(["+" + "-" * (w + 1) for w in widths] + ["+"]) + " "
+    bd = cnt_bounds(widths)
+    return " " + "\t".join("+" + "-" * cnt_dashes(bd[k + 1] - bd[k]) for k in range(len(widths))) + " "
 
 
 def cnt_marks(secs):
@@ -358,7 +376,7 @@ def scenario_table():
                       ["Всего:", "", "2", "3.00"]])
 
     def cells(line):
-        return [c.strip() for c in line.split("\t")[:-1]]
+        return [c.strip() for c in line.split("\t")]
 
     lines = cnt_display([area])
     row_m1 = [ln for ln in lines if "М1" in ln][0]
@@ -386,12 +404,15 @@ def scenario_table():
         widths = WIDTHS[key]
         out = cnt_display(secs)
         rows = [ln for ln in out if "\t" in ln]
-        check("%s: каждая строка — %d ячеек и закрывающая «|»" % (name, len(widths)),
-              all(len(ln.split("\t")) == len(widths) + 1 for ln in rows))
+        check("%s: каждая строка — %d ячеек, после последней колонки символа нет" % (name, len(widths)),
+              all(len(ln.split("\t")) == len(widths) and not ln.rstrip().endswith(("|", "+")) for ln in rows))
+        bd = cnt_bounds(widths)
+        check("%s: дефисы не доходят до следующей табуляции (1 + N/2 < ширины ячейки)" % name,
+              all(1 + cnt_dashes(bd[k + 1] - bd[k]) / 2 < bd[k + 1] - bd[k] for k in range(len(widths))))
         fits = True
-        for ln in rows:
-            for part, w in zip(ln.split("\t")[:-1], widths):
-                if len(part.lstrip(" ")) - 2 > w:
+        for ln in [r for r in rows if "|" in r]:   # линии с дефисами шире ячеек по замыслу
+            for part, w in zip(ln.split("\t"), widths):
+                if len(part.strip()) - 2 > w:
                     fits = False
         check("%s: все ячейки помещаются в ширину колонок" % name, fits)
     check("раздел отделён одной пустой строкой (погонаж + площадь)",
@@ -399,10 +420,8 @@ def scenario_table():
     head = [ln for ln in lines if "Размеры" in ln][0]
     check("шапка с «Всего» — подпись прижата вправо",
           cells(head)[-1].endswith("Всего"))
-    def units(chars):
-        return (6 * chars + 2) // 5   # 1 символ ≈ 1,2 единицы (по скриншоту)
-    widths_m = max(units(sum(w + 2 for w in WIDTHS["m"]) + 2) + 6, 48 + 2)
-    widths_n = max(units(sum(w + 2 for w in WIDTHS["n"]) + 2) + 6, 48 + 2)
+    widths_m = max(cnt_units(sum(w + 2 for w in WIDTHS["m"]) + 2) + 6, 48 + 2)
+    widths_n = max(cnt_units(sum(w + 2 for w in WIDTHS["n"]) + 2) + 6, 48 + 2)
     check("ширина окна: без марок %d, с марками %d единиц (колонка «Марка» 20, пробелы по краям)" % (widths_n, widths_m),
           widths_n == 50 and widths_m == 76)
     check("колонка «Марка» 20 символов: «В-1 А-1» и марки до 20 символов помещаются",

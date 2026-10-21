@@ -1020,18 +1020,36 @@
   (strcat (ae-sv-spaces pad) text)
 )
 
-;; —трока таблицы: Ђ| €чейкаї на каждой позиции табул€ции, в конце Ђ|ї
+;; —трока таблицы: Ђ| €чейкаї на каждой позиции табул€ции; после последней колонки символа нет
 (defun ae-sv-cnt-row (cells aligns widths / parts)
   (setq parts
     (mapcar '(lambda (c al w) (strcat "| " (ae-sv-cnt-pad c w al))) cells aligns widths))
-  (strcat " " (ae-sv-join-sep (append parts (list "|")) (chr 9)) " ")
+  (strcat " " (ae-sv-join-sep parts (chr 9)) " ")
 )
 
-;; Ћини€ таблицы: Ђ+ї на каждой позиции табул€ции, между ними Ч дефисы
-(defun ae-sv-cnt-line (widths)
+;; ≈диница ширины списка по символам (как в табул€ци€х DCL): 1 символ примерно 1,2 единицы
+(defun ae-sv-cnt-units (c) (/ (+ (* 6 c) 2) 5))
+
+;; ѕозиции табул€ций колонок: начало колонки k Ч units(1 + накопленна€ ширина W + 2);
+;; последн€€ позици€ Ч правый край последней колонки
+(defun ae-sv-cnt-bounds (widths / acc out)
+  (setq acc 0 out '())
+  (foreach w widths
+    (setq out (cons (ae-sv-cnt-units (1+ acc)) out)
+          acc (+ acc w 2)))
+  (reverse (cons (ae-sv-cnt-units (1+ acc)) out))
+)
+
+;; Ћини€ таблицы: между Ђ+ї на позици€х табул€ций Ч дефисы. ƒефис примерно 0,5 единицы, Ђ+ї примерно 1 единица,
+;; поэтому между двум€ табул€ци€ми (G единиц) ставитс€ 2G-3 дефисов: лини€ доходит почти до
+;; следующего Ђ+ї и не перескакивает табул€цию (запас 3 дефиса). —права от последней колонки Ч без Ђ+ї.
+(defun ae-sv-cnt-line (widths / bd)
+  (setq bd (ae-sv-cnt-bounds widths))
   (strcat " "
     (ae-sv-join-sep
-      (append (mapcar '(lambda (w) (strcat "+" (ae-sv-dashes (1+ w)))) widths) (list "+"))
+      (mapcar '(lambda (x0 x1) (strcat "+" (ae-sv-dashes (- (* 2 (- x1 x0)) 3))))
+              (reverse (cdr (reverse bd)))
+              (cdr bd))
       (chr 9))
     " ")
 )

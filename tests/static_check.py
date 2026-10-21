@@ -1802,7 +1802,7 @@ def check_search_count_window() -> list[str]:
 
     Инварианты:
     1. *ae-sv-cnt-widths* (lsp): варианты n (без марок) и m (с марками) —
-       ширины колонок в символах; ячейка = «| » + W, в конце «|»;
+       ширины колонок в символах; ячейка = «| » + W; после последней колонки символа нет;
     2. DCL: диалоги searchattvis_count_n и searchattvis_count_m;
        tabs = 1,2 · (1 пробел слева + накопленная ширина ячеек, ячейка = W + 2),
        ширина списка = 1,2 · (сумма ячеек + пробелы слева и справа) + 6, не меньше кнопок;
@@ -1856,6 +1856,8 @@ def check_search_count_window() -> list[str]:
             errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: tabs {got_tabs}, ожидалось {expect_tabs}")
         if int(wm.group(2)) != 40:
             errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: высота {wm.group(2)}, ожидалось 40")
+        if not re.search(r'key = "txt_count_status";.*?alignment = right;', body, re.S):
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: строка состояния не выровнена вправо")
     return errors
 
 

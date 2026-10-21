@@ -176,6 +176,7 @@ searchattvis_count_n : dialog {
       label = "";
       width = 50;
       fixed_width = true;
+      alignment = right;
     }
 
     : row {
@@ -225,6 +226,7 @@ searchattvis_count_m : dialog {
       label = "";
       width = 76;
       fixed_width = true;
+      alignment = right;
     }
 
     : row {
