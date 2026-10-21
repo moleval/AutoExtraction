@@ -931,126 +931,63 @@
 )
 
 ;; ============================================================
-;; Окно «Подсчёт»: список — колонки без линий, разделены табуляцией.
-;; Без марок:  № | Размер 1 | Размер 2 | Кол-во | Сумма
-;; С марками:  № | Марка | Размер 1 | Размер 2 | Кол-во | Сумма
-;; Размер 1 — «Длина, мм» (погонаж) или «Высота» (площадь); Размер 2 — «Ширина»
-;; (у погонажа пустой). Ширина поля F, символов: ключ n_s / m_s — компактно,
-;; n_l / m_l — широко. Между колонками зазор в 1 символ; последняя колонка без зазора.
-;; Диалог searchattvis_count_<ключ> в DCL задаёт ширину окна и табуляции по тем же F
-;; (сверка в tests/static_check.py, check_search_count_grid). Вариант — по данным.
+;; Окно «Подсчёт»: список из карточек — две строки на позицию, без табуляций и линий:
+;;   1  М1  2100x900 мм
+;;      2 шт.  3.78 м2
+;; Итог раздела — «Всего: N шт. S ед.». Ширина окна 96 единиц, высота 28 строк (DCL).
 ;; ============================================================
-(setq *ae-sv-cnt-fields*
-  (quote (("n_s" 6 9 6 6 11)
-          ("n_l" 6 11 8 8 13)
-          ("m_s" 6 5 9 6 6 11)
-          ("m_l" 6 10 11 8 8 13))))
 
-(defun ae-sv-spaces (n / s)
-  (setq s "")
-  (repeat (max 0 n) (setq s (strcat s " ")))
-  s
+;; Значение колонки по заголовку (пусто, если колонки нет)
+(defun ae-sv-cnt-cell (cols row name / i)
+  (setq i (vl-position name cols))
+  (if i (nth i row) "")
 )
 
-;; Номер колонки по заголовку (nil — такой колонки нет)
-(defun ae-sv-cnt-slot (h marks)
-  (cond
-    ((= h "№") 0)
-    ((and marks (= h "Марка")) 1)
-    ((member h (quote ("Длина, мм" "Высота"))) (if marks 2 1))
-    ((= h "Ширина") (if marks 3 2))
-    ((= h "Кол-во") (if marks 4 3))
-    ((wcmatch h "Сумма*") (if marks 5 4))
-    (T nil))
+;; Единица раздела по заголовку суммы: м.п. или м2
+(defun ae-sv-cnt-unit (cols)
+  (if (vl-string-search "м.п." (last cols)) "м.п." "м2")
 )
 
-;; Выравнивание колонки: 0 — влево, 1 — по центру, 2 — вправо.
-;; Шапка по центру, кроме «Сумма» (вправо); данные: № и Марка — влево, сумма — вправо.
-(defun ae-sv-cnt-align (slot marks header-p)
-  (cond
-    ((and (not header-p) (or (= slot 0) (and marks (= slot 1)))) 0)
-    ((= slot (if marks 5 4)) 2)
-    (T 1))
+;; Две строки позиции: «№  [Марка]  размер» и «   количество шт.  сумма ед.»
+(defun ae-sv-cnt-item (cols row / no mk size)
+  (setq no (ae-sv-cnt-cell cols row "№")
+        mk (ae-sv-cnt-cell cols row "Марка"))
+  (setq size
+    (if (vl-position "Высота" cols)
+      (strcat (ae-sv-cnt-cell cols row "Высота") "x" (ae-sv-cnt-cell cols row "Ширина") " мм")
+      (strcat (ae-sv-cnt-cell cols row "Длина, мм") " мм")))
+  (list
+    (strcat no "  " (if (= mk "") "" (strcat mk "  ")) size)
+    (strcat "   " (nth (- (length row) 2) row) " шт.  " (last row) " " (ae-sv-cnt-unit cols)))
 )
 
-;; Ячейка: текст, выровненный пробелами внутри ширины поля w
-(defun ae-sv-cnt-field (text w al / n pad)
-  (setq n (strlen text))
-  (setq pad (cond ((= al 1) (/ (- w n) 2)) ((= al 2) (- w n)) (T 0)))
-  (strcat (ae-sv-spaces pad) text)
+;; Итог раздела — та же форма, что строка состояния
+(defun ae-sv-cnt-total (cols row)
+  (strcat "Всего: " (nth (- (length row) 2) row) " шт. " (last row) " " (ae-sv-cnt-unit cols))
 )
 
-(defun ae-sv-cnt-put (lst idx val / k out)
-  (setq k 0 out '())
-  (foreach x lst
-    (setq out (cons (if (= k idx) val x) out))
-    (setq k (1+ k)))
-  (reverse out)
-)
-
-;; Строка списка: ячейки по колонкам; разделитель — табуляция
-(defun ae-sv-cnt-line (cols cells marks key header-p / fw out i k lst slot)
-  (setq fw (cdr (assoc key *ae-sv-cnt-fields*)))
-  (setq out (ae-sv-blanks (length fw)))
-  (setq i 0)
-  (foreach h cols
-    (setq slot (ae-sv-cnt-slot h marks))
-    (if slot (setq out (ae-sv-cnt-put out slot (if (nth i cells) (nth i cells) ""))))
-    (setq i (1+ i)))
-  (setq lst '() k 0)
-  (foreach text out
-    (setq lst (cons (ae-sv-cnt-field text (nth k fw) (ae-sv-cnt-align k marks header-p)) lst))
-    (setq k (1+ k)))
-  (ae-sv-join-sep (reverse lst) (chr 9))
-)
-
-(defun ae-sv-cnt-marks-p (secs / hit)
-  (setq hit nil)
-  (foreach sec secs
-    (if (member "Марка" (car (cadr sec))) (setq hit T)))
-  hit
-)
-
-;; Поля всех строк помещаются в поля варианта size (s или l)
-(defun ae-sv-cnt-fits (secs marks size / fw ok cols i slot)
-  (setq fw (cdr (assoc (strcat (if marks "m" "n") "_" size) *ae-sv-cnt-fields*)))
-  (setq ok T)
-  (foreach sec secs
-    (setq cols (car (cadr sec)))
-    (foreach row (cadr sec)
-      (setq i 0)
-      (foreach h cols
-        (setq slot (ae-sv-cnt-slot h marks))
-        (if (and slot (> (strlen (if (nth i row) (nth i row) "")) (nth slot fw))) (setq ok nil))
-        (setq i (1+ i)))))
-  ok
-)
-
-;; Ключ варианта окна: n/m (без марок / с марками) + s/l (компактно / широко)
-(defun ae-sv-cnt-key (secs / marks)
-  (setq marks (ae-sv-cnt-marks-p secs))
-  (strcat (if marks "m" "n") "_" (if (ae-sv-cnt-fits secs marks "s") "s" "l"))
-)
-
-;; Строки списка: шапка и строки разделов; между разделами — пустая строка
-(defun ae-sv-cnt-display (key / marks out cols first)
-  (setq marks (= (substr key 1 1) "m"))
-  (setq out '() first T)
-  (foreach sec *ae-sv-cnt-secs*
-    (setq cols (car (cadr sec)))
-    (if (not first) (setq out (append out (list ""))))
-    (setq first nil)
-    (setq out (append out (list (ae-sv-cnt-line cols cols marks key T))))
-    (foreach row (cdr (cadr sec))
-      (setq out (append out (list (ae-sv-cnt-line cols row marks key nil))))))
-  out
+;; Строки списка: позиции каждого раздела, итог раздела последним; между разделами — пустая строка
+(defun ae-sv-cnt-display (/ out first body items cols)
+  (if (null *ae-sv-cnt-secs*)
+    (mapcar 'car *ae-sv-cnt-rows*)
+    (progn
+      (setq out '() first T)
+      (foreach sec *ae-sv-cnt-secs*
+        (setq cols (car (cadr sec))
+              body (cdr (cadr sec))
+              items (reverse (cdr (reverse body))))
+        (if (not first) (setq out (append out (list ""))))
+        (setq first nil)
+        (foreach row items
+          (setq out (append out (ae-sv-cnt-item cols row))))
+        (setq out (append out (list (ae-sv-cnt-total cols (last body))))))
+      out))
 )
 
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
-(defun ae-sv-count-dialog (/ dcl-file dcl-id key)
+(defun ae-sv-count-dialog (/ dcl-file dcl-id)
   (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
   (setq *ae-sv-next* "close")
-  (setq key (ae-sv-cnt-key *ae-sv-cnt-secs*))
   (setq dcl-file (ae-sv-dcl-file))
   (if (null dcl-file)
     (alert "Не найден файл Extraction\\searchattvis.dcl.")
@@ -1058,10 +995,10 @@
       (setq dcl-id (load_dialog dcl-file))
       (if (< dcl-id 0)
         (alert "Не удалось загрузить окно подсчёта.")
-        (if (new_dialog (strcat "searchattvis_count_" key) dcl-id)
+        (if (new_dialog "searchattvis_count" dcl-id)
           (progn
             (start_list "lst_count")
-            (foreach s (if *ae-sv-cnt-secs* (ae-sv-cnt-display key) (mapcar (quote car) *ae-sv-cnt-rows*))
+            (foreach s (ae-sv-cnt-display)
               (add_list s))
             (end_list)
             (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))

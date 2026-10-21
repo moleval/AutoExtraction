@@ -1797,14 +1797,15 @@ def check_summary_marks() -> list[str]:
 # Main
 # ----------------------------------------------------------------------
 
-def check_search_count_grid() -> list[str]:
-    """Окно «Подсчёт»: варианты DCL согласованы с полями сетки в lsp.
+def check_search_count_window() -> list[str]:
+    """Окно «Подсчёт»: один диалог-список (карточки, без табуляций).
 
-    Поля *ae-sv-cnt-fields* (lsp): ключ n|m + s|l, далее ширины колонок.
-    Колонки разделены зазором в 1 символ (последняя без зазора). Для каждого
-    диалога searchattvis_count_<ключ>: tabs = 4 · сумма колонок слева;
-    width = 4 · сумма колонок + 8.
-    Диалоги без марок (n_*) и с марками (m_*) — все четыре варианта.
+    Инварианты:
+    1. диалог searchattvis_count в DCL: список width = 96, height = 28
+       (ширина ≈ треть прежней, высота ×2), без tabs;
+    2. окно открывается по ключу searchattvis_count; старых вариантов
+       searchattvis_count_<n|m>_<s|l> и табуляционной сетки в lsp нет;
+    3. без (or (nth …)) — AutoLISP возвращает T, а не значение.
     """
     errors: list[str] = []
     sv = ROOT / "Extraction/searchattvis.lsp"
@@ -1813,46 +1814,30 @@ def check_search_count_grid() -> list[str]:
         return errors
     lsp = read_text(sv)
     dcl_text = read_text(dcl)
-    if 'new_dialog (strcat "searchattvis_count_" key)' not in lsp:
-        errors.append("Extraction/searchattvis.lsp: окно «Подсчёт» не выбирает вариант DCL по ключу")
+    if '(new_dialog "searchattvis_count" dcl-id)' not in lsp:
+        errors.append("Extraction/searchattvis.lsp: окно «Подсчёт» не открывает searchattvis_count")
+    for bad, what in (
+        ("*ae-sv-cnt-fields*", "остались поля табуляционной сетки"),
+        ("(strcat \"searchattvis_count_\"", "остался выбор варианта окна по ключу"),
+    ):
+        if bad in lsp:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
     if re.search(r"\(or \((?:nth|c[ad]+r)\b", lsp):
         errors.append("Extraction/searchattvis.lsp: (or (nth|cadr…)) возвращает T, а не значение; использовать if")
-    if '"searchattvis_count"' in lsp:
-        errors.append("Extraction/searchattvis.lsp: остался старый диалог searchattvis_count")
-    m = re.search(r"\(setq \*ae-sv-cnt-fields\*(.*?)\n\n", lsp, re.S)
-    if not m:
-        errors.append("Extraction/searchattvis.lsp: нет *ae-sv-cnt-fields*")
+    if re.search(r"searchattvis_count_[nm]_[sl]", dcl_text):
+        errors.append("Extraction/searchattvis.dcl: остались варианты searchattvis_count_<n|m>_<s|l>")
+    dm = re.search(r"searchattvis_count : dialog \{(.*?)\n\}\n", dcl_text, re.S)
+    if not dm:
+        errors.append("Extraction/searchattvis.dcl: нет диалога searchattvis_count")
         return errors
-    fields = {k: [int(x) for x in v.split()]
-              for k, v in re.findall(r'\("([nm]_[sl])"((?:\s+\d+)+)\)', m.group(1))}
-    keys = ["n_s", "n_l", "m_s", "m_l"]
-    if sorted(fields) != sorted(keys):
-        errors.append(f"Extraction/searchattvis.lsp: поля сетки для {sorted(fields)}, нужны {keys}")
-    for key in keys:
-        if key not in fields:
-            continue
-        dm = re.search(r"searchattvis_count_" + key + r" : dialog \{(.*?)\n\}\n", dcl_text, re.S)
-        if not dm:
-            errors.append(f"Extraction/searchattvis.dcl: нет диалога searchattvis_count_{key}")
-            continue
-        body = dm.group(1)
-        wm = re.search(r'key = "lst_count";\s*width = (\d+);', body)
-        tm = re.search(r'tabs = "([\d ]*)";', body)
-        if not wm or not tm:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: нет width/tabs списка")
-            continue
-        w = [f + 1 for f in fields[key][:-1]] + [fields[key][-1]]
-        expect_width = 4 * sum(w) + 8
-        expect_tabs = []
-        acc = 0
-        for x in w[:-1]:
-            acc += x
-            expect_tabs.append(4 * acc)
-        got_tabs = [int(x) for x in tm.group(1).split()]
-        if int(wm.group(1)) != expect_width:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: ширина {wm.group(1)}, ожидалось {expect_width}")
-        if got_tabs != expect_tabs:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: tabs {got_tabs}, ожидалось {expect_tabs}")
+    body = dm.group(1)
+    wm = re.search(r'key = "lst_count";\s*width = (\d+);\s*height = (\d+);', body)
+    if not wm:
+        errors.append("Extraction/searchattvis.dcl: searchattvis_count: нет width/height списка")
+    elif (int(wm.group(1)), int(wm.group(2))) != (96, 28):
+        errors.append(f"Extraction/searchattvis.dcl: список {wm.group(1)}×{wm.group(2)}, ожидалось 96×28")
+    if "tabs" in body:
+        errors.append("Extraction/searchattvis.dcl: searchattvis_count: остались tabs (карточки без табуляций)")
     return errors
 
 
@@ -1925,7 +1910,7 @@ def main() -> int:
     errors += check_fill_allowance()
     errors += check_search_count()
     errors += check_summary_marks()
-    errors += check_search_count_grid()
+    errors += check_search_count_window()
     errors += check_xls_marks_guard()
 
     if errors:
@@ -1944,7 +1929,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
-        f" / mark-labels / fill-allowance / search-count / summary-marks / search-count-grid"
+        f" / mark-labels / fill-allowance / search-count / summary-marks / search-count-window"
     )
     print("RESULT: PASS")
     return 0

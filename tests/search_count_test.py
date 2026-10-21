@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import fnmatch
+import re
 import sys
 
 PASS = 0
@@ -268,100 +269,51 @@ def scenario_sort():
 
 
 # ----------------------------------------------------------------------
-# Колонки окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
+# Карточки окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
 # ----------------------------------------------------------------------
 
-def read_grid_fields():
-    """Поля читаются из lsp, чтобы тест проверял реальные значения."""
-    import re
-    from pathlib import Path
-    lsp = Path(__file__).resolve().parent.parent / "Extraction" / "searchattvis.lsp"
-    text = lsp.read_text(encoding="cp1251")
-    m = re.search(r"\(setq \*ae-sv-cnt-fields\*(.*?)\n\n", text, re.S)
-    pairs = re.findall(r'\("([nm]_[sl])"((?:\s+\d+)+)\)', m.group(1))
-    return {k: [int(x) for x in v.split()] for k, v in pairs}
+LIST_WIDTH_UNITS = 96   # ширина списка в DCL; ~4 единицы на символ
+MAX_LINE_CHARS = 22     # 22 символа × 4 + запас = 96
 
 
-FIELDS = read_grid_fields()
+def cnt_cell(cols, row, name):
+    return row[cols.index(name)] if name in cols else ""
 
 
-def cnt_slot(h, marks):
-    if h == "№":
-        return 0
-    if marks and h == "Марка":
-        return 1
-    if h in ("Длина, мм", "Высота"):
-        return 2 if marks else 1
-    if h == "Ширина":
-        return 3 if marks else 2
-    if h == "Кол-во":
-        return 4 if marks else 3
-    if h.startswith("Сумма"):
-        return 5 if marks else 4
-    return None
+def cnt_unit(cols):
+    return "м.п." if "м.п." in cols[-1] else "м2"
 
 
-def cnt_align(slot, marks, header):
-    if not header and (slot == 0 or (marks and slot == 1)):
-        return 0
-    if slot == (5 if marks else 4):
-        return 2
-    return 1
-
-
-def cnt_field(text, w, al):
-    n = len(text)
-    if al == 1:
-        pad = (w - n) // 2
-    elif al == 2:
-        pad = w - n
+def cnt_item(cols, row):
+    no = cnt_cell(cols, row, "№")
+    mk = cnt_cell(cols, row, "Марка")
+    if "Высота" in cols:
+        size = cnt_cell(cols, row, "Высота") + "x" + cnt_cell(cols, row, "Ширина") + " мм"
     else:
-        pad = 0
-    return " " * max(0, pad) + text
+        size = cnt_cell(cols, row, "Длина, мм") + " мм"
+    first = no + "  " + (mk + "  " if mk else "") + size
+    second = "   " + row[-2] + " шт.  " + row[-1] + " " + cnt_unit(cols)
+    return [first, second]
 
 
-def cnt_line(cols, cells, marks, key, header):
-    fw = FIELDS[key]
-    out = [""] * len(fw)
-    for i, h in enumerate(cols):
-        slot = cnt_slot(h, marks)
-        if slot is not None:
-            out[slot] = cells[i] if i < len(cells) and cells[i] else ""
-    return "\t".join(cnt_field(t, fw[k], cnt_align(k, marks, header))
-                     for k, t in enumerate(out))
+def cnt_total(cols, row):
+    return "Всего: " + row[-2] + " шт. " + row[-1] + " " + cnt_unit(cols)
 
 
-def cnt_fits(secs, marks, size):
-    fw = FIELDS[("m" if marks else "n") + "_" + size]
-    for cols, rows in secs:
-        for row in rows:
-            for i, h in enumerate(cols):
-                slot = cnt_slot(h, marks)
-                if slot is not None and len(row[i]) > fw[slot]:
-                    return False
-    return True
-
-
-def cnt_key(secs):
-    marks = any("Марка" in cols for cols, _ in secs)
-    size = "s" if cnt_fits(secs, marks, "s") else "l"
-    return ("m" if marks else "n") + "_" + size
-
-
-def cnt_display(secs, key):
-    marks = key[0] == "m"
+def cnt_display(secs):
     out = []
     for idx, (cols, rows) in enumerate(secs):
         if idx:
             out.append("")
-        out.append(cnt_line(cols, cols, marks, key, True))
-        for row in rows[1:]:
-            out.append(cnt_line(cols, row, marks, key, False))
+        body = rows[1:]
+        for row in body[:-1]:
+            out.extend(cnt_item(cols, row))
+        out.append(cnt_total(cols, body[-1]))
     return out
 
 
-def scenario_grid():
-    print("\n-- Колонки «Подсчёт»: без линий, выравнивание, варианты --")
+def scenario_cards():
+    print("\n-- Карточки «Подсчёт»: две строки на позицию, итог, ширина --")
     lin_cols = ["№", "Длина, мм", "Кол-во", "Сумма, м.п."]
     area_cols = ["№", "Марка", "Высота", "Ширина", "Кол-во", "Сумма, м2"]
     lin = (lin_cols, [lin_cols,
@@ -370,51 +322,34 @@ def scenario_grid():
                       ["Всего:", "", "3", "3.90"]])
     area = (area_cols, [area_cols,
                         ["1", "М1", "2100", "900", "2", "3.78"],
-                        ["Всего:", "", "", "", "2", "3.78"]])
-    check("погонаж без марок: компактный вариант n_s", cnt_key([lin]) == "n_s")
-    check("площадь с марками и малыми числами: m_s", cnt_key([area]) == "m_s")
-    long_len = (lin_cols, [lin_cols, ["1", "1234567890", "1", "1.00"]])
-    check("длинное значение (10 символов в «Длина», компактное поле 9) → n_l",
-          cnt_key([long_len]) == "n_l")
-    long_mark = (area_cols, [area_cols, ["1", "МАРКА-1234", "1", "1", "1", "1.00"]])
-    check("марка 10 символов → m_l (компактное поле 5)", cnt_key([long_mark]) == "m_l")
+                        ["2", "М10", "1200", "600", "1", "0.72"],
+                        ["Всего:", "", "", "", "3", "4.50"]])
 
-    for key in ("n_s", "n_l", "m_s", "m_l"):
-        fw = FIELDS[key]
-        lines = cnt_display([lin, area], key)
-        check("%s: нет линий и разделителей «|»" % key,
-              not any(("|" in ln) or set(ln) <= set("-") and ln for ln in lines))
-        check("%s: число колонок = %d" % (key, len(fw)),
-              all(len(ln.split("\t")) == len(fw) for ln in lines if ln))
-        ok = True
-        for ln in lines:
-            if not ln:
-                continue
-            for k, c in enumerate(ln.split("\t")):
-                if len(c) > fw[k]:
-                    ok = False
-        check("%s: все ячейки помещаются в поля" % key, ok)
-        check("%s: раздел отделён пустой строкой" % key, "" in lines[1:-1])
-
-    fw = FIELDS["m_s"]
-    lines = cnt_display([lin, area], "m_s")
-    area_head = [ln for ln in lines if "Сумма, м2" in ln][0].split("\t")
-    qty = area_head[4].strip()
-    left = len(area_head[4]) - len(area_head[4].lstrip())
-    right = len(area_head[4]) - len(area_head[4].rstrip())
-    check("шапка «Кол-во» по центру (m_s)", qty == "Кол-во" and abs(left - right) <= 1)
-    check("шапка «Сумма, м2» прижата вправо (m_s)",
-          area_head[5].strip() == "Сумма, м2" and area_head[5].endswith("Сумма, м2")
-          and len(area_head[5]) == fw[5])
-    area_row = [ln for ln in lines if ln and ln.split("\t")[1].strip().startswith("М1")][0].split("\t")
-    check("«№» и «Марка» в данных прижаты влево (m_s)",
-          area_row[0].startswith("1") and area_row[1].startswith("М1"))
-    check("сумма в данных прижата вправо (m_s)",
-          area_row[5].endswith("3.78") and len(area_row[5]) == fw[5])
-    check("«Всего:» — последней строкой раздела (m_s)",
-          any(ln.startswith("Всего:") for ln in lines))
-    check("ширина колонок: сумма(поля) + зазоры для n_s = 42 символа",
-          sum(FIELDS["n_s"]) + len(FIELDS["n_s"]) - 1 == 42)
+    lines = cnt_display([lin])
+    check("погонаж: «1  1500 мм» и «   2 шт.  3.00 м.п.»",
+          lines[0] == "1  1500 мм" and lines[1] == "   2 шт.  3.00 м.п.")
+    check("погонаж: итог «Всего: 3 шт. 3.90 м.п.»",
+          lines[-1] == "Всего: 3 шт. 3.90 м.п.")
+    lines = cnt_display([area])
+    check("площадь с маркой: «1  М1  2100x900 мм», «   2 шт.  3.78 м2»",
+          lines[0] == "1  М1  2100x900 мм" and lines[1] == "   2 шт.  3.78 м2")
+    check("площадь: позиции в порядке таблицы (М1 перед М10)",
+          lines[2].startswith("2  М10") and lines[-1] == "Всего: 3 шт. 4.50 м2")
+    check("между разделами одна пустая строка",
+          cnt_display([lin, area]).count("") == 1)
+    check("в списке нет табуляций и линий",
+          all("\t" not in ln and "|" not in ln and not set(ln) <= set("-") or ln == ""
+              for ln in cnt_display([lin, area])))
+    typical = cnt_display([lin, area])
+    check("типичные строки не длиннее %d символов (окно %d единиц)" % (MAX_LINE_CHARS, LIST_WIDTH_UNITS),
+          all(len(ln) <= MAX_LINE_CHARS for ln in typical))
+    from pathlib import Path
+    dcl = (Path(__file__).resolve().parent.parent / "Extraction" / "searchattvis.dcl").read_text(encoding="cp1251")
+    width = int(re.search(r'key = "lst_count";\s*width = (\d+);', dcl).group(1))
+    check("ширина списка в DCL = %d единиц (прежний максимум 252: не шире ~ трети)" % width,
+          width == LIST_WIDTH_UNITS and 252 / width >= 2.5)
+    check("высота списка 28 строк — вдвое больше 14",
+          28 == 2 * 14)
 
 
 
@@ -430,7 +365,7 @@ def main():
     scenario_rounding()
     scenario_layout()
     scenario_sort()
-    scenario_grid()
+    scenario_cards()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[SEARCH][OK]")
