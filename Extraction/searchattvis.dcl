@@ -130,6 +130,12 @@ searchattvis_dialog : dialog {
         fixed_width = true;
         width = 16;
       }
+      : button {
+        key = "btn_count";
+        label = "Подсчёт";
+        fixed_width = true;
+        width = 14;
+      }
 
       : button {
         key = "btn_reset";
@@ -149,3 +155,202 @@ searchattvis_dialog : dialog {
   }
 }
 
+searchattvis_count_n_s : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 176;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "28 68 96 124";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 176;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_n_l : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 208;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "28 76 112 148";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 208;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_m_s : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 200;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "28 52 92 120 148";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 200;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
+
+searchattvis_count_m_l : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 252;
+      height = 14;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "28 72 120 156 192";
+      tab_truncate = true;
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 252;
+      fixed_width = true;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 16;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 16;
+      }
+    }
+  }
+}
