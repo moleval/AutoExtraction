@@ -86,6 +86,16 @@
   found
 )
 
+(defun ae-sv-unique-ens (lst / seen out)
+  (setq seen (ssadd) out '())
+  (foreach en lst
+    (if (not (ssmemb en seen))
+      (progn
+        (ssadd en seen)
+        (setq out (cons en out)))))
+  (reverse out)
+)
+
 (defun ae-sv-unique (lst / out)
   (setq out '())
   (foreach x lst
@@ -115,9 +125,9 @@
   (reverse out)
 )
 
-;; Замороженный, заблокированный или выключенный слой — вставка не выбирается
-(defun ae-sv-layer-skip-p (en / ld flags color)
-  (setq ld (tblsearch "LAYER" (cdr (assoc 8 (entget en)))))
+;; Замороженный, заблокированный или выключенный слой (по имени) — вставка не выбирается
+(defun ae-sv-layer-name-skip-p (lname / ld flags color)
+  (setq ld (if (and (= (type lname) 'STR) (/= lname "")) (tblsearch "LAYER" lname) nil))
   (if (null ld)
     nil
     (progn
@@ -127,6 +137,11 @@
       (or (= 1 (logand flags 1))
           (= 4 (logand flags 4))
           (and (numberp color) (< color 0)))))
+)
+
+;; Вставка на замороженном, заблокированном или выключенном слое
+(defun ae-sv-layer-skip-p (en)
+  (ae-sv-layer-name-skip-p (cdr (assoc 8 (entget en))))
 )
 
 ;; Атрибуты вставки: список (тег . значение), пустые теги отброшены
@@ -205,7 +220,8 @@
                               (if (car dyn) (car (car dyn)) "")
                               (ae-sv-read-attrs vla)
                               (car dyn)
-                              (cdr dyn))
+                              (cdr dyn)
+                              (ae-sv-str (cdr (assoc 8 (entget en)))))
                         out)))))
   (reverse out)
 )
@@ -215,16 +231,21 @@
 ;; items: ((текст ename) ...) -> ((текст имена...) ...), по алфавиту
 ;; ============================================================
 
-(defun ae-sv-group (items / sorted out cur ens it)
+(defun ae-sv-group (items / sorted out cur ens seen it)
   (setq sorted
-    (vl-sort items '(lambda (a b) (< (strcase (car a)) (strcase (car b))))))
-  (setq out '() cur nil ens '())
+    (mapcar 'cdr
+      (vl-sort (mapcar '(lambda (it) (cons (strcase (car it)) it)) items)
+               '(lambda (a b) (< (car a) (car b))))))
+  (setq out '() cur nil ens '() seen nil)
   (foreach it sorted
     (if (and cur (= (car it) cur))
-      (if (not (member (cadr it) ens)) (setq ens (cons (cadr it) ens)))
+      (if (not (ssmemb (cadr it) seen))
+        (progn
+          (ssadd (cadr it) seen)
+          (setq ens (cons (cadr it) ens))))
       (progn
         (if cur (setq out (cons (cons cur (reverse ens)) out)))
-        (setq cur (car it) ens (list (cadr it))))))
+        (setq cur (car it) ens (list (cadr it)) seen (ssadd (cadr it))))))
   (if cur (setq out (cons (cons cur (reverse ens)) out)))
   (reverse out)
 )
@@ -347,15 +368,14 @@
   out
 )
 
-(defun ae-sv-entries (qa qb / out rec)
-  (setq out '())
+(defun ae-sv-entries (qa qb / acc rec part)
+  (setq acc '())
   (foreach rec *ae-sv-inserts*
-    (setq out
-      (append out
-        (if (= *ae-sv-mode* "attr")
-          (ae-sv-attr-entries rec qa qb)
-          (ae-sv-vis-entries rec qa qb)))))
-  out
+    (setq part (if (= *ae-sv-mode* "attr")
+                 (ae-sv-attr-entries rec qa qb)
+                 (ae-sv-vis-entries rec qa qb)))
+    (setq acc (append (reverse part) acc)))
+  (reverse acc)
 )
 
 ;; Список 1 (блоки): если выбраны пункты списка 2 — только блоки с ними
@@ -377,13 +397,15 @@
 )
 
 ;; Итог «Выбрать»: вставки, которые проходят и по выбранным блокам, и по выбранным пунктам
-(defun ae-sv-final (entries sel-b sel-i / ens)
-  (setq ens '())
+(defun ae-sv-final (entries sel-b sel-i / ens seen)
+  (setq ens '() seen (ssadd))
   (foreach e entries
     (if (and (or (null sel-b) (member (car e) sel-b))
              (or (null sel-i) (member (cadr e) sel-i))
-             (not (member (caddr e) ens)))
-      (setq ens (cons (caddr e) ens))))
+             (not (ssmemb (caddr e) seen)))
+      (progn
+        (ssadd (caddr e) seen)
+        (setq ens (cons (caddr e) ens)))))
   ens
 )
 
@@ -419,12 +441,20 @@
   s
 )
 
-;; Заполнить список строками «пункт (N)»; выбор восстанавливается по тексту пункта
-(defun ae-sv-fill (key rows sel / i idx)
-  (start_list key)
-  (foreach r rows
-    (add_list (strcat (car r) " (" (itoa (length (cdr r))) ")")))
-  (end_list)
+;; Заполнить список строками «пункт (N)»; выбор восстанавливается по тексту пункта.
+;; Список перерисовывается, только если его строки изменились (меньше мигания при обновлении).
+(setq *ae-sv-shown* nil)         ; строки, показанные в списках: ((ключ . строки) ...)
+
+(defun ae-sv-fill (key rows sel / i idx texts txt)
+  (setq texts (mapcar '(lambda (r) (strcat (car r) " (" (itoa (length (cdr r))) ")")) rows))
+  (if (not (equal texts (cdr (assoc key *ae-sv-shown*))))
+    (progn
+      (start_list key)
+      (foreach txt texts (add_list txt))
+      (end_list)
+      (setq *ae-sv-shown*
+        (cons (cons key texts)
+              (vl-remove-if '(lambda (x) (= (car x) key)) *ae-sv-shown*)))))
   (setq idx '() i 0)
   (foreach r rows
     (if (member (car r) sel) (setq idx (cons (itoa i) idx)))
@@ -460,7 +490,7 @@
       (strcat "Блоков: " (itoa (length rows1)) ", "
               (if (= *ae-sv-mode* "attr") "атрибутов: " "видимостей: ")
               (itoa (length rows2)) ", вставок: "
-              (itoa (length (ae-sv-unique (mapcar 'caddr entries))))
+              (itoa (length (ae-sv-unique-ens (mapcar 'caddr entries))))
               ". Область: " *ae-sv-scope-text*)))
   T
 )
@@ -477,7 +507,7 @@
                      " (" (itoa (length *ae-sv-rows2*)) "):"))
       (foreach r *ae-sv-rows2*
         (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))
-      (princ (strcat "\nВставок: " (itoa (length (ae-sv-unique (mapcar 'caddr *ae-sv-entries*))))
+      (princ (strcat "\nВставок: " (itoa (length (ae-sv-unique-ens (mapcar 'caddr *ae-sv-entries*))))
                      ". Область: " *ae-sv-scope-text*))))
   (princ)
 )
@@ -518,6 +548,7 @@
               (done_dialog 1))))))))
 
 (defun ae-sv-init (/ r)
+  (setq *ae-sv-shown* nil)
   (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
   (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "attr") "0" "1"))
   (ae-sv-set-hints)
@@ -613,13 +644,17 @@
 (setq *ae-sv-cnt-secs* nil)     ; разделы: (заголовок строки)
 (setq *ae-sv-cnt-rows* nil)     ; строки списка окна «Подсчёт» (списки полей)
 
-;; Значение динамического свойства с точным именем (без учёта регистра) или nil
-(defun ae-sv-prop-exact (rec name / hit)
-  (setq hit nil)
+;; Свойства вставки (ИМЯ-ПРОПИСНЫМИ . значение) — имена очищаются один раз на вставку
+(defun ae-sv-prop-up (rec / out)
+  (setq out '())
   (foreach p (nth 5 rec)
-    (if (and (null hit) (= (strcase (ae-sv-trim (car p))) (strcase name)))
-      (setq hit (cdr p))))
-  hit
+    (setq out (cons (cons (strcase (ae-sv-trim (car p))) (cdr p)) out)))
+  (reverse out)
+)
+
+;; Значение свойства по имени (точное совпадение, регистр не важен); первое совпадение
+(defun ae-sv-prop-get (up name)
+  (cdr (assoc (strcase name) up))
 )
 
 ;; Значение атрибута «Марка» (без учёта регистра) или ""
@@ -673,23 +708,24 @@
 )
 
 ;; Первый положительный размер в миллиметрах по списку ключей, либо nil
-(defun ae-sv-dim-of (rec keys / hit)
+(defun ae-sv-dim-of (up keys / hit)
   (setq hit nil)
   (foreach k keys
     (if (null hit)
-      (setq hit (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec k))))))
+      (setq hit (ae-sv-mm (ae-sv-num (ae-sv-prop-get up k))))))
   hit
 )
 
 ;; Размер вставки: ("A" высота ширина) — площадь; ("L" длина nil) — погонаж; nil — размера нет.
-;; Припуск добавляется к высоте и ширине блоков по маскам, только для площади.
-(defun ae-sv-size-of (rec / h w l add)
-  (setq h (ae-sv-dim-of rec *ae-sv-height-keys*)
-        w (ae-sv-dim-of rec *ae-sv-width-keys*)
-        l (ae-sv-mm (ae-sv-num (ae-sv-prop-exact rec "Длина"))))
+;; Припуск (allow) добавляется к высоте и ширине блоков по маскам, только для площади.
+(defun ae-sv-size-of (rec allow / h w l add up)
+  (setq up (ae-sv-prop-up rec))
+  (setq h (ae-sv-dim-of up *ae-sv-height-keys*)
+        w (ae-sv-dim-of up *ae-sv-width-keys*)
+        l (ae-sv-mm (ae-sv-num (ae-sv-prop-get up "Длина"))))
   (if (and h (ae-sv-frame-p rec))
     (progn
-      (setq add (ae-sv-allowance))
+      (setq add allow)
       (setq h (+ h add))
       (if w (setq w (+ w add)))))
   (cond
@@ -699,10 +735,10 @@
 )
 
 ;; Группы: ((вид марка размер1 размер2) . количество); nosize — вставки без размера
-(defun ae-sv-calc (recs / groups nosize sz key hit)
-  (setq groups '() nosize 0)
+(defun ae-sv-calc (recs / groups nosize sz key hit allow)
+  (setq groups '() nosize 0 allow (ae-sv-allowance))
   (foreach r recs
-    (setq sz (ae-sv-size-of r))
+    (setq sz (ae-sv-size-of r allow))
     (if (null sz)
       (setq nosize (1+ nosize))
       (progn
@@ -817,15 +853,22 @@
   (reverse secs)
 )
 
-(defun ae-sv-skip-rec (r) (ae-sv-layer-skip-p (car r)))
-
-;; Вставки выбора: пересечение выбранных блоков и пунктов; замороженные/выключенные слои — нет
-(defun ae-sv-count-recs (sel-b sel-i / ens ss)
+;; Вставки выбора: пересечение выбранных блоков и пунктов; замороженные/выключенные слои — нет.
+;; Слой проверяется один раз на имя слоя (кэш), а не на каждую вставку.
+(defun ae-sv-count-recs (sel-b sel-i / ens ss cache out lay)
   (setq ens (if (or sel-b sel-i) (ae-sv-final *ae-sv-entries* sel-b sel-i) nil))
   (setq ss (ssadd))
   (foreach en ens (ssadd en ss))
-  (vl-remove-if 'ae-sv-skip-rec
-    (vl-remove-if-not '(lambda (r) (ssmemb (car r) ss)) *ae-sv-inserts*))
+  (setq cache '() out '())
+  (foreach r *ae-sv-inserts*
+    (if (ssmemb (car r) ss)
+      (progn
+        (setq lay (nth 6 r))
+        (if (null (assoc lay cache))
+          (setq cache (cons (cons lay (ae-sv-layer-name-skip-p lay)) cache)))
+        (if (null (cdr (assoc lay cache)))
+          (setq out (cons r out))))))
+  (reverse out)
 )
 
 (defun ae-sv-join-sep (lst sep / s first)
@@ -1137,8 +1180,10 @@
 )
 
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
-(defun ae-sv-count-dialog (/ dcl-file dcl-id)
+(defun ae-sv-count-dialog (/ dcl-file dcl-id t0)
+  (setq t0 (getvar "MILLISECS"))
   (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
+  (princ (strcat "\nПодсчёт: расчёт " (itoa (- (getvar "MILLISECS") t0)) " мс."))
   (setq *ae-sv-next* "close")
   (setq dcl-file (ae-sv-dcl-file))
   (if (null dcl-file)
@@ -1298,7 +1343,7 @@
       (reverse out)))
 )
 
-(defun ae-sv-load-scope (/ pre ens)
+(defun ae-sv-load-scope (/ pre ens t0)
   (setq pre (ssget "_I"))
   (setq ens (if pre (ae-sv-model-inserts pre) (ae-sv-all-model-inserts)))
   (cond
@@ -1312,7 +1357,10 @@
      (setq *ae-sv-scope-text*
        (strcat (if pre "выделенные" "весь чертёж")
                " (" (itoa (length ens)) " вставок)"))
+     (setq t0 (getvar "MILLISECS"))
      (setq *ae-sv-inserts* (ae-sv-collect ens))
+     (princ (strcat "\nПоиск: вставок " (itoa (length ens))
+                    ", сбор данных " (itoa (- (getvar "MILLISECS") t0)) " мс."))
      T))
 )
 
