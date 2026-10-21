@@ -667,9 +667,24 @@
 )
 
 ;; Число из строки или nil
-(defun ae-sv-num (s)
+;; Первое число в строке: «1500», «1500.0», «1500,5», «1500 мм» (знак минус в начале)
+(defun ae-sv-num-prefix (s / out i a)
+  (setq s (ae-sv-trim s) out "" i 1)
+  (while (and (<= i (strlen s))
+              (progn
+                (setq a (ascii (substr s i 1)))
+                (or (and (>= a 48) (<= a 57)) (= a 46) (= a 44) (= a 45))))
+    (setq out (strcat out (substr s i 1)) i (1+ i)))
+  out
+)
+
+(defun ae-sv-num (s / p r)
   (if (and (= (type s) 'STR) (/= s ""))
-    (distof s 2)
+    (progn
+      (setq p (ae-sv-num-prefix s))
+      (setq r (distof p 2))
+      (if (null r) (setq r (distof (vl-string-translate ".," ",." p) 2)))
+      r)
     nil)
 )
 
@@ -896,16 +911,37 @@
 )
 
 ;; Данные окна «Подсчёт» по выбранным блокам (и пунктам): строки списка и разделы
-(defun ae-sv-cnt-data (sel-b sel-i / rows secs)
+;; Текст диагностики, если размеров нет: сколько вставок выбрано, сколько отброшено по слоям
+;; и какие свойства прочитаны у первой вставки
+(defun ae-sv-prop-list-text (props / out n)
+  (setq out '() n 0)
+  (foreach p props
+    (if (< n 8)
+      (setq out (cons (strcat (car p) "=" (cdr p)) out) n (1+ n))))
+  (if out (ae-sv-join-sep (reverse out) "; ") "нет")
+)
+
+(defun ae-sv-nosize-text (sel-b sel-i recs / ens-n skip head)
+  (setq ens-n (length (ae-sv-final *ae-sv-entries* sel-b sel-i)))
+  (setq skip (- ens-n (length recs)))
+  (setq head (if (= (length sel-b) 1)
+               (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
+               "У выбранных блоков нет погонажа или площади"))
+  (strcat head ". Вставок: " (itoa ens-n)
+          ", на замороженных, заблокированных или выключенных слоях: " (itoa skip)
+          ". Свойства: "
+          (if recs (ae-sv-prop-list-text (nth 5 (car recs))) "нет"))
+)
+
+(defun ae-sv-cnt-data (sel-b sel-i / rows secs recs)
   (setq rows '() secs '())
   (if (null sel-b)
     (setq rows (list (list "Выберите блок в списке слева")))
     (progn
-      (setq secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)))
+      (setq recs (ae-sv-count-recs sel-b sel-i))
+      (setq secs (ae-sv-build-sections recs))
       (if (null secs)
-        (setq rows (list (list (if (= (length sel-b) 1)
-                                 (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
-                                 "У выбранных блоков нет погонажа или площади"))))
+        (setq rows (list (list (ae-sv-nosize-text sel-b sel-i recs))))
         (foreach sec secs
           (setq rows (append rows (cadr sec)))))))
   (setq *ae-sv-cnt-secs* secs)
