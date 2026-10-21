@@ -327,7 +327,7 @@ def cnt_bounds(widths):
 
 def cnt_row(cells, aligns, widths):
     parts = ["| " + cnt_pad(c, w, al) for c, al, w in zip(cells, aligns, widths)]
-    return " " + "\t".join(parts) + " "
+    return " " + "\t".join(parts + ["|"]) + " "
 
 
 def cnt_dashes(gap):
@@ -336,7 +336,7 @@ def cnt_dashes(gap):
 
 def cnt_line(widths):
     bd = cnt_bounds(widths)
-    return " " + "\t".join("+" + "-" * cnt_dashes(bd[k + 1] - bd[k]) for k in range(len(widths))) + " "
+    return " " + "\t".join(["+" + "-" * cnt_dashes(bd[k + 1] - bd[k]) for k in range(len(widths))] + ["+"]) + " "
 
 
 def cnt_marks(secs):
@@ -381,8 +381,8 @@ def scenario_table():
     lines = cnt_display([area])
     row_m1 = [ln for ln in lines if "М1" in ln][0]
     check("позиция М1: «1 | М1 | 2100x900 | 2 шт. | 3.78 м2» (как в примере)",
-          cells(row_m1) == ["| 1", "| М1", "| 2100x900", "| 2 шт.", "| 3.78 м2"]
-          or [c.lstrip("| ").strip() for c in cells(row_m1)] == ["1", "М1", "2100x900", "2 шт.", "3.78 м2"])
+          cells(row_m1)[:-1] == ["| 1", "| М1", "| 2100x900", "| 2 шт.", "| 3.78 м2"]
+          or [c.lstrip("| ").strip() for c in cells(row_m1)[:-1]] == ["1", "М1", "2100x900", "2 шт.", "3.78 м2"])
     total = [ln for ln in lines if "Всего:" in ln][0]
     check("итог: «Всего:», 12 шт., 127.56 м2 (сумма групп)",
           "12 шт." in total and "127.56 м2" in total)
@@ -394,9 +394,9 @@ def scenario_table():
     lin_lines = cnt_display([lin])
     row_1 = [ln for ln in lin_lines if "1500" in ln][0]
     check("погонаж без марок: «1 | 1500 | 2 шт. | 3.00 м.п.»",
-          [c.lstrip("| ").strip() for c in cells(row_1)] == ["1", "1500", "2 шт.", "3.00 м.п."])
+          [c.lstrip("| ").strip() for c in cells(row_1)[:-1]] == ["1", "1500", "2 шт.", "3.00 м.п."])
     check("погонаж: «Всего:» есть, колонка марки отсутствует",
-          any("Всего:" in ln for ln in lin_lines) and len(cells(row_1)) == len(WIDTHS["n"]))
+          any("Всего:" in ln for ln in lin_lines) and len(cells(row_1)) - 1 == len(WIDTHS["n"]))
     check("без марок — вариант n: 4 колонки; с марками — m: 5 колонок",
           len(WIDTHS["n"]) == 4 and len(WIDTHS["m"]) == 5)
     for name, secs in (("n", [lin]), ("m", [area]), ("m+n", [area, lin])):
@@ -404,8 +404,8 @@ def scenario_table():
         widths = WIDTHS[key]
         out = cnt_display(secs)
         rows = [ln for ln in out if "\t" in ln]
-        check("%s: каждая строка — %d ячеек, после последней колонки символа нет" % (name, len(widths)),
-              all(len(ln.split("\t")) == len(widths) and not ln.rstrip().endswith(("|", "+")) for ln in rows))
+        check("%s: каждая строка — %d ячеек и закрывающий «|» или «+» справа" % (name, len(widths)),
+              all(len(ln.split("\t")) == len(widths) + 1 and ln.rstrip()[-1] in "|+" for ln in rows))
         bd = cnt_bounds(widths)
         check("%s: дефисы не доходят до следующей табуляции (1 + N/2 < ширины ячейки)" % name,
               all(1 + cnt_dashes(bd[k + 1] - bd[k]) / 2 < bd[k + 1] - bd[k] for k in range(len(widths))))
@@ -419,7 +419,7 @@ def scenario_table():
           cnt_display([area, lin]).count("") == 1)
     head = [ln for ln in lines if "Размеры" in ln][0]
     check("шапка с «Всего» — подпись прижата вправо",
-          cells(head)[-1].endswith("Всего"))
+          cells(head)[-2].endswith("Всего"))
     widths_m = max(cnt_units(sum(w + 2 for w in WIDTHS["m"]) + 2) + 6, 48 + 2)
     widths_n = max(cnt_units(sum(w + 2 for w in WIDTHS["n"]) + 2) + 6, 48 + 2)
     check("ширина окна: без марок %d, с марками %d единиц (колонка «Марка» 20, пробелы по краям)" % (widths_n, widths_m),

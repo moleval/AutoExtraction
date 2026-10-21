@@ -1020,11 +1020,11 @@
   (strcat (ae-sv-spaces pad) text)
 )
 
-;; —трока таблицы: Ђ| €чейкаї на каждой позиции табул€ции; после последней колонки символа нет
+;; —трока таблицы: Ђ| €чейкаї на каждой позиции табул€ции; справа Ч закрывающа€ Ђ|ї на правой границе таблицы
 (defun ae-sv-cnt-row (cells aligns widths / parts)
   (setq parts
     (mapcar '(lambda (c al w) (strcat "| " (ae-sv-cnt-pad c w al))) cells aligns widths))
-  (strcat " " (ae-sv-join-sep parts (chr 9)) " ")
+  (strcat " " (ae-sv-join-sep (append parts (list "|")) (chr 9)) " ")
 )
 
 ;; ≈диница ширины списка по символам (как в табул€ци€х DCL): 1 символ примерно 1,2 единицы
@@ -1042,14 +1042,16 @@
 
 ;; Ћини€ таблицы: между Ђ+ї на позици€х табул€ций Ч дефисы. ƒефис примерно 0,5 единицы, Ђ+ї примерно 1 единица,
 ;; поэтому между двум€ табул€ци€ми (G единиц) ставитс€ 2G-3 дефисов: лини€ доходит почти до
-;; следующего Ђ+ї и не перескакивает табул€цию (запас 3 дефиса). —права от последней колонки Ч без Ђ+ї.
+;; следующего Ђ+ї и не перескакивает табул€цию (запас 3 дефиса). —права Ч закрывающий Ђ+ї на правой границе.
 (defun ae-sv-cnt-line (widths / bd)
   (setq bd (ae-sv-cnt-bounds widths))
   (strcat " "
     (ae-sv-join-sep
-      (mapcar '(lambda (x0 x1) (strcat "+" (ae-sv-dashes (- (* 2 (- x1 x0)) 3))))
-              (reverse (cdr (reverse bd)))
-              (cdr bd))
+      (append
+        (mapcar '(lambda (x0 x1) (strcat "+" (ae-sv-dashes (- (* 2 (- x1 x0)) 3))))
+                (reverse (cdr (reverse bd)))
+                (cdr bd))
+        (list "+"))
       (chr 9))
     " ")
 )
