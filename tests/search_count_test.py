@@ -343,14 +343,41 @@ def cnt_marks(secs):
     return any("Марка" in cols for cols, _ in secs)
 
 
-def cnt_display(secs):
+def cnt_wrap(text, maxw):
+    lines, line = [], ""
+    for w in text.split():
+        if not line:
+            line = w
+        elif len(line) + 1 + len(w) <= maxw:
+            line += " " + w
+        else:
+            lines.append(line)
+            line = w
+    if line:
+        lines.append(line)
+    return lines
+
+
+def cnt_title_rows(names, total):
+    out = []
+    for n in names:
+        for ln in cnt_wrap(n, total - 2):
+            pad = (total - len(ln)) // 2
+            out.append(" " + " " * max(0, pad) + ln)
+    return out
+
+
+def cnt_display(secs, names=()):
     marks = cnt_marks(secs)
     key = "m" if marks else "n"
     widths = WIDTHS[key]
-    out = [cnt_line(widths)]
+    total = sum(w + 2 for w in widths)
+    out = []
     for idx, (cols, rows) in enumerate(secs):
         if idx:
             out.append("")
+        out += cnt_title_rows(names, total)
+        out.append(cnt_line(widths))
         body = rows[1:]
         items, tot = body[:-1], body[-1]
         out.append(cnt_row(HEADS[key], HEAD_ALIGNS[key], widths))
@@ -426,6 +453,28 @@ def scenario_table():
           widths_n == 50 and widths_m == 76)
     check("колонка «Марка» 20 символов: «В-1 А-1» и марки до 20 символов помещаются",
           all(len(m) <= 20 for m in ["В-1 А-1", "М122", "МАРКА-ДЛИННАЯ-20сим"]))
+    tot_m = sum(w + 2 for w in WIDTHS["m"])
+    one = cnt_display([area], ("ВН-2 Б6",))
+    head_line = one[0]
+    check("заголовок: название блока — первая строка таблицы, по центру (пробелы слева = (ширина − длина) / 2 + 1)",
+          head_line.strip() == "ВН-2 Б6" and len(head_line) - len(head_line.lstrip(" ")) == (tot_m - len("ВН-2 Б6")) // 2 + 1)
+    frame_after = one[1]
+    check("заголовок стоит над рамкой: следующая строка — линия",
+          frame_after.strip() and set(frame_after.strip()) <= set("+-\t"))
+    two = cnt_display([area], ("ВН-2 Б6", "ВН-2 Б12.1"))
+    check("несколько блоков — каждое название в своей строке (две строки заголовка)",
+          [ln.strip() for ln in two[:2]] == ["ВН-2 Б6", "ВН-2 Б12.1"] and two[2].strip().startswith("+"))
+    long_name = "ОЧЕНЬ ДЛИННОЕ НАЗВАНИЕ БЛОКА ВН-2 Б12.1 С ДОПОЛНИТЕЛЬНЫМ ТЕКСТОМ ДЛЯ ПЕРЕНОСА"
+    lng = cnt_display([area], (long_name,))
+    head_rows = [ln for ln in lng if ln.strip() and "+" not in ln and "|" not in ln]
+    check("длинное название переносится по словам, строки не длиннее таблицы",
+          len(head_rows) >= 2 and all(len(ln.strip()) <= tot_m - 2 for ln in head_rows)
+          and " ".join(ln.strip() for ln in head_rows) == long_name)
+    both = cnt_display([area, lin], ("ВН-2 Б6",))
+    check("два раздела — заголовок над каждым разделом, отдельно от предыдущего",
+          sum(1 for ln in both if ln.strip() == "ВН-2 Б6") == 2)
+    check("без выбранного блока заголовка нет",
+          not any("ВН-2" in ln for ln in cnt_display([area])))
 
 
 

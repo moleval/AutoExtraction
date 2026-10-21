@@ -1061,24 +1061,63 @@
   (cdr (assoc (if marks "m" "n") *ae-sv-cnt-widths*))
 )
 
-;; —троки списка ЂѕодсчЄтї: разделы подр€д, между разделами Ч пуста€ строка
-(defun ae-sv-cnt-display (/ marks widths out first cols body items heads)
+;; —лова строки (разделитель Ч пробел)
+(defun ae-sv-words (text / out cur i n c)
+  (setq out '() cur "" i 1 n (strlen text))
+  (while (<= i n)
+    (setq c (substr text i 1))
+    (if (= c " ")
+      (progn
+        (if (/= cur "") (setq out (cons cur out)))
+        (setq cur ""))
+      (setq cur (strcat cur c)))
+    (setq i (1+ i)))
+  (if (/= cur "") (setq out (cons cur out)))
+  (reverse out)
+)
+
+;; ѕеренос текста по словам в строки не длиннее maxw (слово длиннее maxw Ч отдельной строкой)
+(defun ae-sv-wrap (text maxw / lines line w)
+  (setq lines '() line "")
+  (foreach w (ae-sv-words text)
+    (cond
+      ((= line "") (setq line w))
+      ((<= (+ (strlen line) 1 (strlen w)) maxw) (setq line (strcat line " " w)))
+      (T (setq lines (cons line lines) line w))))
+  (if (/= line "") (setq lines (cons line lines)))
+  (reverse lines)
+)
+
+;; «аголовок таблицы ЂѕодсчЄтї: название каждого выбранного блока Ч своей строкой, по центру таблицы.
+;; total Ч ширина таблицы в символах (сумма €чеек W + 2); центрирование пробелами слева.
+(defun ae-sv-cnt-title-rows (names total / out pad)
+  (setq out '())
+  (foreach n names
+    (foreach ln (ae-sv-wrap n (- total 2))
+      (setq pad (/ (- total (strlen ln)) 2))
+      (setq out (append out (list (strcat " " (ae-sv-spaces pad) ln))))))
+  out
+)
+
+;; —троки списка ЂѕодсчЄтї: разделы подр€д, между разделами Ч пуста€ строка; над каждым разделом Ч заголовок
+(defun ae-sv-cnt-display (/ marks widths out cols body items heads total)
   (if (null *ae-sv-cnt-secs*)
     (mapcar 'car *ae-sv-cnt-rows*)
     (progn
       (setq marks (ae-sv-cnt-marks-p *ae-sv-cnt-secs*)
             widths (ae-sv-cnt-widths-of marks)
             heads (ae-sv-cnt-heads marks)
-            out (list (ae-sv-cnt-line widths))
-            first T)
+            total (apply '+ (mapcar '(lambda (w) (+ w 2)) widths))
+            out '())
       (foreach sec *ae-sv-cnt-secs*
         (setq cols (car (cadr sec))
               body (cdr (cadr sec))
               items (reverse (cdr (reverse body))))
-        (if (not first) (setq out (append out (list ""))))
-        (setq first nil)
+        (if out (setq out (append out (list ""))))
+        (setq out (append out (ae-sv-cnt-title-rows (car *ae-sv-count-sel*) total)))
         (setq out (append out
-                          (list (ae-sv-cnt-row heads (ae-sv-cnt-head-aligns marks) widths)
+                          (list (ae-sv-cnt-line widths)
+                                (ae-sv-cnt-row heads (ae-sv-cnt-head-aligns marks) widths)
                                 (ae-sv-cnt-line widths))))
         (foreach row items
           (setq out (append out
