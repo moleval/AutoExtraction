@@ -443,6 +443,7 @@
 
 ;; Заполнить список строками «пункт (N)»; выбор восстанавливается по тексту пункта.
 ;; Список перерисовывается, только если его строки изменились (меньше мигания при обновлении).
+(setq *ae-sv-entries-key* nil *ae-sv-entries-cache* nil)  ; кэш записей окна: (режим запрос1 запрос2)
 (setq *ae-sv-shown* nil)         ; строки, показанные в списках: ((ключ . строки) ...)
 
 (defun ae-sv-fill (key rows sel / i idx texts txt)
@@ -463,6 +464,16 @@
 )
 
 ;; Обновление обоих списков и статуса. Каждый список сужает другой.
+;; Записи окна по режиму и запросам — один раз; выбор строк их не меняет
+(defun ae-sv-entries-cached (qa qb / key)
+  (setq key (list *ae-sv-mode* qa qb))
+  (if (equal key *ae-sv-entries-key*)
+    *ae-sv-entries-cache*
+    (progn
+      (setq *ae-sv-entries-cache* (ae-sv-entries qa qb))
+      (setq *ae-sv-entries-key* key)
+      *ae-sv-entries-cache*)))
+
 (defun ae-sv-refresh (/ qa qb sel-b sel-i entries rows1 rows2)
   (setq qa (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
   (setq qb (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
@@ -473,7 +484,7 @@
     (progn
       (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
       (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))))
-  (setq entries (ae-sv-entries qa qb))
+  (setq entries (ae-sv-entries-cached qa qb))
   (setq rows1 (ae-sv-list1 entries sel-i))
   (setq rows2 (ae-sv-list2 entries sel-b))
   (setq sel-b (ae-sv-keep sel-b rows1))
@@ -1395,6 +1406,7 @@
                " (" (itoa (length ens)) " вставок)"))
      (setq t0 (getvar "MILLISECS"))
      (setq *ae-sv-inserts* (ae-sv-collect ens))
+     (setq *ae-sv-entries-key* nil *ae-sv-entries-cache* nil)
      (princ (strcat "\nПоиск: вставок " (itoa (length ens))
                     ", сбор данных " (itoa (- (getvar "MILLISECS") t0)) " мс."))
      T))
