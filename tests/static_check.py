@@ -1814,6 +1814,8 @@ def check_search_count_grid() -> list[str]:
     dcl_text = read_text(dcl)
     if 'new_dialog (strcat "searchattvis_count_" key)' not in lsp:
         errors.append("Extraction/searchattvis.lsp: окно «Подсчёт» не выбирает вариант DCL по ключу")
+    if re.search(r"\(or \((?:nth|c[ad]+r)\b", lsp):
+        errors.append("Extraction/searchattvis.lsp: (or (nth|cadr…)) возвращает T, а не значение; использовать if")
     if '"searchattvis_count"' in lsp:
         errors.append("Extraction/searchattvis.lsp: остался старый диалог searchattvis_count")
     m = re.search(r"\(setq \*ae-sv-cnt-fields\*(.*?)\n\n", lsp, re.S)

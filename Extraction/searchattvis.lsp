@@ -752,13 +752,14 @@
 (defun ae-sv-sorted (groups kind)
   (vl-sort
     (vl-remove-if-not '(lambda (g) (= (car (car g)) kind)) groups)
-    '(lambda (a b / ka kb)
+    '(lambda (a b / ka kb wa wb)
        (setq ka (ae-sv-nat-key (cadr (car a))) kb (ae-sv-nat-key (cadr (car b))))
+       (setq wa (if (cadddr (car a)) (cadddr (car a)) 0)
+             wb (if (cadddr (car b)) (cadddr (car b)) 0))
        (cond
          ((not (= ka kb)) (ae-sv-str-less ka kb))
          ((/= (caddr (car a)) (caddr (car b))) (< (caddr (car a)) (caddr (car b))))
-         ((/= (or (cadddr (car a)) 0) (or (cadddr (car b)) 0))
-          (< (or (cadddr (car a)) 0) (or (cadddr (car b)) 0)))
+         ((/= wa wb) (< wa wb))
          (T (ae-sv-str-less (cadr (car a)) (cadr (car b))))))
   )
 )
@@ -993,7 +994,7 @@
   (setq i 0)
   (foreach h cols
     (setq slot (ae-sv-cnt-slot h marks))
-    (if slot (setq out (ae-sv-cnt-put out slot (or (nth i cells) ""))))
+    (if slot (setq out (ae-sv-cnt-put out slot (if (nth i cells) (nth i cells) ""))))
     (setq i (1+ i)))
   (setq lst '() k 0)
   (foreach text out
@@ -1030,7 +1031,7 @@
       (setq i 0)
       (foreach h cols
         (setq slot (ae-sv-cnt-slot h marks))
-        (if (and slot (> (strlen (or (nth i row) "")) (nth slot fw))) (setq ok nil))
+        (if (and slot (> (strlen (if (nth i row) (nth i row) "")) (nth slot fw))) (setq ok nil))
         (setq i (1+ i)))))
   ok
 )
