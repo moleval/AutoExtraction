@@ -931,19 +931,20 @@
 )
 
 ;; ============================================================
-;; Окно «Подсчёт»: список — сетка ячеек. Один список для погонажа и площади:
-;;   без марок:  № | Размер 1 | Размер 2 | Кол-во | Сумма
-;;   с марками:  № | Марка | Размер 1 | Размер 2 | Кол-во | Сумма
+;; Окно «Подсчёт»: список — колонки без линий, разделены табуляцией.
+;; Без марок:  № | Размер 1 | Размер 2 | Кол-во | Сумма
+;; С марками:  № | Марка | Размер 1 | Размер 2 | Кол-во | Сумма
 ;; Размер 1 — «Длина, мм» (погонаж) или «Высота» (площадь); Размер 2 — «Ширина»
 ;; (у погонажа пустой). Ширина поля F, символов: ключ n_s / m_s — компактно,
-;; n_l / m_l — широко. Диалог searchattvis_count_<ключ> в DCL задаёт ширину окна и
-;; позиции табуляции по тем же F; сверку делает tests/static_check.py.
+;; n_l / m_l — широко. Между колонками зазор в 1 символ; последняя колонка без зазора.
+;; Диалог searchattvis_count_<ключ> в DCL задаёт ширину окна и табуляции по тем же F
+;; (сверка в tests/static_check.py, check_search_count_grid). Вариант — по данным.
 ;; ============================================================
 (setq *ae-sv-cnt-fields*
-  (quote (("n_s" 6 9 8 6 11)
-          ("n_l" 7 11 10 8 13)
-          ("m_s" 6 8 9 8 6 11)
-          ("m_l" 7 14 11 10 8 13))))
+  (quote (("n_s" 6 9 6 6 11)
+          ("n_l" 6 11 8 8 13)
+          ("m_s" 6 5 9 6 6 11)
+          ("m_l" 6 10 11 8 8 13))))
 
 (defun ae-sv-spaces (n / s)
   (setq s "")
@@ -951,7 +952,7 @@
   s
 )
 
-;; Номер колонки сетки по заголовку (nil — такой колонки нет)
+;; Номер колонки по заголовку (nil — такой колонки нет)
 (defun ae-sv-cnt-slot (h marks)
   (cond
     ((= h "№") 0)
@@ -972,11 +973,11 @@
     (T 1))
 )
 
-;; Ячейка: «| » и текст, выровненный пробелами внутри ширины w
+;; Ячейка: текст, выровненный пробелами внутри ширины поля w
 (defun ae-sv-cnt-field (text w al / n pad)
   (setq n (strlen text))
   (setq pad (cond ((= al 1) (/ (- w n) 2)) ((= al 2) (- w n)) (T 0)))
-  (strcat "| " (ae-sv-spaces pad) text)
+  (strcat (ae-sv-spaces pad) text)
 )
 
 (defun ae-sv-cnt-put (lst idx val / k out)
@@ -987,7 +988,7 @@
   (reverse out)
 )
 
-;; Строка списка: ячейки по колонкам сетки; разделитель — табуляция; в конце «|»
+;; Строка списка: ячейки по колонкам; разделитель — табуляция
 (defun ae-sv-cnt-line (cols cells marks key header-p / fw out i k lst slot)
   (setq fw (cdr (assoc key *ae-sv-cnt-fields*)))
   (setq out (ae-sv-blanks (length fw)))
@@ -998,20 +999,9 @@
     (setq i (1+ i)))
   (setq lst '() k 0)
   (foreach text out
-    (setq lst (cons (strcat (ae-sv-cnt-field text (nth k fw) (ae-sv-cnt-align k marks header-p))
-                            (if (= k (1- (length fw))) " |" ""))
-                    lst))
+    (setq lst (cons (ae-sv-cnt-field text (nth k fw) (ae-sv-cnt-align k marks header-p)) lst))
     (setq k (1+ k)))
   (ae-sv-join-sep (reverse lst) (chr 9))
-)
-
-;; Горизонтальная линия по ширине сетки
-(defun ae-sv-cnt-dash (key / fw n s)
-  (setq fw (cdr (assoc key *ae-sv-cnt-fields*)))
-  (setq n (+ 2 (apply '+ (mapcar '(lambda (f) (+ f 2)) fw))))
-  (setq s "")
-  (repeat n (setq s (strcat s "-")))
-  s
 )
 
 (defun ae-sv-cnt-marks-p (secs / hit)
@@ -1042,17 +1032,17 @@
   (strcat (if marks "m" "n") "_" (if (ae-sv-cnt-fits secs marks "s") "s" "l"))
 )
 
-;; Строки сетки: линия сверху, шапка, линия, строки, линия; между разделами — пустая строка
-(defun ae-sv-cnt-display (key / marks dash out cols first)
+;; Строки списка: шапка и строки разделов; между разделами — пустая строка
+(defun ae-sv-cnt-display (key / marks out cols first)
   (setq marks (= (substr key 1 1) "m"))
-  (setq dash (ae-sv-cnt-dash key) out (list dash) first T)
+  (setq out '() first T)
   (foreach sec *ae-sv-cnt-secs*
     (setq cols (car (cadr sec)))
     (if (not first) (setq out (append out (list ""))))
     (setq first nil)
-    (setq out (append out (list (ae-sv-cnt-line cols cols marks key T) dash)))
+    (setq out (append out (list (ae-sv-cnt-line cols cols marks key T))))
     (foreach row (cdr (cadr sec))
-      (setq out (append out (list (ae-sv-cnt-line cols row marks key nil) dash)))))
+      (setq out (append out (list (ae-sv-cnt-line cols row marks key nil))))))
   out
 )
 

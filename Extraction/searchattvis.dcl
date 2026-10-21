@@ -164,18 +164,18 @@ searchattvis_count_n_s : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 216;
+      width = 176;
       height = 14;
       fixed_width = true;
       fixed_height = true;
-      tabs = "32 76 116 148";
+      tabs = "28 68 96 124";
       tab_truncate = true;
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 216;
+      width = 176;
       fixed_width = true;
     }
 
@@ -214,18 +214,18 @@ searchattvis_count_n_l : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 252;
+      width = 208;
       height = 14;
       fixed_width = true;
       fixed_height = true;
-      tabs = "36 88 136 176";
+      tabs = "28 76 112 148";
       tab_truncate = true;
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 252;
+      width = 208;
       fixed_width = true;
     }
 
@@ -264,18 +264,18 @@ searchattvis_count_m_s : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 256;
+      width = 200;
       height = 14;
       fixed_width = true;
       fixed_height = true;
-      tabs = "32 72 116 156 188";
+      tabs = "28 52 92 120 148";
       tab_truncate = true;
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 256;
+      width = 200;
       fixed_width = true;
     }
 
@@ -314,18 +314,18 @@ searchattvis_count_m_l : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 316;
+      width = 252;
       height = 14;
       fixed_width = true;
       fixed_height = true;
-      tabs = "36 100 152 200 240";
+      tabs = "28 72 120 156 192";
       tab_truncate = true;
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 316;
+      width = 252;
       fixed_width = true;
     }
 

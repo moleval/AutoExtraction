@@ -268,11 +268,11 @@ def scenario_sort():
 
 
 # ----------------------------------------------------------------------
-# Сетка окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
+# Колонки окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
 # ----------------------------------------------------------------------
 
 def read_grid_fields():
-    """Поля сетки читаются из lsp, чтобы тест проверял реальные значения."""
+    """Поля читаются из lsp, чтобы тест проверял реальные значения."""
     import re
     from pathlib import Path
     lsp = Path(__file__).resolve().parent.parent / "Extraction" / "searchattvis.lsp"
@@ -317,7 +317,7 @@ def cnt_field(text, w, al):
         pad = w - n
     else:
         pad = 0
-    return "| " + " " * max(0, pad) + text
+    return " " * max(0, pad) + text
 
 
 def cnt_line(cols, cells, marks, key, header):
@@ -326,18 +326,9 @@ def cnt_line(cols, cells, marks, key, header):
     for i, h in enumerate(cols):
         slot = cnt_slot(h, marks)
         if slot is not None:
-            out[slot] = cells[i] if i < len(cells) else ""
-    parts = []
-    for k, text in enumerate(out):
-        f = cnt_field(text, fw[k], cnt_align(k, marks, header))
-        if k == len(fw) - 1:
-            f += " |"
-        parts.append(f)
-    return "\t".join(parts)
-
-
-def cnt_dash(key):
-    return "-" * (2 + sum(f + 2 for f in FIELDS[key]))
+            out[slot] = cells[i] if i < len(cells) and cells[i] else ""
+    return "\t".join(cnt_field(t, fw[k], cnt_align(k, marks, header))
+                     for k, t in enumerate(out))
 
 
 def cnt_fits(secs, marks, size):
@@ -359,88 +350,71 @@ def cnt_key(secs):
 
 def cnt_display(secs, key):
     marks = key[0] == "m"
-    dash = cnt_dash(key)
-    out = [dash]
+    out = []
     for idx, (cols, rows) in enumerate(secs):
         if idx:
             out.append("")
         out.append(cnt_line(cols, cols, marks, key, True))
-        out.append(dash)
         for row in rows[1:]:
             out.append(cnt_line(cols, row, marks, key, False))
-            out.append(dash)
     return out
 
 
 def scenario_grid():
-    print("\n-- Сетка «Подсчёт»: варианты, линии, выравнивание --")
+    print("\n-- Колонки «Подсчёт»: без линий, выравнивание, варианты --")
     lin_cols = ["№", "Длина, мм", "Кол-во", "Сумма, м.п."]
-    area_cols_m = ["№", "Марка", "Высота", "Ширина", "Кол-во", "Сумма, м2"]
+    area_cols = ["№", "Марка", "Высота", "Ширина", "Кол-во", "Сумма, м2"]
     lin = (lin_cols, [lin_cols,
                       ["1", "1500", "2", "3.00"],
                       ["2", "900", "1", "0.90"],
                       ["Всего:", "", "3", "3.90"]])
-    area = (area_cols_m, [area_cols_m,
-                          ["1", "М1", "2100", "900", "2", "3.78"],
-                          ["Всего:", "", "", "", "2", "3.78"]])
-    # Сумма с числом длиннее «Сумма» (11) — компактный не влезает
-    check("погонаж без марок: компактный вариант n_s",
-          cnt_key([lin]) == "n_s")
-    check("площадь с марками и малыми числами: m_s",
-          cnt_key([area]) == "m_s")
+    area = (area_cols, [area_cols,
+                        ["1", "М1", "2100", "900", "2", "3.78"],
+                        ["Всего:", "", "", "", "2", "3.78"]])
+    check("погонаж без марок: компактный вариант n_s", cnt_key([lin]) == "n_s")
+    check("площадь с марками и малыми числами: m_s", cnt_key([area]) == "m_s")
     long_len = (lin_cols, [lin_cols, ["1", "1234567890", "1", "1.00"]])
-    check("длинное значение (10 символов в «Длина», поле компактного 9) → n_l",
+    check("длинное значение (10 символов в «Длина», компактное поле 9) → n_l",
           cnt_key([long_len]) == "n_l")
-    long_mark = (area_cols_m, [area_cols_m, ["1", "МАРКА-123", "1", "1", "1", "1.00"]])
-    check("марка 9 символов → широкий вариант m_l",
-          cnt_key([long_mark]) == "m_l")
+    long_mark = (area_cols, [area_cols, ["1", "МАРКА-1234", "1", "1", "1", "1.00"]])
+    check("марка 10 символов → m_l (компактное поле 5)", cnt_key([long_mark]) == "m_l")
+
     for key in ("n_s", "n_l", "m_s", "m_l"):
-        n_slots = len(FIELDS[key])
-        dash = cnt_dash(key)
-        check("%s: линия = 2 + сумма(поле+2)" % key,
-              len(dash) == 2 + sum(f + 2 for f in FIELDS[key]))
+        fw = FIELDS[key]
         lines = cnt_display([lin, area], key)
-        cells_ok = True
+        check("%s: нет линий и разделителей «|»" % key,
+              not any(("|" in ln) or set(ln) <= set("-") and ln for ln in lines))
+        check("%s: число колонок = %d" % (key, len(fw)),
+              all(len(ln.split("\t")) == len(fw) for ln in lines if ln))
+        ok = True
         for ln in lines:
-            if ln == dash or ln == "":
+            if not ln:
                 continue
-            cells = ln.split("\t")
-            if len(cells) != n_slots:
-                cells_ok = False
-            for k, c in enumerate(cells):
-                limit = FIELDS[key][k] + 2 + (2 if k == n_slots - 1 else 0)
-                if len(c) > limit:
-                    cells_ok = False
-        check("%s: все ячейки помещаются в поля, колонок = %d" % (key, n_slots),
-              cells_ok)
-        check("%s: сверху и после каждой строки линия" % key,
-              lines[0] == dash and lines[-1] == dash)
-    lines = cnt_display([lin, area], "m_s")
-    head = lines[1].split("\t")
-    def content(cell, key, k):
-        # содержимое поля без «| » и без хвостового « |»
-        return cell[2:2 + FIELDS[key][k]]
+            for k, c in enumerate(ln.split("\t")):
+                if len(c) > fw[k]:
+                    ok = False
+        check("%s: все ячейки помещаются в поля" % key, ok)
+        check("%s: раздел отделён пустой строкой" % key, "" in lines[1:-1])
 
     fw = FIELDS["m_s"]
+    lines = cnt_display([lin, area], "m_s")
     area_head = [ln for ln in lines if "Сумма, м2" in ln][0].split("\t")
-    h_qty = content(area_head[4], "m_s", 4)
-    h_sum = content(area_head[5], "m_s", 5)
-    check("шапка «Кол-во» по центру (m_s)",
-          abs((len(h_qty) - len(h_qty.lstrip())) - (len(h_qty) - len(h_qty.rstrip()))) <= 1
-          and h_qty.strip() == "Кол-во")
+    qty = area_head[4].strip()
+    left = len(area_head[4]) - len(area_head[4].lstrip())
+    right = len(area_head[4]) - len(area_head[4].rstrip())
+    check("шапка «Кол-во» по центру (m_s)", qty == "Кол-во" and abs(left - right) <= 1)
     check("шапка «Сумма, м2» прижата вправо (m_s)",
-          h_sum.endswith("Сумма, м2") and h_sum[-1] == "2" and fw[5] == 11)
-    area_row = [ln for ln in lines if "\t" in ln and ln.split("\t")[1].startswith("| М1")][0].split("\t")
+          area_head[5].strip() == "Сумма, м2" and area_head[5].endswith("Сумма, м2")
+          and len(area_head[5]) == fw[5])
+    area_row = [ln for ln in lines if ln and ln.split("\t")[1].strip().startswith("М1")][0].split("\t")
     check("«№» и «Марка» в данных прижаты влево (m_s)",
-          content(area_row[0], "m_s", 0).startswith("1")
-          and content(area_row[1], "m_s", 1).startswith("М1"))
+          area_row[0].startswith("1") and area_row[1].startswith("М1"))
     check("сумма в данных прижата вправо (m_s)",
-          content(area_row[5], "m_s", 5).endswith("3.78")
-          and content(area_row[5], "m_s", 5)[-1] == "8")
-    check("«Всего:» — последняя строка раздела, без разделителя перед ней",
-          any(ln.startswith("| Всего:") for ln in lines))
-    check("между разделами пустая строка",
-          "" in lines[1:-1])
+          area_row[5].endswith("3.78") and len(area_row[5]) == fw[5])
+    check("«Всего:» — последней строкой раздела (m_s)",
+          any(ln.startswith("Всего:") for ln in lines))
+    check("ширина колонок: сумма(поля) + зазоры для n_s = 42 символа",
+          sum(FIELDS["n_s"]) + len(FIELDS["n_s"]) - 1 == 42)
 
 
 

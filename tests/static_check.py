@@ -1801,8 +1801,9 @@ def check_search_count_grid() -> list[str]:
     """Окно «Подсчёт»: варианты DCL согласованы с полями сетки в lsp.
 
     Поля *ae-sv-cnt-fields* (lsp): ключ n|m + s|l, далее ширины колонок.
-    Слот = поле + 2 («| »). Для каждого диалога searchattvis_count_<ключ>:
-    tabs = 4 · сумма слотов слева; width = 4 · (сумма слотов + 2) + 8.
+    Колонки разделены зазором в 1 символ (последняя без зазора). Для каждого
+    диалога searchattvis_count_<ключ>: tabs = 4 · сумма колонок слева;
+    width = 4 · сумма колонок + 8.
     Диалоги без марок (n_*) и с марками (m_*) — все четыре варианта.
     """
     errors: list[str] = []
@@ -1840,8 +1841,8 @@ def check_search_count_grid() -> list[str]:
         if not wm or not tm:
             errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: нет width/tabs списка")
             continue
-        w = [f + 2 for f in fields[key]]
-        expect_width = 4 * (sum(w) + 2) + 8
+        w = [f + 1 for f in fields[key][:-1]] + [fields[key][-1]]
+        expect_width = 4 * sum(w) + 8
         expect_tabs = []
         acc = 0
         for x in w[:-1]:
