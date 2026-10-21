@@ -164,17 +164,17 @@ searchattvis_count_n : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 144;
+      width = 50;
       height = 40;
       fixed_width = true;
       fixed_height = true;
-      tabs = "20 60 92 136";
+      tabs = "6 18 28 41";
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 144;
+      width = 50;
       fixed_width = true;
     }
 
@@ -185,7 +185,7 @@ searchattvis_count_n : dialog {
         key = "btn_copy";
         label = "Копировать";
         fixed_width = true;
-        width = 16;
+        width = 14;
       }
       : button {
         key = "btn_acad";
@@ -198,7 +198,7 @@ searchattvis_count_n : dialog {
         label = "Закрыть";
         is_cancel = true;
         fixed_width = true;
-        width = 16;
+        width = 12;
       }
     }
   }
@@ -213,17 +213,17 @@ searchattvis_count_m : dialog {
 
     : list_box {
       key = "lst_count";
-      width = 176;
+      width = 59;
       height = 40;
       fixed_width = true;
       fixed_height = true;
-      tabs = "20 52 92 124 168";
+      tabs = "6 18 30 40 53";
     }
 
     : text {
       key = "txt_count_status";
       label = "";
-      width = 176;
+      width = 59;
       fixed_width = true;
     }
 
@@ -234,7 +234,7 @@ searchattvis_count_m : dialog {
         key = "btn_copy";
         label = "Копировать";
         fixed_width = true;
-        width = 16;
+        width = 14;
       }
       : button {
         key = "btn_acad";
@@ -247,7 +247,7 @@ searchattvis_count_m : dialog {
         label = "Закрыть";
         is_cancel = true;
         fixed_width = true;
-        width = 16;
+        width = 12;
       }
     }
   }

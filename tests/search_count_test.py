@@ -272,7 +272,7 @@ def scenario_sort():
 # Таблица окна «Подсчёт» (порт ae-sv-cnt-* из searchattvis.lsp)
 # ----------------------------------------------------------------------
 
-WIDTHS = {"n": [3, 8, 6, 9], "m": [3, 6, 8, 6, 9]}   # *ae-sv-cnt-widths* в lsp
+WIDTHS = {"n": [3, 8, 6, 9], "m": [3, 8, 8, 6, 9]}   # *ae-sv-cnt-widths* в lsp
 HEADS = {"n": ["№", "Размеры", "Кол-во", "Всего"],
          "m": ["№", "Марка", "Размеры", "Кол-во", "Всего"]}
 ALIGNS = {"n": ["l", "c", "c", "r"], "m": ["l", "l", "c", "c", "r"]}
@@ -399,10 +399,14 @@ def scenario_table():
     head = [ln for ln in lines if "Размеры" in ln][0]
     check("шапка с «Всего» — подпись прижата вправо",
           cells(head)[-1].endswith("Всего"))
-    widths_m = sum(w + 2 for w in WIDTHS["m"]) * 4 + 8
-    widths_n = sum(w + 2 for w in WIDTHS["n"]) * 4 + 8
-    check("ширина: без марок %d, с марками %d единиц" % (widths_n, widths_m),
-          widths_n == 144 and widths_m == 176)
+    def units(chars):
+        return (6 * chars + 2) // 5   # 1 символ ≈ 1,2 единицы (по скриншоту)
+    widths_m = max(units(sum(w + 2 for w in WIDTHS["m"])) + 6, 48 + 2)
+    widths_n = max(units(sum(w + 2 for w in WIDTHS["n"])) + 6, 48 + 2)
+    check("ширина окна: без марок %d, с марками %d единиц (было 144 и 176)" % (widths_n, widths_m),
+          widths_n == 50 and widths_m == 59)
+    check("ширина с марками примерно в три раза меньше прежней (176 → 59)",
+          widths_m * 3 <= 176 + 3)
 
 
 

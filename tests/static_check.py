@@ -1804,8 +1804,8 @@ def check_search_count_window() -> list[str]:
     1. *ae-sv-cnt-widths* (lsp): варианты n (без марок) и m (с марками) —
        ширины колонок в символах; ячейка = «| » + W, в конце «|»;
     2. DCL: диалоги searchattvis_count_n и searchattvis_count_m;
-       tabs = 4 · накопленная ширина ячеек (ячейка = W + 2), ширина списка =
-       4 · сумма ячеек + 8, высота списка 40;
+       tabs = 1,2 · накопленная ширина ячеек (ячейка = W + 2), ширина списка =
+       1,2 · сумма ячеек + 6 (не меньше кнопок), высота списка 40;
     3. окно выбирает диалог через (ae-sv-cnt-dialog-name);
     4. без (or (nth …)) — AutoLISP возвращает T, а не значение.
     """
@@ -1842,12 +1842,12 @@ def check_search_count_window() -> list[str]:
             errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: нет width/height/tabs списка")
             continue
         cells = [w + 2 for w in widths[key]]
-        expect_width = 4 * sum(cells) + 8
+        expect_width = max((6 * sum(cells) + 2) // 5 + 6, 48 + 2)   # + кнопки 14+22+12
         expect_tabs = []
         acc = 0
         for c in cells:
             acc += c
-            expect_tabs.append(4 * acc)
+            expect_tabs.append((6 * acc + 2) // 5)
         got_tabs = [int(x) for x in tm.group(1).split()]
         if int(wm.group(1)) != expect_width:
             errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: ширина {wm.group(1)}, ожидалось {expect_width}")
