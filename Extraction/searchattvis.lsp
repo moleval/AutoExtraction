@@ -1191,8 +1191,6 @@
           (list (strcat (nth (- (length row) 2) row) " шт.")
                 (strcat (last row) " " (ae-sv-cnt-unit cols)))))
 
-;; ячейки итога раздела: подпись Ђ¬сего:ї в колонке размеров
-;; ячейки итога раздела: подпись Ђ¬сего:ї в первой колонке размеров
 ;; ячейки итога раздела: подпись Ђ¬сего:ї в первой колонке размеров
 (defun ae-sv-cnt-total-cells (cols row marks wide)
   (append (list "")
@@ -1202,9 +1200,7 @@
           (list (strcat (nth (- (length row) 2) row) " шт.")
                 (strcat (last row) " " (ae-sv-cnt-unit cols)))))
 
-;; «аголовки колонок
-;; «аголовки колонок раздела: площадь Ч ¬ысота | Ўирина; погонаж Ч ƒлина и пуста€ колонка
-;; «аголовки колонок раздела
+;; «аголовки колонок раздела: площадь Ч ¬ысота | Ўирина; погонаж Ч ƒлина (в общей сетке Ч с пустой колонкой)
 (defun ae-sv-cnt-heads (marks area wide)
   (if area
     (if marks
@@ -1219,8 +1215,6 @@
         (list "є" "ƒлина" " ол-во" "¬сего"))))
 )
 
-;; ¬ыравнивание: l Ч влево, c Ч по центру, r Ч вправо
-;; ¬ыравнивание: l Ч влево, c Ч по центру, r Ч вправо
 ;; ¬ыравнивание: l Ч влево, c Ч по центру, r Ч вправо
 (defun ae-sv-cnt-aligns (marks wide)
   (append (list "l") (if marks (list "l") '()) (list "c") (if wide (list "c") '()) (list "c" "r")))
@@ -1271,7 +1265,6 @@
     " ")
 )
 
-;; Ўирины по варианту таблицы (n Ч без марок, m Ч с марками)
 ;; Ўирины по ключу варианта (n, m, ln, lm)
 (defun ae-sv-cnt-widths-of (key)
   (cdr (assoc key *ae-sv-cnt-widths*))
@@ -1348,7 +1341,6 @@
       out))
 )
 
-;; »м€ диалога: с марками Ч searchattvis_count_m, без Ч searchattvis_count_n
 ;; »м€ диалога по варианту: searchattvis_count_n / _m / _ln / _lm
 (defun ae-sv-cnt-dialog-name ()
   (strcat "searchattvis_count_"
