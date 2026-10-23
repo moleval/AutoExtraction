@@ -867,15 +867,19 @@
             (append (list (itoa i)) (if mk (list m) '())
                     (list (itoa d1) (itoa n) (rtos (/ (* d1 n) 1000.0) 2 2))))))))
   (setq rows (append rows (list (ae-sv-total-row cols cnt sum))))
+  (princ (strcat "\n[dbg SEC] section kind=" kind " rows=" (itoa (length rows))))
   (list title rows)
 )
 
 ;; Разделы по данным вставок: сначала погонаж, затем площадь
 (defun ae-sv-build-sections (recs / c groups lin area secs)
   (setq c (ae-sv-calc recs) groups (car c) secs '())
+  (princ (strcat "\n[dbg S1] calc groups=" (itoa (length groups))))
   (setq lin (ae-sv-sorted groups "L") area (ae-sv-sorted groups "A"))
+  (princ (strcat "\n[dbg S2] sorted lin=" (itoa (length lin)) " area=" (itoa (length area))))
   (if lin (setq secs (cons (ae-sv-section "м.п." lin "L") secs)))
   (if area (setq secs (cons (ae-sv-section "м2" area "A") secs)))
+  (princ "\n[dbg S3] build-sections done")
   (reverse secs)
 )
 
@@ -894,6 +898,7 @@
           (setq cache (cons (cons lay (ae-sv-layer-name-skip-p lay)) cache)))
         (if (null (cdr (assoc lay cache)))
           (setq out (cons r out))))))
+  (princ (strcat "\n[dbg R] recs=" (itoa (length out))))
   (reverse out)
 )
 
@@ -965,9 +970,11 @@
                              (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b (list st)))
                                              (list st)))))
         (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (or sel-b sel-i))))
+      (princ (strcat "\n[dbg 2a] secs n=" (itoa (length secs))))
       (if (null secs)
         (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
+          (princ "\n[dbg 2b] sec")
           (setq rows (append rows
                              (if rows (list (list "")) '())
                              (list (list (ae-sv-block-title (caddr sec))))
