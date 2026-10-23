@@ -954,6 +954,7 @@
 
 (defun ae-sv-cnt-data (sel-b sel-i / rows secs recs)
   (setq rows '() secs '())
+  (princ "\n[dbg 2] cnt-data start")
   (if (and (null sel-b) (null sel-i))
     (setq rows (list (list "Выберите блок в списке слева")))
     (progn
@@ -971,6 +972,7 @@
                              (if rows (list (list "")) '())
                              (list (list (ae-sv-block-title (caddr sec))))
                              (cadr sec)))))))
+  (princ (strcat "\n[dbg 3] cnt-data done, secs=" (itoa (length secs)) " rows=" (itoa (length rows))))
   (setq *ae-sv-cnt-secs* secs)
   (setq *ae-sv-cnt-rows* rows)
 )
@@ -1000,7 +1002,9 @@
 
 ;; Кнопка «Подсчёт» в окне поиска: закрыть поиск и открыть окно «Подсчёт»
 (defun ae-sv-on-count ()
+  (princ "\n[dbg 0] on-count")
   (setq *ae-sv-restore* (ae-sv-snapshot))
+  (princ "\n[dbg 0b] snapshot ok")
   (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
   (setq *ae-sv-next* "count")
   (done_dialog 4)
@@ -1245,6 +1249,7 @@
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
 (defun ae-sv-count-dialog (/ dcl-file dcl-id t0)
   (setq t0 (getvar "MILLISECS"))
+  (princ "\n[dbg 1] count-dialog start")
   (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
   (princ (strcat "\nПодсчёт: расчёт " (itoa (- (getvar "MILLISECS") t0)) " мс."))
   (setq *ae-sv-next* "close")
@@ -1257,11 +1262,14 @@
         (alert "Не удалось загрузить окно подсчёта.")
         (if (new_dialog (ae-sv-cnt-dialog-name) dcl-id)
           (progn
+            (princ "\n[dbg 5] dialog opened")
             (start_list "lst_count")
             (foreach s (ae-sv-cnt-display)
               (add_list s))
             (end_list)
+            (princ "\n[dbg 6] list filled")
             (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))
+            (princ "\n[dbg 7] status set")
             (action_tile "btn_copy" "(ae-sv-cnt-copy)")
             (action_tile "btn_acad" "(progn (setq *ae-sv-next* \"table\") (done_dialog 3))")
             (action_tile "btn_count_close" "(progn (setq *ae-sv-next* \"close\") (done_dialog 0))")
@@ -1371,6 +1379,7 @@
 ;; Цикл окна «Подсчёт»: «Таблица AutoCAD» строит таблицу и снова показывает окно;
 ;; «Закрыть» или Esc возвращают окно поиска с сохранённым выбором
 (defun ae-sv-count-flow ()
+  (princ "\n[dbg F] count-flow")
   (setq *ae-sv-next* "table")
   (while (equal *ae-sv-next* "table")
     (ae-sv-count-dialog)
