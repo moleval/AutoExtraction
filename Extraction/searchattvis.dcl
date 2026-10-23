@@ -13,66 +13,50 @@ searchattvis_dialog : dialog {
   : column {
     children_alignment = left;
 
-    : row {
-      alignment = left;
+    : boxed_column {
+      label = "Режим";
+      width = 124;
+      fixed_width = true;
       children_alignment = left;
-      children_fixed_width = true;
 
-      : boxed_column {
-        label = "";
-        width = 60.4;
-        fixed_width = true;
-        children_alignment = left;
+      : radio_row {
+        key = "rb_row_mode";
 
-        : radio_row {
-          key = "rb_row_attr";
-
-          : radio_button {
-            key = "rb_mode_attr";
-            label = "Атрибуты";
-          }
+        : radio_button {
+          key = "rb_mode_all";
+          label = "Все блоки";
         }
-
-        : row {
-          alignment = centered;
-
-          : edit_box {
-            key = "edt_query";
-            edit_width = 56;
-          }
+        : radio_button {
+          key = "rb_mode_attr";
+          label = "Блоки с атрибутами";
         }
-
-        : spacer {
-          height = 1.2;
+        : radio_button {
+          key = "rb_mode_vis";
+          label = "Видимости блоков";
         }
       }
+    }
 
-      : boxed_column {
-        label = "";
-        width = 60.4;
-        fixed_width = true;
-        children_alignment = left;
+    : boxed_column {
+      label = "Поиск";
+      width = 124;
+      fixed_width = true;
+      children_alignment = left;
 
-        : radio_row {
-          key = "rb_row_vis";
+      : row {
+        alignment = left;
 
-          : radio_button {
-            key = "rb_mode_vis";
-            label = "Видимость блока";
-          }
+        : edit_box {
+          key = "edt_name";
+          edit_width = 36;
         }
-
-        : row {
-          alignment = centered;
-
-          : edit_box {
-            key = "edt_value";
-            edit_width = 56;
-          }
+        : edit_box {
+          key = "edt_query";
+          edit_width = 36;
         }
-
-        : spacer {
-          height = 1.2;
+        : edit_box {
+          key = "edt_value";
+          edit_width = 36;
         }
       }
     }
@@ -146,7 +130,7 @@ searchattvis_dialog : dialog {
 
       : button {
         key = "btn_cancel";
-        label = "Отменить";
+        label = "Закрыть";
         is_cancel = true;
         fixed_width = true;
         width = 16;

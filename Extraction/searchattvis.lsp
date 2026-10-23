@@ -10,7 +10,7 @@
 ;;; ============================================================
 (vl-load-com)
 
-(setq *ae-sv-mode* "attr")      ; "attr" | "vis"
+(setq *ae-sv-mode* "all")      ; "all" | "attr" | "vis"
 (setq *ae-sv-inserts* nil)      ; записи: (ename имя видимость атрибуты)
 (setq *ae-sv-rows* nil)         ; строки списка: (текст . имена вставок)
 (setq *ae-sv-scope-text* "")    ; текст области для строки статуса
@@ -287,21 +287,37 @@
 
 ;; Подсказки внутри полей (как в панелях «Блоки» и «Слои»)
 (defun ae-sv-hints ()
-  (if (= *ae-sv-mode* "attr")
-    (list "Атрибут (по Enter):" "Значение (по Enter):")
-    (list "Видимость (по Enter):" "Значение (по Enter):"))
+  (cond
+    ((= *ae-sv-mode* "attr")
+     (list "Имя (по Enter):" "Атрибут (по Enter):" "Значение (по Enter):"))
+    ((= *ae-sv-mode* "vis")
+     (list "Имя (по Enter):" "Видимость (по Enter):" "Значение (по Enter):"))
+    (T
+     (list "Имя (по Enter):" "" "Значение (по Enter):")))
 )
 
 (defun ae-sv-set-hints (/ h)
   (setq h (ae-sv-hints))
-  (set_tile "edt_query" (car h))
-  (set_tile "edt_value" (cadr h))
+  (if (= (ae-sv-str (get_tile "edt_name")) "")
+    (set_tile "edt_name" (car h)))
+  (set_tile "edt_query" (cadr h))
+  (set_tile "edt_value" (caddr h))
+  (mode_tile "edt_query" (if (= *ae-sv-mode* "all") 1 0))
+  (mode_tile "edt_value" 0)
+)
+
+;; Радиокнопки режима: отмечена только текущая
+(defun ae-sv-set-radios ()
+  (set_tile "rb_mode_all" (if (= *ae-sv-mode* "all") "1" "0"))
+  (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
+  (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "vis") "1" "0"))
 )
 
 ;; Текст поля без подсказки: подсказка вырезается из любой позиции,
 ;; набранный до неё или после неё текст сохраняется
 (defun ae-sv-clean (v hint / p)
   (cond
+    ((= hint "") v)
     ((= v hint) "")
     ((setq p (vl-string-search hint v))
      (strcat (substr v 1 p) (substr v (+ p (strlen hint) 1))))
@@ -368,13 +384,37 @@
   out
 )
 
-(defun ae-sv-entries (qa qb / acc rec part)
+(defun ae-sv-len-match (rec qval / hit a v)
+  ;; «Все блоки»: значение сравнивается только со свойством или атрибутом «Длина»
+  (setq hit nil)
+  (setq v (ae-sv-prop-get (ae-sv-prop-up rec) "Длина"))
+  (if (and v (ae-sv-match v qval)) (setq hit T))
+  (foreach a (nth 3 rec)
+    (if (and (not hit)
+             (= (strcase (ae-sv-trim (car a))) (strcase "Длина"))
+             (ae-sv-match (cdr a) qval))
+      (setq hit T)))
+  hit
+)
+
+(defun ae-sv-all-entries (rec qval / name)
+  ;; «Все блоки»: одна строка на вставку; пункты (атрибуты, видимости) не выводятся
+  (setq name (nth 1 rec))
+  (if (or (= qval "") (ae-sv-len-match rec qval))
+    (list (list name name (car rec)))
+    '()))
+
+(defun ae-sv-entries (qn qa qb / acc rec part)
   (setq acc '())
   (foreach rec *ae-sv-inserts*
-    (setq part (if (= *ae-sv-mode* "attr")
-                 (ae-sv-attr-entries rec qa qb)
-                 (ae-sv-vis-entries rec qa qb)))
-    (setq acc (append (reverse part) acc)))
+    (if (ae-sv-match (nth 1 rec) qn)
+      (progn
+        (setq part
+          (cond
+            ((= *ae-sv-mode* "all") (ae-sv-all-entries rec qb))
+            ((= *ae-sv-mode* "attr") (ae-sv-attr-entries rec qa qb))
+            (T (ae-sv-vis-entries rec qa qb))))
+        (setq acc (append (reverse part) acc)))))
   (reverse acc)
 )
 
@@ -465,18 +505,20 @@
 
 ;; Обновление обоих списков и статуса. Каждый список сужает другой.
 ;; Записи окна по режиму и запросам — один раз; выбор строк их не меняет
-(defun ae-sv-entries-cached (qa qb / key)
-  (setq key (list *ae-sv-mode* qa qb))
+(defun ae-sv-entries-cached (qn qa qb / key)
+  (setq key (list *ae-sv-mode* qn qa qb))
   (if (equal key *ae-sv-entries-key*)
     *ae-sv-entries-cache*
     (progn
-      (setq *ae-sv-entries-cache* (ae-sv-entries qa qb))
+      (setq *ae-sv-entries-cache* (ae-sv-entries qn qa qb))
       (setq *ae-sv-entries-key* key)
       *ae-sv-entries-cache*)))
 
-(defun ae-sv-refresh (/ qa qb sel-b sel-i entries rows1 rows2)
-  (setq qa (ae-sv-norm (ae-sv-field "edt_query" (car (ae-sv-hints)))))
-  (setq qb (ae-sv-norm (ae-sv-field "edt_value" (cadr (ae-sv-hints)))))
+(defun ae-sv-refresh (/ h qn qa qb sel-b sel-i entries rows1 rows2)
+  (setq h (ae-sv-hints))
+  (setq qn (ae-sv-norm (ae-sv-field "edt_name" (car h))))
+  (setq qa (ae-sv-norm (ae-sv-field "edt_query" (cadr h))))
+  (setq qb (ae-sv-norm (ae-sv-field "edt_value" (caddr h))))
   (if *ae-sv-pend*
     (progn
       (setq sel-b (car *ae-sv-pend*) sel-i (cadr *ae-sv-pend*))
@@ -484,23 +526,30 @@
     (progn
       (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
       (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))))
-  (setq entries (ae-sv-entries-cached qa qb))
+  (setq entries (ae-sv-entries-cached qn qa qb))
   (setq rows1 (ae-sv-list1 entries sel-i))
-  (setq rows2 (ae-sv-list2 entries sel-b))
+  (setq rows2 (if (= *ae-sv-mode* "all") nil (ae-sv-list2 entries sel-b)))
   (setq sel-b (ae-sv-keep sel-b rows1))
   (setq sel-i (ae-sv-keep sel-i rows2))
   (setq *ae-sv-entries* entries)
   (setq *ae-sv-rows1* rows1)
   (setq *ae-sv-rows2* rows2)
-  (set_tile "txt_items_label" (if (= *ae-sv-mode* "attr") "Атрибуты" "Видимости"))
+  (set_tile "txt_items_label"
+    (cond ((= *ae-sv-mode* "attr") "Атрибуты")
+          ((= *ae-sv-mode* "vis") "Видимости")
+          (T "")))
   (ae-sv-fill "lst_blocks" rows1 sel-b)
   (ae-sv-fill "lst_items" rows2 sel-i)
   (set_tile "txt_status"
     (if (or sel-b sel-i)
       (ae-sv-status-text sel-b sel-i rows1 rows2)
-      (strcat "Блоков: " (itoa (length rows1)) ", "
-              (if (= *ae-sv-mode* "attr") "атрибутов: " "видимостей: ")
-              (itoa (length rows2)) ", вставок: "
+      (strcat "Блоков: " (itoa (length rows1))
+              (cond ((= *ae-sv-mode* "attr") ", атрибутов: " )
+                    ((= *ae-sv-mode* "vis") ", видимостей: ")
+                    (T ", "))
+              (if (= *ae-sv-mode* "all") "" (itoa (length rows2)))
+              (if (= *ae-sv-mode* "all") "" ", ")
+              "вставок: "
               (itoa (length (ae-sv-unique-ens (mapcar 'caddr entries))))
               ". Область: " *ae-sv-scope-text*)))
   T
@@ -514,19 +563,23 @@
       (princ (strcat "\nБлоки (" (itoa (length *ae-sv-rows1*)) "):"))
       (foreach r *ae-sv-rows1*
         (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))
-      (princ (strcat "\n" (if (= *ae-sv-mode* "attr") "Атрибуты" "Видимости")
-                     " (" (itoa (length *ae-sv-rows2*)) "):"))
-      (foreach r *ae-sv-rows2*
-        (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))
+      (if (/= *ae-sv-mode* "all")
+        (progn
+          (princ (strcat "\n" (if (= *ae-sv-mode* "attr") "Атрибуты" "Видимости")
+                         " (" (itoa (length *ae-sv-rows2*)) "):"))
+          (foreach r *ae-sv-rows2*
+            (princ (strcat "\n  " (car r) " | " (itoa (length (cdr r))) " шт.")))))
       (princ (strcat "\nВставок: " (itoa (length (ae-sv-unique-ens (mapcar 'caddr *ae-sv-entries*))))
                      ". Область: " *ae-sv-scope-text*))))
   (princ)
 )
 
 (defun ae-sv-on-mode (m)
+  ;; смена режима очищает «Видимость» и «Значение»; «Имя» сохраняется
   (setq *ae-sv-mode* m)
-  (set_tile "rb_mode_attr" (if (= m "attr") "1" "0"))
-  (set_tile "rb_mode_vis" (if (= m "attr") "0" "1"))
+  (ae-sv-set-radios)
+  (set_tile "edt_query" "")
+  (set_tile "edt_value" "")
   (setq *ae-sv-rows1* nil *ae-sv-rows2* nil)
   (ae-sv-set-hints)
   (ae-sv-refresh)
@@ -560,14 +613,14 @@
 
 (defun ae-sv-init (/ r)
   (setq *ae-sv-shown* nil)
-  (set_tile "rb_mode_attr" (if (= *ae-sv-mode* "attr") "1" "0"))
-  (set_tile "rb_mode_vis" (if (= *ae-sv-mode* "attr") "0" "1"))
+  (ae-sv-set-radios)
   (ae-sv-set-hints)
   (if *ae-sv-restore*
     (progn
       (setq r *ae-sv-restore*)
-      (if (/= (caddr r) "") (set_tile "edt_query" (caddr r)))
-      (if (/= (cadddr r) "") (set_tile "edt_value" (cadddr r)))
+      (if (/= (caddr r) "") (set_tile "edt_name" (caddr r)))
+      (if (/= (cadddr r) "") (set_tile "edt_query" (cadddr r)))
+      (if (/= (nth 4 r) "") (set_tile "edt_value" (nth 4 r)))
       (setq *ae-sv-pend* (list (car r) (cadr r)))
       (setq *ae-sv-restore* nil)))
   (ae-sv-refresh)
@@ -581,8 +634,10 @@
 )
 
 (defun ae-sv-wire ()
+  (action_tile "rb_mode_all" "(ae-sv-on-mode \"all\")")
   (action_tile "rb_mode_attr" "(ae-sv-on-mode \"attr\")")
   (action_tile "rb_mode_vis" "(ae-sv-on-mode \"vis\")")
+  (action_tile "edt_name" "(ae-sv-refresh)")
   (action_tile "edt_query" "(ae-sv-refresh)")
   (action_tile "edt_value" "(ae-sv-refresh)")
   (action_tile "lst_blocks" "(ae-sv-refresh)")
@@ -654,6 +709,7 @@
 (setq *ae-sv-count-sel* nil)    ; (блоки пункты) — выбор для окна «Подсчёт»
 (setq *ae-sv-cnt-secs* nil)     ; разделы: (заголовок строки)
 (setq *ae-sv-cnt-rows* nil)     ; строки списка окна «Подсчёт» (списки полей)
+(setq *ae-sv-count-all-title* nil)     ; заголовок «Все блоки: N шт.» для подсчёта без выбора
 
 ;; Свойства вставки (ИМЯ-ПРОПИСНЫМИ . значение) — имена очищаются один раз на вставку
 (defun ae-sv-prop-up (rec / out)
@@ -963,7 +1019,7 @@
           (setq secs (append secs
                              (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b (list st)))
                                              (list st)))))
-        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (if sel-b sel-b sel-i))))
+        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (ae-sv-title-names sel-b sel-i))))
       (if (null secs)
         (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
@@ -992,18 +1048,41 @@
 
 ;; Запомнить выбор и запрос перед закрытием окна поиска
 (defun ae-sv-snapshot ()
+  ;; (блоки, пункты, имя, видимость/атрибут, значение)
   (list (ae-sv-selected "lst_blocks" *ae-sv-rows1*)
         (ae-sv-selected "lst_items" *ae-sv-rows2*)
-        (ae-sv-field "edt_query" (car (ae-sv-hints)))
-        (ae-sv-field "edt_value" (cadr (ae-sv-hints))))
+        (ae-sv-field "edt_name" (car (ae-sv-hints)))
+        (ae-sv-field "edt_query" (cadr (ae-sv-hints)))
+        (ae-sv-field "edt_value" (caddr (ae-sv-hints))))
+)
+
+(defun ae-sv-title-names (sel-b sel-i)
+  ;; заголовок таблицы: «Все блоки: N шт.» или выбранные имена
+  (cond (*ae-sv-count-all-title* (list *ae-sv-count-all-title*))
+        (sel-b sel-b)
+        (T sel-i))
 )
 
 ;; Кнопка «Подсчёт» в окне поиска: закрыть поиск и открыть окно «Подсчёт»
-(defun ae-sv-on-count ()
+(defun ae-sv-on-count (/ names total)
+  (setq *ae-sv-count-all-title* nil)
   (setq *ae-sv-restore* (ae-sv-snapshot))
   (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
-  (setq *ae-sv-next* "count")
-  (done_dialog 4)
+  (setq names (mapcar 'car *ae-sv-rows1*))
+  (cond
+    ((and (= *ae-sv-mode* "all") (null (car *ae-sv-count-sel*)) (null names))
+     (setq *ae-sv-restore* nil)
+     (set_tile "txt_status" "Блоков по фильтру нет."))
+    ((and (= *ae-sv-mode* "all") (null (car *ae-sv-count-sel*)))
+     ;; без выбора в «Все блоки» — все блоки, прошедшие фильтр
+     (setq total (length (ae-sv-final *ae-sv-entries* names nil)))
+     (setq *ae-sv-count-sel* (list names nil))
+     (setq *ae-sv-count-all-title* (strcat "Все блоки: " (itoa total) " шт."))
+     (setq *ae-sv-next* "count")
+     (done_dialog 4))
+    (T
+     (setq *ae-sv-next* "count")
+     (done_dialog 4)))
 )
 
 ;; Текст строк для буфера обмена: строки через CRLF, поля через табуляцию
@@ -1379,6 +1458,7 @@
     (progn
       ;; Таблица или копирование выполнены: окна «Подсчёт» и «Поиск» не открываются снова
       (setq *ae-sv-next* nil *ae-sv-restore* nil *ae-sv-pend* nil *ae-sv-count-sel* nil)
+      (setq *ae-sv-count-all-title* nil)
       (setq *ae-sv-finished* T))
     (progn
       (setq *ae-sv-next* nil)
@@ -1467,6 +1547,12 @@
   (ae-sv-run "vis")
 )
 
+(defun c:ПОИСКБЛОК ()
+  (ae-sv-run "all")
+)
+
+(defun c:SEARCHBLOCK () (c:ПОИСКБЛОК))
+
 (defun c:SEARCHVIS () (c:ПОИСКВИД))
 
 ;; ПОИСКСПИСОК: режим, затем условия. Пустое условие — без ограничения.
@@ -1490,6 +1576,7 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
+        ("SEARCHBLOCK / ПОИСКБЛОК" "Поиск блоков: все блоки или выборка (Имя, Значение)")
         ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)")
         ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
