@@ -867,19 +867,15 @@
             (append (list (itoa i)) (if mk (list m) '())
                     (list (itoa d1) (itoa n) (rtos (/ (* d1 n) 1000.0) 2 2))))))))
   (setq rows (append rows (list (ae-sv-total-row cols cnt sum))))
-  (princ (strcat "\n[dbg SEC] section kind=" kind " rows=" (itoa (length rows))))
   (list title rows)
 )
 
 ;; Разделы по данным вставок: сначала погонаж, затем площадь
 (defun ae-sv-build-sections (recs / c groups lin area secs)
   (setq c (ae-sv-calc recs) groups (car c) secs '())
-  (princ (strcat "\n[dbg S1] calc groups=" (itoa (length groups))))
   (setq lin (ae-sv-sorted groups "L") area (ae-sv-sorted groups "A"))
-  (princ (strcat "\n[dbg S2] sorted lin=" (itoa (length lin)) " area=" (itoa (length area))))
   (if lin (setq secs (cons (ae-sv-section "м.п." lin "L") secs)))
   (if area (setq secs (cons (ae-sv-section "м2" area "A") secs)))
-  (princ "\n[dbg S3] build-sections done")
   (reverse secs)
 )
 
@@ -898,7 +894,6 @@
           (setq cache (cons (cons lay (ae-sv-layer-name-skip-p lay)) cache)))
         (if (null (cdr (assoc lay cache)))
           (setq out (cons r out))))))
-  (princ (strcat "\n[dbg R] recs=" (itoa (length out))))
   (reverse out)
 )
 
@@ -959,7 +954,6 @@
 
 (defun ae-sv-cnt-data (sel-b sel-i / rows secs recs)
   (setq rows '() secs '())
-  (princ "\n[dbg 2] cnt-data start")
   (if (and (null sel-b) (null sel-i))
     (setq rows (list (list "Выберите блок в списке слева")))
     (progn
@@ -969,19 +963,14 @@
           (setq secs (append secs
                              (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b (list st)))
                                              (list st)))))
-        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (or sel-b sel-i))))
-      (princ (strcat "\n[dbg 2a] secs n=" (itoa (length secs))))
+        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (if sel-b sel-b sel-i))))
       (if (null secs)
         (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
-          (princ "\n[dbg 2b] sec")
-          (princ (strcat "\n[dbg 2c] title=" (vl-princ-to-string (car sec)) " names=" (vl-princ-to-string (caddr sec)) " rowsType=" (vl-princ-to-string (type (cadr sec)))))
-          (princ (strcat "\n[dbg 2d] block-title=" (ae-sv-block-title (caddr sec))))
           (setq rows (append rows
                              (if rows (list (list "")) '())
                              (list (list (ae-sv-block-title (caddr sec))))
                              (cadr sec)))))))
-  (princ (strcat "\n[dbg 3] cnt-data done, secs=" (itoa (length secs)) " rows=" (itoa (length rows))))
   (setq *ae-sv-cnt-secs* secs)
   (setq *ae-sv-cnt-rows* rows)
 )
@@ -1011,9 +1000,7 @@
 
 ;; Кнопка «Подсчёт» в окне поиска: закрыть поиск и открыть окно «Подсчёт»
 (defun ae-sv-on-count ()
-  (princ "\n[dbg 0] on-count")
   (setq *ae-sv-restore* (ae-sv-snapshot))
-  (princ "\n[dbg 0b] snapshot ok")
   (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
   (setq *ae-sv-next* "count")
   (done_dialog 4)
@@ -1258,7 +1245,6 @@
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
 (defun ae-sv-count-dialog (/ dcl-file dcl-id t0)
   (setq t0 (getvar "MILLISECS"))
-  (princ "\n[dbg 1] count-dialog start")
   (ae-sv-cnt-data (car *ae-sv-count-sel*) (cadr *ae-sv-count-sel*))
   (princ (strcat "\nПодсчёт: расчёт " (itoa (- (getvar "MILLISECS") t0)) " мс."))
   (setq *ae-sv-next* "close")
@@ -1271,14 +1257,11 @@
         (alert "Не удалось загрузить окно подсчёта.")
         (if (new_dialog (ae-sv-cnt-dialog-name) dcl-id)
           (progn
-            (princ "\n[dbg 5] dialog opened")
             (start_list "lst_count")
             (foreach s (ae-sv-cnt-display)
               (add_list s))
             (end_list)
-            (princ "\n[dbg 6] list filled")
             (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))
-            (princ "\n[dbg 7] status set")
             (action_tile "btn_copy" "(ae-sv-cnt-copy)")
             (action_tile "btn_acad" "(progn (setq *ae-sv-next* \"table\") (done_dialog 3))")
             (action_tile "btn_count_close" "(progn (setq *ae-sv-next* \"close\") (done_dialog 0))")
@@ -1388,7 +1371,6 @@
 ;; Цикл окна «Подсчёт»: «Таблица AutoCAD» строит таблицу и снова показывает окно;
 ;; «Закрыть» или Esc возвращают окно поиска с сохранённым выбором
 (defun ae-sv-count-flow ()
-  (princ "\n[dbg F] count-flow")
   (setq *ae-sv-next* "table")
   (while (equal *ae-sv-next* "table")
     (ae-sv-count-dialog)
