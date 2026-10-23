@@ -341,3 +341,121 @@ searchattvis_count_lm : dialog {
     }
   }
 }
+
+searchattvis_count_xn : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 59;
+      height = 24;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 18 29 38 52";
+    }
+
+    : list_box {
+      key = "lst_count2";
+      width = 50;
+      height = 16;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 18 28 41";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 59;
+      fixed_width = true;
+      alignment = right;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 14;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 12;
+      }
+    }
+  }
+}
+
+searchattvis_count_xm : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 85;
+      height = 24;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 34 44 55 65 78";
+    }
+
+    : list_box {
+      key = "lst_count2";
+      width = 74;
+      height = 16;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 34 44 54 67";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 85;
+      fixed_width = true;
+      alignment = right;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 14;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 12;
+      }
+    }
+  }
+}

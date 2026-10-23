@@ -1676,7 +1676,7 @@ def check_search_count() -> list[str]:
     1. площадь берёт «Высота в свету» / «Ширина в свету» раньше обычных
        имён — та же цепочка, что у ЗАПОЛНЕНИЯ;
     2. припуск берётся из настроек задачи ЗАПОЛНЕНИЕ (ae-settings-frame-allowance)
-       и применяется только к блокам по маскам «Заполнени*», «Стекло*»;
+       и применяется только к блокам по маскам задачи ЗАПОЛНЕНИЕ (input.block, как у раскроя);
     3. размеры считаются через общую функцию ae-sv-size-of, которую используют
        и таблица, и окно «Подсчёт».
     """
@@ -1688,11 +1688,12 @@ def check_search_count() -> list[str]:
     for need, what in (
         ('(quote ("Высота в свету" "Высота"))', "нет приоритета «Высота в свету» для площади"),
         ('(quote ("Ширина в свету" "Ширина" "Длина"))', "нет приоритета «Ширина в свету» для площади"),
-        ('(quote ("Заполнени*" "Стекло*"))', "нет масок припуска «Заполнени*», «Стекло*»"),
+        ("(ae-settings-task-blocks 'ZAPOLNENIE)", "припуск не берёт маски задачи ЗАПОЛНЕНИЕ (input.block)"),
+        ("(defun ae-sv-frame-masks", "нет маски припуска из задачи ЗАПОЛНЕНИЕ"),
         ("(defun ae-sv-allowance", "нет доступа к припуску"),
         ("(ae-settings-frame-allowance)", "припуск не берётся из настроек задачи ЗАПОЛНЕНИЕ"),
         ("(defun ae-sv-frame-p", "нет проверки имени блока по маскам припуска"),
-        ("(ae-sv-frame-p rec)", "припуск не применяется в ae-sv-size-of"),
+        ("(ae-sv-frame-p rec masks)", "припуск не применяется в ae-sv-size-of"),
     ):
         if need not in text:
             errors.append(f"Extraction/searchattvis.lsp: {what}")
@@ -1803,7 +1804,8 @@ def check_search_count_window() -> list[str]:
     Инварианты:
     1. *ae-sv-cnt-widths* (lsp): варианты n (без марок) и m (с марками) —
        ширины колонок в символах; ячейка = «| » + W; справа закрывающая «|» на правой границе;
-    2. DCL: диалоги searchattvis_count_n и searchattvis_count_m;
+    2. DCL: диалоги searchattvis_count_n и searchattvis_count_m; при смешанном выборе —
+       searchattvis_count_xn / _xm с двумя списками (lst_count — площадь, lst_count2 — погонаж);
        tabs = 1,2 · (1 пробел слева + накопленная ширина ячеек, ячейка = W + 2),
        ширина списка = 1,2 · (сумма ячеек + пробелы слева и справа) + 6, не меньше кнопок;
        высота списка 40;
@@ -1829,20 +1831,20 @@ def check_search_count_window() -> list[str]:
               for k, v in re.findall(r'\("(ln|lm|n|m)"((?:\s+\d+)+)\)', m.group(1))}
     if sorted(widths) != ["lm", "ln", "m", "n"]:
         errors.append(f"Extraction/searchattvis.lsp: ширины для {sorted(widths)}, нужны n, m, ln и lm")
-    for key in ("n", "m", "ln", "lm"):
-        if key not in widths:
-            continue
-        dm = re.search(r"searchattvis_count_" + key + r" : dialog \{(.*?)\n\}\n", dcl_text, re.S)
+    def dialog_body(name):
+        dm = re.search(r"searchattvis_count_" + name + r" : dialog \{(.*?)\n\}\n", dcl_text, re.S)
         if not dm:
-            errors.append(f"Extraction/searchattvis.dcl: нет диалога searchattvis_count_{key}")
-            continue
-        body = dm.group(1)
-        wm = re.search(r'key = "lst_count";\s*width = (\d+);\s*height = (\d+);', body)
-        tm = re.search(r'tabs = "([\d ]*)";', body)
+            errors.append(f"Extraction/searchattvis.dcl: нет диалога searchattvis_count_{name}")
+            return None
+        return dm.group(1)
+
+    def check_list(body, dlg, list_key, wkey, height):
+        wm = re.search(r'key = "' + list_key + r'";\s*width = (\d+);\s*height = (\d+);', body)
+        tm = re.search(r'key = "' + list_key + r'";.*?tabs = "([\d ]*)";', body, re.S)
         if not wm or not tm:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: нет width/height/tabs списка")
-            continue
-        cells = [w + 2 for w in widths[key]]
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg}: нет width/height/tabs у {list_key}")
+            return
+        cells = [w + 2 for w in widths[wkey]]
         expect_width = max((6 * (sum(cells) + 2) + 2) // 5 + 6, 48 + 2)   # + кнопки 14+22+12
         expect_tabs = []
         acc = 1                       # пробел слева от таблицы
@@ -1851,13 +1853,34 @@ def check_search_count_window() -> list[str]:
             expect_tabs.append((6 * acc + 2) // 5)
         got_tabs = [int(x) for x in tm.group(1).split()]
         if int(wm.group(1)) != expect_width:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: ширина {wm.group(1)}, ожидалось {expect_width}")
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: ширина {wm.group(1)}, ожидалось {expect_width}")
         if got_tabs != expect_tabs:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: tabs {got_tabs}, ожидалось {expect_tabs}")
-        if int(wm.group(2)) != 40:
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: высота {wm.group(2)}, ожидалось 40")
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: tabs {got_tabs}, ожидалось {expect_tabs}")
+        if height is not None and int(wm.group(2)) != height:
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: высота {wm.group(2)}, ожидалось {height}")
+
+    def check_status(body, dlg):
         if not re.search(r'key = "txt_count_status";.*?alignment = right;', body, re.S):
-            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{key}: строка состояния не выровнена вправо")
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg}: строка состояния не выровнена вправо")
+
+    for key in ("n", "m", "ln", "lm"):
+        if key not in widths:
+            continue
+        body = dialog_body(key)
+        if body is None:
+            continue
+        check_list(body, key, "lst_count", key, 40)
+        check_status(body, key)
+    # смешанный выбор: площадь (lst_count) и погонаж (lst_count2) — два списка
+    for dlg, area, lin in (("xn", "n", "ln"), ("xm", "m", "lm")):
+        if area not in widths or lin not in widths:
+            continue
+        body = dialog_body(dlg)
+        if body is None:
+            continue
+        check_list(body, dlg, "lst_count", area, 24)
+        check_list(body, dlg, "lst_count2", lin, 16)
+        check_status(body, dlg)
     return errors
 
 

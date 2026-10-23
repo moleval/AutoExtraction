@@ -764,12 +764,11 @@
     nil)
 )
 
-;; Ключи размеров для площади — цепочка ЗАПОЛНЕНИЯ (zapolnenie.lsp): сначала размер «в свету»,
-;; затем обычные параметры. Совпадение точное, регистр не важен: «Высота1» не берётся.
+;; Ключи размеров для площади — цепочка ЗАПОЛНЕНИЯ (zapolnenie.lsp и раскрой): сначала размер «в свету»,
+;; затем обычные параметры. Для каждого ключа — точное совпадение имени (регистр не важен),
+;; затем вхождение в имени БЕЗ цифр («Высота двери» берётся, «Высота1» — нет).
 (setq *ae-sv-height-keys* (quote ("Высота в свету" "Высота")))
 (setq *ae-sv-width-keys*  (quote ("Ширина в свету" "Ширина" "Длина")))
-;; Блоки, к размерам которых добавляется припуск на раму (маски, регистр не важен)
-(setq *ae-sv-frame-masks* (quote ("Заполнени*" "Стекло*")))
 (setq *ae-sv-allowance-default* 26)
 
 ;; Припуск на раму: настройка task.ZAPOLNENIE / input.frame.allowance, иначе 26
@@ -780,36 +779,70 @@
   (if (and (numberp v) (>= v 0)) v *ae-sv-allowance-default*)
 )
 
-;; Имя блока (эффективное) подходит под одну из масок припуска
-(defun ae-sv-frame-p (rec / hit)
+;; Маски припуска — те же, что у раскроя (cs-fill-masks): task.ZAPOLNENIE / input.block.
+;; Пустой список — припуск выключен. Читается один раз на подсчёт (см. ae-sv-calc).
+(defun ae-sv-frame-masks (/ m)
+  (setq m nil)
+  (if (= (type ae-settings-task-blocks) 'SUBR)
+    (setq m (ae-settings-task-blocks 'ZAPOLNENIE)))
+  (if (and m (listp m)) m nil)
+)
+
+;; Имя блока (EffectiveName) или первое значение видимости подходит под одну из масок (регистр не важен)
+(defun ae-sv-frame-p (rec masks / hit vals)
   (setq hit nil)
-  (foreach m *ae-sv-frame-masks*
-    (if (and (null hit) (ae-sv-match (nth 1 rec) m))
-      (setq hit T)))
+  (if masks
+    (progn
+      (setq vals (list (nth 1 rec) (nth 2 rec)))
+      (foreach v vals
+        (if (and (= (type v) 'STR) (/= v ""))
+          (foreach m masks
+            (if (and (= (type m) 'STR) (wcmatch (strcase v) (strcase m)))
+              (setq hit T)))))))
   hit
 )
 
-;; Первый положительный размер в миллиметрах по списку ключей, либо nil
-(defun ae-sv-dim-of (up keys / hit)
+;; В строке есть цифра (маска «#» — одна цифра)
+(defun ae-sv-has-digit-p (s / i hit)
+  (setq hit nil i 1)
+  (while (and (null hit) (<= i (strlen s)))
+    (if (wcmatch (substr s i 1) "#") (setq hit T))
+    (setq i (1+ i)))
+  hit
+)
+
+;; Размер по ключу: точное имя, затем вхождение в имени без цифр. up — (имя в верхнем регистре . значение)
+(defun ae-sv-dim-key (up k / hit p)
+  (setq hit (ae-sv-mm (ae-sv-num (ae-sv-prop-get up k))))
+  (if (null hit)
+    (foreach p up
+      (if (and (null hit)
+               (not (ae-sv-has-digit-p (car p)))
+               (vl-string-search (strcase k) (car p)))
+        (setq hit (ae-sv-mm (ae-sv-num (cdr p)))))))
+  hit
+)
+
+;; Первый найденный размер по списку ключей (порядок ключей важен), либо nil
+(defun ae-sv-dim-of (up keys / hit k)
   (setq hit nil)
   (foreach k keys
-    (if (null hit)
-      (setq hit (ae-sv-mm (ae-sv-num (ae-sv-prop-get up k))))))
+    (if (null hit) (setq hit (ae-sv-dim-key up k))))
   hit
 )
 
 ;; Размер вставки: ("A" высота ширина) — площадь; ("L" длина nil) — погонаж; nil — размера нет.
-;; Припуск (allow) добавляется к высоте и ширине блоков по маскам, только для площади.
-(defun ae-sv-size-of (rec allow / h w l add up)
+;; Припуск (allow) добавляется к высоте и ширине блоков с маской раскроя, только для площади.
+;; Погонаж — только точное «Длина» (без номера и без подстроки).
+(defun ae-sv-size-of (rec allow masks / h w l up)
   (setq up (ae-sv-prop-up rec))
   (setq h (ae-sv-dim-of up *ae-sv-height-keys*)
         w (ae-sv-dim-of up *ae-sv-width-keys*)
         l (ae-sv-mm (ae-sv-num (ae-sv-prop-get up "Длина"))))
-  (if (and h (ae-sv-frame-p rec))
+  (if (and h (ae-sv-frame-p rec masks))
     (progn
-      (setq add allow)
-      (setq h (+ h add))
-      (if w (setq w (+ w add)))))
+      (setq h (+ h allow))
+      (if w (setq w (+ w allow)))))
   (cond
     ((and h w) (list "A" h w))
     (l (list "L" l nil))
@@ -817,10 +850,10 @@
 )
 
 ;; Группы: ((вид марка размер1 размер2) . количество); nosize — вставки без размера
-(defun ae-sv-calc (recs / groups nosize sz key hit allow)
-  (setq groups '() nosize 0 allow (ae-sv-allowance))
+(defun ae-sv-calc (recs / groups nosize sz key hit allow masks)
+  (setq groups '() nosize 0 allow (ae-sv-allowance) masks (ae-sv-frame-masks))
   (foreach r recs
-    (setq sz (ae-sv-size-of r allow))
+    (setq sz (ae-sv-size-of r allow masks))
     (if (null sz)
       (setq nosize (1+ nosize))
       (progn
@@ -1119,7 +1152,7 @@
 ;; Окно «Подсчёт»: таблица с рамкой (вид как в примере пользователя).
 ;;   площадь: | № | [Марка] | Высота | Ширина | Кол-во | Всего |
 ;;   погонаж без площади: | № | [Марка] | Длина | Кол-во | Всего | (ключи ln / lm)
-;;   смешанная таблица: одна сетка на весь список, у погонажа вторая колонка размеров пустая (ключи n / m)
+;;   смешанный выбор: площадь и погонаж — два отдельных списка (диалоги _xn / _xm)
 ;; Ширина колонок W, символов: по ним DCL задаёт табуляции и ширину списка
 ;; (проверка — tests/static_check.py, check_search_count_window). Вариант — по данным.
 ;; Строки: линия над шапкой, шапка, линия, позиции, линия, «Всего:», линия.
@@ -1162,7 +1195,7 @@
 
 ;; Размер: погонаж — длина; площадь — высота x ширина
 (defun ae-sv-cnt-size-cells (cols row wide)
-  ;; площадь — высота и ширина отдельными колонками; погонаж — длина, а при общей сетке ещё пустая колонка
+  ;; площадь — высота и ширина отдельными колонками; погонаж — одна колонка длины
   (if (vl-position "Высота" cols)
     (list (ae-sv-cnt-cell cols row "Высота") (ae-sv-cnt-cell cols row "Ширина"))
     (if wide
@@ -1200,7 +1233,7 @@
           (list (strcat (nth (- (length row) 2) row) " шт.")
                 (strcat (last row) " " (ae-sv-cnt-unit cols)))))
 
-;; Заголовки колонок раздела: площадь — Высота | Ширина; погонаж — Длина (в общей сетке — с пустой колонкой)
+;; Заголовки колонок раздела: площадь — Высота | Ширина; погонаж — Длина
 (defun ae-sv-cnt-heads (marks area wide)
   (if area
     (if marks
@@ -1309,16 +1342,15 @@
 )
 
 ;; Строки списка «Подсчёт»: разделы подряд, между разделами — пустая строка; над каждым разделом — заголовок
-(defun ae-sv-cnt-display (/ marks wide widths out cols body items total)
-  (if (null *ae-sv-cnt-secs*)
-    (mapcar 'car *ae-sv-cnt-rows*)
+(defun ae-sv-cnt-lines (secs marks / wide widths out cols body items total)
+  (if (null secs)
+    nil
     (progn
-      (setq marks (ae-sv-cnt-marks-p *ae-sv-cnt-secs*)
-            wide (ae-sv-cnt-area-p *ae-sv-cnt-secs*)
+      (setq wide (ae-sv-cnt-area-p secs)
             widths (ae-sv-cnt-widths-of (ae-sv-cnt-key marks wide))
             total (apply '+ (mapcar '(lambda (w) (+ w 2)) widths))
             out '())
-      (foreach sec *ae-sv-cnt-secs*
+      (foreach sec secs
         (setq cols (car (cadr sec))
               body (cdr (cadr sec))
               items (reverse (cdr (reverse body))))
@@ -1341,10 +1373,35 @@
       out))
 )
 
-;; Имя диалога по варианту: searchattvis_count_n / _m / _ln / _lm
-(defun ae-sv-cnt-dialog-name ()
-  (strcat "searchattvis_count_"
-          (ae-sv-cnt-key (ae-sv-cnt-marks-p *ae-sv-cnt-secs*) (ae-sv-cnt-area-p *ae-sv-cnt-secs*))))
+;; Вставки одного вида: площадь (колонки «Высота» и «Ширина») и погонаж (колонка «Длина»)
+(defun ae-sv-cnt-area-secs (secs)
+  (vl-remove-if-not '(lambda (s) (member "Высота" (car (cadr s)))) secs)
+)
+
+(defun ae-sv-cnt-lin-secs (secs)
+  (vl-remove-if '(lambda (s) (member "Высота" (car (cadr s)))) secs)
+)
+
+;; Смешанный выбор: есть и площадь, и погонаж — два отдельных списка (диалоги _xn / _xm)
+(defun ae-sv-cnt-mixed-p (secs)
+  (if (and (ae-sv-cnt-area-secs secs) (ae-sv-cnt-lin-secs secs)) T nil)
+)
+
+;; Строки окна для одного диалога (n, m, ln, lm) — все разделы
+(defun ae-sv-cnt-display ()
+  (if (null *ae-sv-cnt-secs*)
+    (mapcar 'car *ae-sv-cnt-rows*)
+    (ae-sv-cnt-lines *ae-sv-cnt-secs* (ae-sv-cnt-marks-p *ae-sv-cnt-secs*)))
+)
+
+;; Имя диалога: searchattvis_count_n / _m / _ln / _lm; при смешанном выборе — _xn / _xm
+(defun ae-sv-cnt-dialog-name (/ marks)
+  (setq marks (ae-sv-cnt-marks-p *ae-sv-cnt-secs*))
+  (cond
+    ((null *ae-sv-cnt-secs*) "searchattvis_count_n")
+    ((ae-sv-cnt-mixed-p *ae-sv-cnt-secs*) (strcat "searchattvis_count_x" (if marks "m" "n")))
+    (T (strcat "searchattvis_count_" (ae-sv-cnt-key marks (ae-sv-cnt-area-p *ae-sv-cnt-secs*)))))
+)
 
 ;; Окно «Подсчёт». Результат — *ae-sv-next*: "table" (таблица) или "close"
 (defun ae-sv-count-dialog (/ dcl-file dcl-id t0)
@@ -1361,10 +1418,21 @@
         (alert "Не удалось загрузить окно подсчёта.")
         (if (new_dialog (ae-sv-cnt-dialog-name) dcl-id)
           (progn
-            (start_list "lst_count")
-            (foreach s (ae-sv-cnt-display)
-              (add_list s))
-            (end_list)
+            (if (ae-sv-cnt-mixed-p *ae-sv-cnt-secs*)
+              (progn
+                (start_list "lst_count")
+                (foreach s (ae-sv-cnt-lines (ae-sv-cnt-area-secs *ae-sv-cnt-secs*) (ae-sv-cnt-marks-p *ae-sv-cnt-secs*))
+                  (add_list s))
+                (end_list)
+                (start_list "lst_count2")
+                (foreach s (ae-sv-cnt-lines (ae-sv-cnt-lin-secs *ae-sv-cnt-secs*) (ae-sv-cnt-marks-p *ae-sv-cnt-secs*))
+                  (add_list s))
+                (end_list))
+              (progn
+                (start_list "lst_count")
+                (foreach s (ae-sv-cnt-display)
+                  (add_list s))
+                (end_list)))
             (set_tile "txt_count_status" (ae-sv-totals-text *ae-sv-cnt-secs*))
             (action_tile "btn_copy" "(ae-sv-cnt-copy)")
             (action_tile "btn_acad" "(progn (setq *ae-sv-next* \"table\") (done_dialog 3))")

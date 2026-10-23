@@ -7,14 +7,15 @@
 с цепочкой размеров ЗАПОЛНЕНИЯ (`Extraction/zapolnenie.lsp`).
 
 Правила:
-- площадь: сначала размер «в свету» («Высота в свету», «Ширина в свету»),
-  затем «Высота» и «Ширина» без номера; если «Ширины» нет — «Длина»;
-- совпадение точное (регистр не важен): «Высота1» не берётся;
-- припуск на раму (настройка input.frame.allowance, по умолчанию 26)
-  добавляется к высоте и ширине блоков с именем по маскам «Заполнени*»
-  и «Стекло*»; у остальных блоков припуска нет;
+- площадь: сначала размер «в свету» («Высота в свету», «Ширина в свету»), затем «Высота» и «Ширина»,
+  для ширины после них — «Длина»; по каждому ключу сначала точное имя (регистр не важен),
+  затем вхождение в имени БЕЗ цифр: «Высота двери» берётся, «Высота1» — нет;
+- если «Высоты» нет — блок в площадь не попадает;
+- припуск на раму (input.frame.allowance, по умолчанию 26) добавляется к высоте и ширине блоков,
+  у которых имя или первое значение видимости подходит под маски задачи ЗАПОЛНЕНИЕ (input.block);
+  пустой список масок — припуска нет (как в раскрое); у остальных блоков припуска нет;
 - размеры округляются до миллиметров ДО припуска;
-- без высоты блок в площадь не попадает; погонаж («Длина») припуска не получает.
+- погонаж («Длина», только точное имя) припуска не получает.
 
 Только stdlib. Запуск: python3 tests/search_count_test.py
 """
@@ -30,7 +31,7 @@ FAIL = 0
 
 HEIGHT_KEYS = ["Высота в свету", "Высота"]
 WIDTH_KEYS = ["Ширина в свету", "Ширина", "Длина"]
-FRAME_MASKS = ["Заполнени*", "Стекло*"]
+FRAME_MASKS = ["*Заполнение*", "*Стекло*"]   # пример настроек task.ZAPOLNENIE / input.block
 DEFAULT_ALLOWANCE = 26
 
 
@@ -45,7 +46,7 @@ def check(name, ok):
 
 
 # ---------------------------------------------------------------
-# Порт: точное совпадение имени свойства (регистр не важен)
+# Порт: свойства, числа, размеры
 # ---------------------------------------------------------------
 
 def prop_exact(props, wanted):
@@ -70,25 +71,45 @@ def num(text):
     return float(text.replace(",", "."))
 
 
+def has_digit(text):
+    return any(ch.isdigit() for ch in text)
+
+
+def dim_key(props, key):
+    """ae-sv-dim-key: точное имя, затем вхождение в имени без цифр."""
+    v = mm(num(prop_exact(props, key)))
+    if v is None:
+        for name, value in props:
+            if key.lower() in name.lower() and not has_digit(name):
+                v = mm(num(value))
+                if v is not None:
+                    break
+    return v
+
+
 def dim_of(props, keys):
+    """ae-sv-dim-of: первый найденный размер по списку ключей (порядок важен)."""
     for k in keys:
-        v = mm(num(prop_exact(props, k)))
+        v = dim_key(props, k)
         if v is not None:
             return v
     return None
 
 
-def is_frame(name):
-    """ae-sv-frame-p: имя подходит под одну из масок (регистр не важен)."""
-    return any(fnmatch.fnmatch(name.lower(), m.lower()) for m in FRAME_MASKS)
+def is_frame(name, vis, masks):
+    """ae-sv-frame-p: имя или первое значение видимости подходит под маску (регистр не важен); пустой список — нет."""
+    if not masks:
+        return False
+    values = [v for v in (name, vis) if v]
+    return any(fnmatch.fnmatch(v.lower(), m.lower()) for v in values for m in masks)
 
 
-def size_of(name, props, allowance=DEFAULT_ALLOWANCE):
+def size_of(name, props, allowance=DEFAULT_ALLOWANCE, vis="", masks=FRAME_MASKS):
     """ae-sv-size-of: ('A', h, w) — площадь; ('L', l, None) — погонаж; None."""
     h = dim_of(props, HEIGHT_KEYS)
     w = dim_of(props, WIDTH_KEYS)
     l = mm(num(prop_exact(props, "Длина")))
-    if h is not None and is_frame(name):
+    if h is not None and is_frame(name, vis, masks):
         h += allowance
         if w is not None:
             w += allowance
@@ -162,6 +183,34 @@ def scenario_mask_case():
           size_of("стеклопакет 4мм", props) == ("A", 1026, 526))
     check("«СТЕКЛО» — с припуском",
           size_of("СТЕКЛО", props) == ("A", 1026, 526))
+
+
+def scenario_door_names():
+    print("\n--- Подсчёт: «Высота двери» и «Ширина двери» (подстрока без цифр) ---")
+    props = [("Высота двери", "2100"), ("Ширина двери", "900")]
+    check("«Высота двери» и «Ширина двери» дают площадь",
+          size_of("Дверь", props) == ("A", 2100, 900))
+    check("«Высота двери 2» (с цифрой) не берётся",
+          size_of("Дверь", [("Высота двери 2", "2100"), ("Ширина двери", "900")]) is None)
+    check("точное «Ширина» важнее «Ширина двери»",
+          size_of("Дверь", [("Высота", "2100"), ("Ширина двери", "900"), ("Ширина", "800")]) == ("A", 2100, 800))
+    check("«Длина двери» — запасная ширина",
+          size_of("Дверь", [("Высота", "2100"), ("Длина двери", "900")]) == ("A", 2100, 900))
+    check("погонаж — только точное «Длина»: «Длина двери» без высоты не даёт погонажа",
+          size_of("Дверь", [("Длина двери", "900")]) is None)
+
+
+def scenario_frame_masks():
+    print("\n--- Маски припуска: как у раскроя (task.ZAPOLNENIE / input.block) ---")
+    props = [("Высота", "1000"), ("Ширина", "500")]
+    check("по видимости: «Окно» с видимостью «Заполнение 1» — с припуском",
+          size_of("Окно", props, vis="Заполнение 1") == ("A", 1026, 526))
+    check("без совпадения имени и видимости — без припуска",
+          size_of("Окно", props, vis="Открыто") == ("A", 1000, 500))
+    check("пустая маска — припуска нет (как в раскрое)",
+          size_of("Заполнение", props, masks=[]) == ("A", 1000, 500))
+    check("маска из настроек, например «*Витраж*», работает",
+          size_of("Витраж 3", props, masks=["*Витраж*"]) == ("A", 1026, 526))
 
 
 def scenario_rounding():
@@ -514,6 +563,8 @@ def main():
     scenario_no_mask_no_allowance()
     scenario_mask_case()
     scenario_rounding()
+    scenario_door_names()
+    scenario_frame_masks()
     scenario_layout()
     scenario_sort()
     scenario_table()
