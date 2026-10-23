@@ -31,10 +31,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 LISP_DIRS = [ROOT / "Extraction", ROOT / "common"]
 DCL_DIRS  = [ROOT / "Extraction"]
-# Plugins\ - сторонние модули (раздел плагинов RELOAD). Проверяются на
-# баланс, лексику, спецформы и пересечение имён defun с проектом; проектные
-# группы (mains, dcl-keys, wrap-guard) на них не распространяются.
-PLUGIN_DIR = ROOT / "Plugins"
+# Плагины - сторонние модули, пути берутся из реестра [plugins] settings.ini
+# (как в RELOAD). Проверяются на баланс, лексику, спецформы и пересечение имён
+# defun с проектом; проектные группы (mains, dcl-keys, wrap-guard) на них не
+# распространяются.
+SETTINGS_INI = ROOT / "settings.ini"
 # tests/*.lsp в основные группы не входят (там свои defun и свои правила),
 # но баланс и лексика проверяются отдельно: chkparens.lsp автозагружает RELOAD.
 TEST_DIR = ROOT / "tests"
@@ -137,27 +138,53 @@ def _reload_string_list(var: str) -> list[str]:
     return []
 
 
-def plugin_dev_files():
-    """Плагины в каталогах разработки - те же пути, что грузит RELOAD.
+def plugin_registry() -> list[tuple[str, str]]:
+    """Реестр [plugins] из settings.ini: (имя, путь) в порядке записей.
 
-    Каталог разработки имеет приоритет над Plugins\; каталога может не быть
-    (другая машина) - тогда список пуст, и это не ошибка.
+    Читается тем же правилом, что ae-settings-read-line: комментарии ; и #,
+    секция [имя], ключ=значение. Программа не знает содержимого плагинов.
     """
-    names = _reload_string_list("*ae-reload-plugin-files*")
-    dirs = _reload_string_list("*ae-reload-plugin-dev-dirs*")
-    for name in names:
-        for d in dirs:
-            # в .lsp путь записан с экранированным слэшем: D:\\PlotFrameToPDF
-            cand = Path(d.replace("\\\\", "\\")) / name
-            if cand.is_file():
-                yield cand
-                break
+    if not SETTINGS_INI.exists():
+        return []
+    section = ""
+    kv: dict[str, str] = {}
+    for line in SETTINGS_INI.read_bytes().decode("cp1251").splitlines():
+        text = line.strip()
+        if not text or text[0] in ";#":
+            continue
+        if text.startswith("[") and "]" in text:
+            section = text[1:text.index("]")].strip().lower()
+            continue
+        if section == "plugins" and "=" in text:
+            key, _, value = text.partition("=")
+            kv[key.strip()] = value.strip()
+    try:
+        count = int(kv.get("plugin.count", "0") or 0)
+    except ValueError:
+        count = 0
+    out: list[tuple[str, str]] = []
+    for i in range(1, count + 1):
+        name = kv.get(f"plugin.{i}.name", "")
+        if name:
+            out.append((name, kv.get(f"plugin.{i}.path", "")))
+    return out
 
 
-def plugin_lisp_files():
-    """Сторонние модули из Plugins\ (могут отсутствовать - это не ошибка)."""
-    if PLUGIN_DIR.exists():
-        yield from sorted(PLUGIN_DIR.glob("*.lsp"))
+def plugin_files():
+    """Плагины из реестра - то, что грузит RELOAD (порядок записей, без повторов).
+
+    Путь из реестра приоритетен; пустой путь - Plugins\\<имя>. Файла может не
+    быть на этой машине: тогда плагин пропускается, это не ошибка проверки.
+    """
+    seen: set[str] = set()
+    for name, path in plugin_registry():
+        cand = Path(path) if path else ROOT / "Plugins" / name
+        key = str(cand).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if cand.is_file():
+            yield cand
 
 
 def dcl_files():
@@ -172,10 +199,10 @@ def test_lisp_files():
 
 
 def all_lisp_files():
-    """Весь LISP проекта: модули, tests/*.lsp, Plugins/*.lsp и reload.lsp."""
+    """Весь LISP проекта: модули, tests/*.lsp, плагины реестра и reload.lsp."""
     yield from lisp_files()
     yield from test_lisp_files()
-    yield from plugin_lisp_files()
+    yield from plugin_files()
     root_lisp = ROOT / "reload.lsp"
     if root_lisp.exists():
         yield root_lisp
@@ -316,8 +343,7 @@ def check_duplicates() -> list[str]:
     errors: list[str] = []
     seen: dict[str, tuple[str, int]] = {}
 
-    for path in (list(lisp_files()) + list(plugin_lisp_files())
-                 + list(plugin_dev_files())):
+    for path in (list(lisp_files()) + list(plugin_files())):
         rel = _rel(path)
         for name, line in find_defuns(path):
             lname = name.lower()
@@ -638,29 +664,70 @@ def check_reload_chkload_guard() -> list[str]:
 
 
 RELOAD_PLUGINS_MUST = [
-    ("(setq *ae-reload-plugin-files*",
-     "списка плагинов *ae-reload-plugin-files* на верхнем уровне"),
-    ("(setq *ae-reload-plugin-dev-dirs*",
-     "списка каталогов разработки *ae-reload-plugin-dev-dirs*"),
-    ("(defun ae-reload-plugin-dev-path (",
-     "резолвера ae-reload-plugin-dev-path (плагин в разработке грузится из своего каталога)"),
-    ("(ae-reload-plugin-dev-path f)",
-     "вызова резолвера при сборке путей плагинов"),
-    ("(vl-file-directory-p plugins-dir)",
-     "проверки папки Plugins\\ - без неё отсутствующий плагин даёт «НЕ НАЙДЕН»"),
-    ("(if dev-path \"разработка\" nil)",
-     "пометки источника в логе: без неё не видно, разработка это или Plugins\\"),
-    ("(if (> plugin-cnt 0)",
-     "условия секции PLUGINS: пустой список обязан пропускаться молча"),
-    ("(setq plugin-cnt (length plugin-items))",
-     "подсчёта плагинов - без него итог «из N модулей» расходится с фактом"),
-    ("(setq revpaths (cons (car it) revpaths))",
-     "учёта плагинов в маркере редакции"),
-    ("(length extraction-files) plugin-cnt)",
-     "знаменателя «из N модулей» с плагинами"),
+    ("(defun ae-reload-plugin-registry (",
+     "чтения реестра плагинов [plugins] из settings.ini"),
+    ("(defun ae-reload-plugin-resolve (",
+     "резолвера пути плагина (путь из реестра, без отката на другой путь)"),
+    ("(ae-reload-plugin-resolve (car plugin-rec) (cadr plugin-rec))",
+     "вызова резолвера в секции PLUGINS"),
+    ("НЕ НАЙДЕН по пути",
+     "строки лога «НЕ НАЙДЕН по пути» для плагина без файла по пути реестра"),
+    ("(ae-reload-plugin-conflicts plugin-res plugin-names plugin-taken)",
+     "проверки перекрытия имён функций плагина: имена проекта и предыдущих плагинов"),
+    ("(append (mapcar 'strcase (ae-reload-plugin-defuns (strcat common f)))",
+     "сбора имён функций проекта для проверки перекрытия"),
+    ("(if (> (length plugin-items) 0)",
+     "условия секции PLUGINS: пустой реестр обязан пропускаться молча"),
+    ("(setq plugin-missing (1+ plugin-missing))",
+     "счётчика плагинов без файла (для итогового предупреждения)"),
+    ("(foreach it plugin-resolved",
+     "учёта найденных плагинов в маркере редакции"),
 ]
 
-PLUGIN_LOCALS = ("plugins-dir", "plugin-items", "plugin-cnt", "dev-path", "it")
+RELOAD_PLUGINS_FORBIDDEN = [
+    ("*ae-reload-plugin-files*",
+     "жёсткого списка имён плагинов: имена берутся из реестра"),
+    ("*ae-reload-plugin-dev-dirs*",
+     "каталогов разработки: поиск по каталогам не используется"),
+    ("ae-reload-plugin-dev-path",
+     "поиска в каталогах разработки: путь берётся из реестра"),
+    ("ae-reload-plugin-remember",
+     "запоминания имён плагина между прогонами: проверка перекрытия идёт по именам проекта"),
+    ("*ae-reload-plugin-own*",
+     "списка имён плагинов между прогонами: он скрывал перекрытие при повторном RELOAD"),
+    ("plugin-cnt",
+     "переменной, которой уже нет в c:RELOAD: её чтение роняет итог прогона (numberp: nil)"),
+    ("PlotFrame",
+     "имени конкретного плагина в коде RELOAD: программа не знает содержимого плагинов"),
+]
+
+PLUGIN_LOCALS = ("plugin-items", "plugin-seen", "plugin-rec", "plugin-name",
+                 "plugin-path", "plugin-res", "plugin-names", "plugin-missing",
+                 "plugin-resolved", "plugin-taken")
+
+
+SETTINGS_PLUGINS_MUST = [
+    ("(ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)",
+     "переноса буфера плагинов в память перед записью settings.ini (иначе «Сохранить» не пишет реестр)"),
+    ("(ae-settings-write))",
+     "записи settings.ini в ae-settings-ui-save"),
+    ('(new_dialog "plugins_dialog" dcl-id)',
+     "открытия диалога плагинов"),
+]
+
+
+def check_settings_plugins_guard() -> list[str]:
+    """Окно настроек: буфер плагинов обязан попадать в settings.ini при «Сохранить»."""
+    path = ROOT / "Extraction" / "settings.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    for needle, what in SETTINGS_PLUGINS_MUST:
+        if needle not in text:
+            errors.append(f"{rel}: плагины в настройках: нет {what}")
+    return errors
 
 
 def check_reload_plugins_guard() -> list[str]:
@@ -674,6 +741,9 @@ def check_reload_plugins_guard() -> list[str]:
     for needle, what in RELOAD_PLUGINS_MUST:
         if needle not in text:
             errors.append(f"{rel}: раздел плагинов: нет {what}")
+    for needle, what in RELOAD_PLUGINS_FORBIDDEN:
+        if needle in text:
+            errors.append(f"{rel}: раздел плагинов: остался {what}")
 
     # Переменные секции обязаны быть локальными для c:RELOAD: иначе они
     # становятся глобальными и переживают прогон (класс дефекта, который
@@ -1073,7 +1143,7 @@ def check_call_arity(files=None) -> list[str]:
     не видно: скобки сбалансированы, спецформы на месте.
     """
     paths = (files if files is not None
-             else list(all_lisp_files()) + list(plugin_dev_files()))
+             else list(all_lisp_files()))
     sig = lisp_signatures(paths)
     errors: list[str] = []
     for path in paths:
@@ -1102,24 +1172,29 @@ def check_call_arity(files=None) -> list[str]:
 
 
 CHKPARENS_PLUGINS_MUST = [
-    ('(strcat root "\\\\Plugins\\\\")',
-     "папки Plugins\\ в обходе CHKALL - принятые плагины остались бы без проверки"),
-    ("(boundp '*ae-reload-plugin-files*)",
-     "стража boundp по *ae-reload-plugin-files*: без него CHKALL падает, "
-     "если reload.lsp не загружен"),
-    ("(member (type ae-reload-plugin-dev-path) '(SUBR USUBR))",
-     "проверки типа резолвера - CHKALL обязан работать и без reload.lsp"),
-    ("(setq p (ae-reload-plugin-dev-path f))",
-     "вызова резолвера ae-reload-plugin-dev-path: CHKALL обязан брать тот же "
-     "путь, что и RELOAD"),
-    ("(if (and p (findfile p))",
-     "проверки, что файл плагина действительно найден"),
+    ("(foreach rec (ae-reload-plugin-registry)",
+     "обхода реестра плагинов в CHKALL - принятые плагины остались бы без проверки"),
+    ("(member (type ae-reload-plugin-registry) '(SUBR USUBR))",
+     "стражи типа реестра: CHKALL обязан работать и без reload.lsp"),
+    ("(member (type ae-reload-plugin-resolve) '(SUBR USUBR))",
+     "стражи типа резолвера: CHKALL обязан работать и без reload.lsp"),
+    ("(setq p (ae-reload-plugin-resolve (car rec) (cadr rec)))",
+     "резолвера ae-reload-plugin-resolve: CHKALL обязан брать тот же путь, что и RELOAD"),
     ("(setq total (+ total (chk-parens-scan p)))",
-     "самого сканирования плагина в разработке (иголка с setq, потому что "
-     "голое (chk-parens-scan p) есть ещё в c:CHKFILE)"),
+     "самого сканирования плагина (иголка с setq, потому что голое "
+     "(chk-parens-scan p) есть ещё в c:CHKFILE)"),
 ]
 
-CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p")
+CHKPARENS_PLUGINS_FORBIDDEN = [
+    ('(strcat root "\\\\Plugins\\\\")',
+     "обхода папки Plugins\\ по файлам: плагины берутся только из реестра"),
+    ("ae-reload-plugin-dev-path",
+     "поиска в каталогах разработки: путь берётся из реестра"),
+    ("*ae-reload-plugin-files*",
+     "жёсткого списка плагинов: имена берутся из реестра"),
+]
+
+CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p", "rec")
 
 
 def check_chkparens_plugins_guard() -> list[str]:
@@ -1138,6 +1213,9 @@ def check_chkparens_plugins_guard() -> list[str]:
     for needle, what in CHKPARENS_PLUGINS_MUST:
         if needle not in text:
             errors.append(f"{rel}: CHKALL и плагины: нет {what}")
+    for needle, what in CHKPARENS_PLUGINS_FORBIDDEN:
+        if needle in text:
+            errors.append(f"{rel}: CHKALL и плагины: остался {what}")
 
     # Переменные обхода обязаны быть локальными для c:CHKALL: иначе они
     # глобальные и переживают команду.
@@ -1591,6 +1669,37 @@ def check_fill_allowance() -> list[str]:
     return errors
 
 
+def check_search_count() -> list[str]:
+    """Подсчёт окна поиска: размеры «в свету» и припуск по маскам.
+
+    Инварианты:
+    1. площадь берёт «Высота в свету» / «Ширина в свету» раньше обычных
+       имён — та же цепочка, что у ЗАПОЛНЕНИЯ;
+    2. припуск берётся из настроек задачи ЗАПОЛНЕНИЕ (ae-settings-frame-allowance)
+       и применяется только к блокам по маскам задачи ЗАПОЛНЕНИЕ (input.block, как у раскроя);
+    3. размеры считаются через общую функцию ae-sv-size-of, которую используют
+       и таблица, и окно «Подсчёт».
+    """
+    errors: list[str] = []
+    sv = ROOT / "Extraction/searchattvis.lsp"
+    if not sv.exists():
+        return errors
+    text = read_text(sv)
+    for need, what in (
+        ('(quote ("Высота в свету" "Высота"))', "нет приоритета «Высота в свету» для площади"),
+        ('(quote ("Ширина в свету" "Ширина" "Длина"))', "нет приоритета «Ширина в свету» для площади"),
+        ("(ae-settings-task-blocks 'ZAPOLNENIE)", "припуск не берёт маски задачи ЗАПОЛНЕНИЕ (input.block)"),
+        ("(defun ae-sv-frame-masks", "нет маски припуска из задачи ЗАПОЛНЕНИЕ"),
+        ("(defun ae-sv-allowance", "нет доступа к припуску"),
+        ("(ae-settings-frame-allowance)", "припуск не берётся из настроек задачи ЗАПОЛНЕНИЕ"),
+        ("(defun ae-sv-frame-p", "нет проверки имени блока по маскам припуска"),
+        ("(ae-sv-frame-p rec masks)", "припуск не применяется в ae-sv-size-of"),
+    ):
+        if need not in text:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+    return errors
+
+
 def check_summary_marks() -> list[str]:
     """Колонка «Марка» в перечне изделий не меняет геометрию отчётов.
 
@@ -1689,6 +1798,92 @@ def check_summary_marks() -> list[str]:
 # Main
 # ----------------------------------------------------------------------
 
+def check_search_count_window() -> list[str]:
+    """Окно «Подсчёт»: таблица с рамкой, ширины колонок из lsp сверяются с DCL.
+
+    Инварианты:
+    1. *ae-sv-cnt-widths* (lsp): варианты n (без марок) и m (с марками) —
+       ширины колонок в символах; ячейка = «| » + W; справа закрывающая «|» на правой границе;
+    2. DCL: диалоги searchattvis_count_n и searchattvis_count_m; при смешанном выборе —
+       searchattvis_count_xn / _xm с двумя списками (lst_count — площадь, lst_count2 — погонаж);
+       tabs = 1,2 · (1 пробел слева + накопленная ширина ячеек, ячейка = W + 2),
+       ширина списка = 1,2 · (сумма ячеек + пробелы слева и справа) + 6, не меньше кнопок;
+       высота списка 40;
+    3. окно выбирает диалог через (ae-sv-cnt-dialog-name);
+    4. без (or (nth …)) — AutoLISP возвращает T, а не значение.
+    """
+    errors: list[str] = []
+    sv = ROOT / "Extraction/searchattvis.lsp"
+    dcl = ROOT / "Extraction/searchattvis.dcl"
+    if not sv.exists() or not dcl.exists():
+        return errors
+    lsp = read_text(sv)
+    dcl_text = read_text(dcl)
+    if "(new_dialog (ae-sv-cnt-dialog-name) dcl-id)" not in lsp:
+        errors.append("Extraction/searchattvis.lsp: окно «Подсчёт» не выбирает диалог через ae-sv-cnt-dialog-name")
+    if re.search(r"\(or \((?:nth|c[ad]+r)\b", lsp):
+        errors.append("Extraction/searchattvis.lsp: (or (nth|cadr…)) возвращает T, а не значение; использовать if")
+    m = re.search(r"\(setq \*ae-sv-cnt-widths\*(.*?)\)\)\)\n", lsp, re.S)
+    if not m:
+        errors.append("Extraction/searchattvis.lsp: нет *ae-sv-cnt-widths*")
+        return errors
+    widths = {k: [int(x) for x in v.split()]
+              for k, v in re.findall(r'\("(ln|lm|n|m)"((?:\s+\d+)+)\)', m.group(1))}
+    if sorted(widths) != ["lm", "ln", "m", "n"]:
+        errors.append(f"Extraction/searchattvis.lsp: ширины для {sorted(widths)}, нужны n, m, ln и lm")
+    def dialog_body(name):
+        dm = re.search(r"searchattvis_count_" + name + r" : dialog \{(.*?)\n\}\n", dcl_text, re.S)
+        if not dm:
+            errors.append(f"Extraction/searchattvis.dcl: нет диалога searchattvis_count_{name}")
+            return None
+        return dm.group(1)
+
+    def check_list(body, dlg, list_key, wkey, height):
+        wm = re.search(r'key = "' + list_key + r'";\s*width = (\d+);\s*height = (\d+);', body)
+        tm = re.search(r'key = "' + list_key + r'";.*?tabs = "([\d ]*)";', body, re.S)
+        if not wm or not tm:
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg}: нет width/height/tabs у {list_key}")
+            return
+        cells = [w + 2 for w in widths[wkey]]
+        expect_width = max((6 * (sum(cells) + 2) + 2) // 5 + 6, 48 + 2)   # + кнопки 14+22+12
+        expect_tabs = []
+        acc = 1                       # пробел слева от таблицы
+        for c in cells:
+            acc += c
+            expect_tabs.append((6 * acc + 2) // 5)
+        got_tabs = [int(x) for x in tm.group(1).split()]
+        if int(wm.group(1)) != expect_width:
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: ширина {wm.group(1)}, ожидалось {expect_width}")
+        if got_tabs != expect_tabs:
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: tabs {got_tabs}, ожидалось {expect_tabs}")
+        if height is not None and int(wm.group(2)) != height:
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg} {list_key}: высота {wm.group(2)}, ожидалось {height}")
+
+    def check_status(body, dlg):
+        if not re.search(r'key = "txt_count_status";.*?alignment = right;', body, re.S):
+            errors.append(f"Extraction/searchattvis.dcl: searchattvis_count_{dlg}: строка состояния не выровнена вправо")
+
+    for key in ("n", "m", "ln", "lm"):
+        if key not in widths:
+            continue
+        body = dialog_body(key)
+        if body is None:
+            continue
+        check_list(body, key, "lst_count", key, 40)
+        check_status(body, key)
+    # смешанный выбор: площадь (lst_count) и погонаж (lst_count2) — два списка
+    for dlg, area, lin in (("xn", "n", "ln"), ("xm", "m", "lm")):
+        if area not in widths or lin not in widths:
+            continue
+        body = dialog_body(dlg)
+        if body is None:
+            continue
+        check_list(body, dlg, "lst_count", area, 24)
+        check_list(body, dlg, "lst_count2", lin, 16)
+        check_status(body, dlg)
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -1715,6 +1910,7 @@ def main() -> int:
     errors += check_cutsheet_wrap_guard()
     errors += check_reload_chkload_guard()
     errors += check_reload_plugins_guard()
+    errors += check_settings_plugins_guard()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -1727,26 +1923,16 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: {msg}")
     errors += check_lisp_lexical(list(test_lisp_files()))
 
-    # Plugins\*.lsp: сторонние модули грузятся тем же RELOAD, поэтому
-    # баланс и лексика проверяются наравне с модулями проекта
+    # Плагины из реестра: грузятся тем же RELOAD, поэтому баланс и лексика
+    # проверяются наравне с модулями проекта
+    plugin_paths = list(plugin_files())
     plugins_count = 0
-    for path in plugin_lisp_files():
+    for path in plugin_paths:
         plugins_count += 1
         ok, msg = check_balance_lex(path)
         if not ok:
-            errors.append(f"{path.relative_to(ROOT)}: {msg}")
-    errors += check_lisp_lexical(list(plugin_lisp_files()))
-
-    # Плагины в разработке: лежат вне репозитория, но грузятся тем же RELOAD,
-    # поэтому проверяются тем же набором общих групп
-    plugins_dev_count = 0
-    dev_files = list(plugin_dev_files())
-    for path in dev_files:
-        plugins_dev_count += 1
-        ok, msg = check_balance_lex(path)
-        if not ok:
             errors.append(f"{_rel(path)}: {msg}")
-    errors += check_lisp_lexical(dev_files)
+    errors += check_lisp_lexical(plugin_paths)
 
     # reload.lsp в корне: грузится первым, его дефект лишает всей диагностики
     root_lisp = ROOT / "reload.lsp"
@@ -1757,15 +1943,17 @@ def main() -> int:
         errors += check_lisp_lexical([root_lisp])
 
     # Спецформы по всем .lsp сразу (модули + tests + reload.lsp + плагины)
-    errors += check_special_forms(list(all_lisp_files()) + dev_files)
+    errors += check_special_forms(list(all_lisp_files()))
     errors += check_reload_version_line()
-    errors += check_defun_duplicates_in_file(list(all_lisp_files()) + dev_files)
-    errors += check_call_arity(list(all_lisp_files()) + dev_files)
+    errors += check_defun_duplicates_in_file(list(all_lisp_files()))
+    errors += check_call_arity(list(all_lisp_files()))
     errors += check_dialog_layers_section()
     errors += check_dcl_gap_prototypes()
     errors += check_mark_labels()
     errors += check_fill_allowance()
+    errors += check_search_count()
     errors += check_summary_marks()
+    errors += check_search_count_window()
     errors += check_xls_marks_guard()
 
     if errors:
@@ -1777,14 +1965,14 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
-        f"plugins={plugins_count} plugins-dev={plugins_dev_count} "
+        f"plugins={plugins_count} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
-        f" / mark-labels / fill-allowance / summary-marks"
+        f" / mark-labels / fill-allowance / search-count / summary-marks / search-count-window"
     )
     print("RESULT: PASS")
     return 0

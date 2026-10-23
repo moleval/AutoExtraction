@@ -104,10 +104,10 @@ memory because the Table object is reconstructed from scratch».
   (ред. 1; `end` вызывается ВМЕСТО `vla-Update`); на них переведены
   `cladding.lsp` (ред. 31, 4 таблицы), `subsystem.lsp` (ред. 1, 2),
   `fasonka.lsp` (ред. 1, 1) и легаси `tbl-create-summary`;
-  `zapolnenie.lsp` (ред. 29, 2 таблицы) — та же схема прямыми вызовами
+  `zapolnenie.lsp` (ред. 30, 2 таблицы) — та же схема прямыми вызовами
   подавления (исторически до появления хелперов), с замером времени
   в логе. Реальных вызовов `vla-Update` в проекте нет.
-- `Extraction/zapolnenie.lsp` (ред. 29): `zapolnenie-create-table-detail`
+- `Extraction/zapolnenie.lsp` (ред. 30): `zapolnenie-create-table-detail`
   и `zapolnenie-create-table-summary`. Схема: число строк считается до
   вставки (`nRows = 2 + строки чанка (+ 1 итог)`), один `vla-AddTable`
   конечного размера → подавление → заполнение (ширины, шапка, данные,

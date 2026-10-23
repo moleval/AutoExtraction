@@ -57,10 +57,6 @@
   )
 )
 
-(defun lft-same-set-p (a b)
-  (and (lft-subset-p a b) (lft-subset-p b a))
-)
-
 (defun lft-inter (a b / out)
   (setq out '())
   (foreach x a
@@ -101,10 +97,6 @@
 (defun lft-names-by-masks (masks tree)
   (mapcar 'car (tu-layer-filter-nodes-by-masks
                  masks *tu-layer-filter-mask-levels* tree))
-)
-
-(defun lft-overlap-p (a b)
-  (if (lft-inter a b) T nil)
 )
 
 ;; ------------------------------------------------------------

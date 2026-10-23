@@ -3,7 +3,7 @@
 Как надёжно читать значения атрибутов вставок (INSERT) из AutoLISP:
 два пути чтения, правила защиты от ошибок COM, семантика применения
 на примере задачи «Марка» (Заполнение). Реализация —
-`Extraction/zapolnenie.lsp` ред. 29 (`zapolnenie-get-attr`,
+`Extraction/zapolnenie.lsp` ред. 30 (`zapolnenie-get-attr`,
 `zapolnenie-mark-line`); отработана на тестовом стенде
 `zapolnenie2.lsp` (удалён после интеграции).
 
@@ -114,7 +114,7 @@
 
 ## 5. Источники
 
-- `Extraction/zapolnenie.lsp` ред. 29 — рабочая реализация (колонка
+- `Extraction/zapolnenie.lsp` ред. 30 — рабочая реализация (колонка
   «Марка», отработана на стенде ред. 1–7 и принята приёмкой).
 - Проект MarkZ (moleval/MarkZ), `MARKZ.lsp` — DXF-путь и ActiveX-фоллбек
   (`mark:find-attr-in-ename`, `mark:find-attr-obj`).

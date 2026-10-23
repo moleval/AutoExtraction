@@ -249,5 +249,5 @@
   )
 )
 
-(princ "\nTABLE-UTILS.LSP загружен (ред. 1: FAST_TABLES ts-ac-fast-begin/end).")
+;; TABLE-UTILS.LSP загружен (ред. 1: FAST_TABLES ts-ac-fast-begin/end).
 (princ)

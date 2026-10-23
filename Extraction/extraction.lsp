@@ -1312,9 +1312,19 @@
   (done_dialog 1)
 )
 
+(defun extraction-search ()
+  (setq *EXTRACTION-ACTION* 'SEARCH)
+  (done_dialog 1)
+)
+
 
 (defun extraction-settings ()
   (setq *EXTRACTION-ACTION* 'SETTINGS)
+  (done_dialog 1)
+)
+
+(defun extraction-plugins ()
+  (setq *EXTRACTION-ACTION* 'PLUGINS)
   (done_dialog 1)
 )
 
@@ -1524,6 +1534,10 @@
   (extraction-apply-settings-defaults)
 
   (setq *extraction-preselected-set* (ssget "_I"))
+  ;; список блоков диспетчера Ч только выбранные вставки (если выбор есть)
+  (if (= (type blockrename-scope-from-set) 'SUBR)
+    (blockrename-scope-from-set *extraction-preselected-set*)
+  )
 
   (setq dcl-file nil)
   (setq modules-dir (extraction-modules-dir))
@@ -1645,10 +1659,12 @@
 
               (extraction-sync-checks-from-layers)
 
+              (action_tile "btn_search" "(extraction-search)")
               (action_tile "btn_settings" "(extraction-settings)")
               (action_tile "btn_help"   "(extraction-help)")
               (action_tile "btn_save"   "(extraction-save)")
               (action_tile "btn_saveas" "(extraction-saveas)")
+              (action_tile "btn_plugins" "(extraction-plugins)")
               (action_tile "btn_close"  "(extraction-close)")
 
               (action_tile "btn_cutline"  "(extraction-cutline)")
@@ -1698,6 +1714,14 @@
               ;; --- ќбработка результата ---
               (cond
 
+                ((eq *EXTRACTION-ACTION* 'SEARCH)
+                 ;; ќкно поиска открываетс€ после закрыти€ диспетчера.
+                 ;; ƒиспетчер после поиска не открываетс€ снова.
+                 (if (member (type c:ѕќ»— ЅЋќ ) '(SUBR USUBR))
+                   (c:ѕќ»— ЅЋќ )
+                   (alert "ќкно поиска недоступно."))
+                )
+
                 ((eq *EXTRACTION-ACTION* 'SETTINGS)
                  ;; √лавное окно закрываетс€ перед вторым модальным DCL.
                  ;; ѕосле настроек оно открываетс€ заново с перечитанными масками.
@@ -1705,6 +1729,14 @@
                    (ae-settings-ui-open)
                  )
                  (extraction-apply-settings-defaults)
+                 (c:extraction)
+                )
+
+                ((eq *EXTRACTION-ACTION* 'PLUGINS)
+                 ;; ќкно плагинов открываетс€ после закрыти€ диспетчера, затем диспетчер снова
+                 (if (= (type ae-settings-ui-plugins-open) 'SUBR)
+                   (ae-settings-ui-plugins-open)
+                 )
                  (c:extraction)
                 )
 
@@ -1844,7 +1876,10 @@
 )
 
 
-(princ "\nEXTRACTION.LSP загружен (ред. 29: раскладка окна Ч отступы сведены к трЄм прототипам DCL; поиск сло€ в панели —лои; фильтры ћои/‘асады/¬итражи/ќкна по групповым фильтрам AutoCAD).")
+;; EXTRACTION.LSP загружен (ред. 29: раскладка окна Ч отступы сведены к трЄм прототипам DCL; поиск сло€ в панели —лои; фильтры ћои/‘асады/¬итражи/ќкна по групповым фильтрам AutoCAD).
+(if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
+  (ae-banner-add "EXTRACTION" '(
+      ("EXTRACTION / Ё —“–ј ÷»я" "окно выбора задач, слоЄв и отчЄтов (ред. 29)"))))
 
 ;; ============================================================
 ;; «ј√Ћ”Ў »
