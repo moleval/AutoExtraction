@@ -935,9 +935,9 @@
 (defun ae-sv-nosize-text (sel-b sel-i recs / ens-n skip head)
   (setq ens-n (length (ae-sv-final *ae-sv-entries* sel-b sel-i)))
   (setq skip (- ens-n (length recs)))
-  (setq head (if (= (length sel-b) 1)
+  (setq head (if (null sel-b) "У выбранных строк нет погонажа или площади" (if (= (length sel-b) 1)
                (strcat "У блока «" (car sel-b) "» нет погонажа или площади")
-               "У выбранных блоков нет погонажа или площади"))
+               "У выбранных блоков нет погонажа или площади")))
   (strcat head ". Вставок: " (itoa ens-n)
           ", на замороженных, заблокированных или выключенных слоях: " (itoa skip)
           ". Свойства: "
@@ -954,7 +954,7 @@
 
 (defun ae-sv-cnt-data (sel-b sel-i / rows secs recs)
   (setq rows '() secs '())
-  (if (null sel-b)
+  (if (and (null sel-b) (null sel-i))
     (setq rows (list (list "Выберите блок в списке слева")))
     (progn
       ;; выбрано две и более видимости — отдельная таблица на каждую видимость
@@ -963,7 +963,7 @@
           (setq secs (append secs
                              (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b (list st)))
                                              (list st)))))
-        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) sel-b)))
+        (setq secs (ae-sv-tag-secs (ae-sv-build-sections (ae-sv-count-recs sel-b sel-i)) (or sel-b sel-i))))
       (if (null secs)
         (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
