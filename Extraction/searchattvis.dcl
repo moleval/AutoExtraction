@@ -59,6 +59,9 @@ searchattvis_dialog : dialog {
           edit_width = 36;
         }
       }
+      : text {
+        label = " ";
+      }
     }
 
     : row {
@@ -209,6 +212,106 @@ searchattvis_count_m : dialog {
       key = "txt_count_status";
       label = "";
       width = 85;
+      fixed_width = true;
+      alignment = right;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 14;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 12;
+      }
+    }
+  }
+}
+
+searchattvis_count_ln : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 50;
+      height = 40;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 18 28 41";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 50;
+      fixed_width = true;
+      alignment = right;
+    }
+
+    : row {
+      alignment = centered;
+
+      : button {
+        key = "btn_copy";
+        label = "Копировать";
+        fixed_width = true;
+        width = 14;
+      }
+      : button {
+        key = "btn_acad";
+        label = "Таблица AutoCAD";
+        fixed_width = true;
+        width = 22;
+      }
+      : button {
+        key = "btn_count_close";
+        label = "Закрыть";
+        is_cancel = true;
+        fixed_width = true;
+        width = 12;
+      }
+    }
+  }
+}
+
+searchattvis_count_lm : dialog {
+
+  label = "Подсчёт";
+
+  : column {
+    children_alignment = left;
+
+    : list_box {
+      key = "lst_count";
+      width = 74;
+      height = 40;
+      fixed_width = true;
+      fixed_height = true;
+      tabs = "7 34 44 54 67";
+    }
+
+    : text {
+      key = "txt_count_status";
+      label = "";
+      width = 74;
       fixed_width = true;
       alignment = right;
     }

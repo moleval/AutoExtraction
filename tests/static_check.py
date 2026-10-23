@@ -1826,10 +1826,10 @@ def check_search_count_window() -> list[str]:
         errors.append("Extraction/searchattvis.lsp: нет *ae-sv-cnt-widths*")
         return errors
     widths = {k: [int(x) for x in v.split()]
-              for k, v in re.findall(r'\("([nm])"((?:\s+\d+)+)\)', m.group(1))}
-    if sorted(widths) != ["m", "n"]:
-        errors.append(f"Extraction/searchattvis.lsp: ширины для {sorted(widths)}, нужны n и m")
-    for key in ("n", "m"):
+              for k, v in re.findall(r'\("(ln|lm|n|m)"((?:\s+\d+)+)\)', m.group(1))}
+    if sorted(widths) != ["lm", "ln", "m", "n"]:
+        errors.append(f"Extraction/searchattvis.lsp: ширины для {sorted(widths)}, нужны n, m, ln и lm")
+    for key in ("n", "m", "ln", "lm"):
         if key not in widths:
             continue
         dm = re.search(r"searchattvis_count_" + key + r" : dialog \{(.*?)\n\}\n", dcl_text, re.S)
