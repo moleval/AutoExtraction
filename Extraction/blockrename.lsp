@@ -308,19 +308,26 @@
 ;; их имена (имя определения блока). Без выбора (или если выбор без вставок
 ;; блоков) список полный. Сами блоки чертежа не затрагиваются.
 
-(defun blockrename-scope-from-set (ss / i en nm names)
-  (setq names '() i 0)
+(defun blockrename-scope-from-set (ss / i en nm cands all names)
+  (setq cands '() i 0)
   (if ss
     (repeat (sslength ss)
       (setq en (ssname ss i))
       (if (= (cdr (assoc 0 (entget en))) "INSERT")
-        (progn
-          (setq nm (vl-catch-all-apply 'vla-get-Name (list (vlax-ename->vla-object en))))
+        (foreach prop '(vla-get-Name vla-get-EffectiveName)
+          (setq nm (vl-catch-all-apply prop (list (vlax-ename->vla-object en))))
           (if (and (not (vl-catch-all-error-p nm))
                    (blockrename-string-p nm)
                    (> (strlen nm) 0))
-            (setq names (cons (strcase nm) names)))))
+            (setq cands (cons (strcase nm) cands)))))
       (setq i (1+ i))))
+  ;; в область попадают только имена, которые есть в списке блоков;
+  ;; если таких нет — область пустая, список полный
+  (setq all (mapcar 'strcase (blockrename-all-names)))
+  (setq names
+    (if cands
+      (vl-remove-if-not '(lambda (n) (member n all)) cands)
+      nil))
   (setq *BLOCKRENAME-SCOPE* names)
   (if names T nil)
 )
