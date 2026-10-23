@@ -975,6 +975,8 @@
         (setq rows (list (list (ae-sv-nosize-text sel-b sel-i (ae-sv-count-recs sel-b sel-i)))))
         (foreach sec secs
           (princ "\n[dbg 2b] sec")
+          (princ (strcat "\n[dbg 2c] title=" (vl-princ-to-string (car sec)) " names=" (vl-princ-to-string (caddr sec)) " rowsType=" (vl-princ-to-string (type (cadr sec)))))
+          (princ (strcat "\n[dbg 2d] block-title=" (ae-sv-block-title (caddr sec))))
           (setq rows (append rows
                              (if rows (list (list "")) '())
                              (list (list (ae-sv-block-title (caddr sec))))
