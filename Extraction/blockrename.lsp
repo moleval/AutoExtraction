@@ -38,6 +38,10 @@
   (setq *BLOCKRENAME-FILTER-ANONYMOUS* nil)
 )
 
+(if (not (boundp '*BLOCKRENAME-SCOPE*))
+  (setq *BLOCKRENAME-SCOPE* nil)
+)
+
 (if (not (boundp '*BLOCKRENAME-SEARCH-PATTERN*))
   (setq *BLOCKRENAME-SEARCH-PATTERN* "")
 )
@@ -297,6 +301,40 @@
 ;; Остальные — с учетом чекбокса и поиска.
 ;; ============================================================
 
+;; ============================================================
+;; Область списка: блоки, выбранные до запуска EXTRACTION
+;; ============================================================
+;; Если при запуске были выбраны вставки блоков, список показывает только
+;; их имена (имя определения блока). Без выбора (или если выбор без вставок
+;; блоков) список полный. Сами блоки чертежа не затрагиваются.
+
+(defun blockrename-scope-from-set (ss / i en nm names)
+  (setq names '() i 0)
+  (if ss
+    (repeat (sslength ss)
+      (setq en (ssname ss i))
+      (if (= (cdr (assoc 0 (entget en))) "INSERT")
+        (progn
+          (setq nm (vl-catch-all-apply 'vla-get-Name (list (vlax-ename->vla-object en))))
+          (if (and (not (vl-catch-all-error-p nm))
+                   (blockrename-string-p nm)
+                   (> (strlen nm) 0))
+            (setq names (cons (strcase nm) names)))))
+      (setq i (1+ i))))
+  (setq *BLOCKRENAME-SCOPE* names)
+  (if names T nil)
+)
+
+(defun blockrename-in-scope-p (name)
+  (if (null *BLOCKRENAME-SCOPE*)
+    T
+    (if (and (blockrename-string-p name)
+             (member (strcase name) *BLOCKRENAME-SCOPE*))
+      T
+      nil))
+)
+
+
 (defun blockrename-filter-list ( / result name search)
 
   (setq result '())
@@ -318,6 +356,7 @@
       ;; Обычная логика фильтрации.
       (if
         (and
+          (blockrename-in-scope-p name)
           (or
             (not *BLOCKRENAME-FILTER-ANONYMOUS*)
             (blockrename-pasteblock-p name))

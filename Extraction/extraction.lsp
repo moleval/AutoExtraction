@@ -1534,6 +1534,10 @@
   (extraction-apply-settings-defaults)
 
   (setq *extraction-preselected-set* (ssget "_I"))
+  ;; список блоков диспетчера — только выбранные вставки (если выбор есть)
+  (if (= (type blockrename-scope-from-set) 'SUBR)
+    (blockrename-scope-from-set *extraction-preselected-set*)
+  )
 
   (setq dcl-file nil)
   (setq modules-dir (extraction-modules-dir))
