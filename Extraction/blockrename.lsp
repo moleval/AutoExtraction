@@ -1110,6 +1110,6 @@
 ;; BLOCKRENAME.LSP загружен (ред. 2: поля Поиск и Новое имя с подсказками). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "BLOCKRENAME" '(
-      ("BLOCKCOPY / КОПИЯБЛОКА" "копия блока (панель «Блоки»)")
-       ("BLOCKRENAME / ПЕРЕИМЕНОВАТЬ" "переименование блока (ред. 2)"))))
+      ("BLOCKCOPY / КОПИЯБЛОКА" "копия блока (панель «Блоки»)" "2")
+       ("BLOCKRENAME / ПЕРЕИМЕНОВАТЬ" "переименование блока" "2"))))
 (princ)

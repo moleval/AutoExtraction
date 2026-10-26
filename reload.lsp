@@ -483,7 +483,12 @@
   (strcat s (ae-banner-rep " " (- n (strlen s))))
 )
 
-(defun ae-banner-print ( / rows w1 w2 sep r it)
+(defun ae-banner-rev (r / v)
+  (setq v (if (and (listp r) (caddr r)) (caddr r) ""))
+  (if (= (type v) 'STR) v "")
+)
+
+(defun ae-banner-print ( / rows w1 w2 w3 sep r it)
   (setq rows '())
   (foreach it *ae-banner-items*
     (foreach r (cdr it)
@@ -493,15 +498,19 @@
     (progn
       (setq w1 (max 7 (apply 'max (mapcar '(lambda (x) (strlen (car x))) rows))))
       (setq w2 (max 10 (apply 'max (mapcar '(lambda (x) (strlen (cadr x))) rows))))
+      (setq w3 (max 4 (apply 'max (mapcar '(lambda (x) (strlen (ae-banner-rev x))) rows))))
       (setq sep (strcat "  +" (ae-banner-rep "-" (+ w1 2)) "+"
-                        (ae-banner-rep "-" (+ w2 2)) "+"))
+                        (ae-banner-rep "-" (+ w2 2)) "+"
+                        (ae-banner-rep "-" (+ w3 2)) "+"))
       (princ (strcat "\n" sep))
       (princ (strcat "\n  | " (ae-banner-pad "йнлюмдю" w1)
-                     " | " (ae-banner-pad "врн декюер" w2) " |"))
+                     " | " (ae-banner-pad "врн декюер" w2)
+                     " | " (ae-banner-pad "пед." w3) " |"))
       (princ (strcat "\n" sep))
       (foreach r rows
         (princ (strcat "\n  | " (ae-banner-pad (car r) w1)
-                       " | " (ae-banner-pad (cadr r) w2) " |")))
+                       " | " (ae-banner-pad (cadr r) w2)
+                       " | " (ae-banner-pad (ae-banner-rev r) w3) " |")))
       (princ (strcat "\n" sep))
     )
   )

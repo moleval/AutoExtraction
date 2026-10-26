@@ -1086,5 +1086,5 @@
 ;; SUBSYSTEM.LSP загружен (ред. 1: FAST_TABLES). Команды: SUBSYSTEM, ПОДСИСТЕМА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу (ред. 1)"))))
+      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "1"))))
 (princ)

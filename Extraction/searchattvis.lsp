@@ -1785,9 +1785,9 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
-        ("SEARCHBLOCK / ПОИСКБЛОК" "Поиск блоков: все блоки или выборка (Блок, Значение)")
-        ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)")
-        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)")))
+        ("SEARCHBLOCK / ПОИСКБЛОК" "поиск блоков: все блоки или выборка (Блок, Значение)" "3")
+        ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)" "3")
+        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)" "3")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))

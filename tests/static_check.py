@@ -682,6 +682,10 @@ RELOAD_PLUGINS_MUST = [
      "счётчика плагинов без файла (для итогового предупреждения)"),
     ("(foreach it plugin-resolved",
      "учёта найденных плагинов в маркере редакции"),
+    ("(defun ae-banner-rev (",
+     "извлечения редакции модуля для таблицы команд RELOAD"),
+    ('(ae-banner-pad "РЕД." w3)',
+     "столбца «РЕД.» в таблице команд RELOAD"),
 ]
 
 RELOAD_PLUGINS_FORBIDDEN = [
