@@ -418,6 +418,11 @@
       (if (findfile path)
         (load path)
         (princ (strcat "\n[EXTRACTION] Не найден: " path)))
+
+      (setq path (strcat root "\\Extraction\\searchattvis.lsp"))
+      (if (findfile path)
+        (load path)
+        (princ (strcat "\n[EXTRACTION] Не найден: " path)))
     )
 
     (princ "\n[EXTRACTION] Корень проекта не найден.")

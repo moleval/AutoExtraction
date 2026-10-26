@@ -48,6 +48,7 @@ searchattvis_dialog : dialog {
 
         : edit_box {
           key = "edt_name";
+          value = "Блок (по Enter):";
           edit_width = 36;
         }
         : edit_box {
@@ -116,6 +117,12 @@ searchattvis_dialog : dialog {
         label = "Выбрать";
         fixed_width = true;
         width = 16;
+      }
+      : button {
+        key = "btn_similar";
+        label = "Выбрать подобное";
+        fixed_width = true;
+        width = 22;
       }
       : button {
         key = "btn_count";

@@ -553,6 +553,172 @@ def scenario_table():
           head_line.strip() == "ВН-2 Б6" and len(head_line) - len(head_line.lstrip(" ")) == (tot_m - len("ВН-2 Б6")) // 2 + 1)
 
 
+# ============================================================
+# «Выбрать подобное» и подсказка «Блок (по Enter):» (порт из searchattvis.lsp)
+# ============================================================
+
+def sv_label_base(s):
+    p = s.find(" | ")
+    return s[:p] if p >= 0 else s
+
+
+def sv_adapt_sel_i(sel_i, entries):
+    if not sel_i:
+        return []
+    labels = [e[1] for e in entries]
+    out = []
+    for s in sel_i:
+        if s in labels:
+            if s not in out:
+                out.append(s)
+        else:
+            base = sv_label_base(s)
+            for e in entries:
+                if sv_label_base(e[1]) == base and e[1] not in out:
+                    out.append(e[1])
+    return out
+
+
+def sv_match(name, pat):
+    if not pat:
+        return True
+    s = (name or "").upper()
+    return any(fnmatch.fnmatchcase(s, p.strip().upper()) for p in pat.split(",") if p.strip())
+
+
+def sv_entries_from(recs, mode, qn="", qa="", qb=""):
+    acc = []
+    for rec in recs:
+        en, name, _vis0, attrs, vis_list, props, _lay = rec
+        if not sv_match(name, qn):
+            continue
+        if mode == "all":
+            if qb == "":
+                acc.append((name, name, en))
+            else:
+                v = prop_exact(props, "Длина")
+                hit = bool(v and sv_match(str(v), qb))
+                for k, av in attrs:
+                    if not hit and k.strip().upper() == "ДЛИНА" and sv_match(av, qb):
+                        hit = True
+                if hit:
+                    acc.append((name, name, en))
+        elif mode == "attr":
+            for k, av in attrs:
+                if sv_match(k, qa) and sv_match(av, qb):
+                    lbl = k if qb == "" else ("%s | %s" % (k, "(пусто)" if av == "" else av))
+                    acc.append((name, lbl, en))
+        else:
+            states = [v for v in vis_list if sv_match(v, qa)]
+            dvals = [] if qb == "" else [(pk, pv) for pk, pv in props if sv_match(pv, qb)]
+            if states and (qb == "" or dvals):
+                if qb == "":
+                    for s in states:
+                        acc.append((name, s, en))
+                else:
+                    for s in states:
+                        for pk, pv in dvals:
+                            acc.append((name, "%s | %s (%s)" % (s, pv, pk), en))
+    return acc
+
+
+def sv_similar_targets(mode, qn, qa, qb, sel_b, sel_i, rows1, rows2, scope_pre):
+    b = list(sel_b)
+    i = list(sel_i)
+    if not b and not i:
+        if mode == "all":
+            if qn != "" or qb != "" or scope_pre:
+                b = [r[0] for r in rows1]
+        elif qa != "" or qb != "":
+            i = [r[0] for r in rows2]
+            if qn != "":
+                b = [r[0] for r in rows1]
+        elif qn != "":
+            b = [r[0] for r in rows1]
+        elif scope_pre:
+            i = [r[0] for r in rows2]
+            if not i:
+                b = [r[0] for r in rows1]
+    elif b and not i and mode != "all" and (qa != "" or qb != ""):
+        i = [r[0] for r in rows2]
+    return b, i
+
+
+def sv_similar_ens(all_recs, mode, qn, qa, qb, sel_b, sel_i):
+    if sel_b and not sel_i and qa == "" and qb == "":
+        out = []
+        for r in all_recs:
+            if sv_match(r[1], qn) and r[1] in sel_b and r[0] not in out:
+                out.append(r[0])
+        return out
+    all_entries = sv_entries_from(all_recs, mode, qn, qa, qb)
+    out = []
+    for blk, lbl, en in all_entries:
+        if (not sel_b or blk in sel_b) and (not sel_i or lbl in sel_i) and en not in out:
+            out.append(en)
+    return out
+
+
+def scenario_similar():
+    print("\n--- Сценарий 11: «Выбрать подобное» по образцу (Блок / Видимость / Атрибут, без значения и со значением) ---")
+    # Чертёж: 5 вставок в модели, образец — en1
+    r1 = ("en1", "Профиль", "Ригель", [("МАРКА", "М1"), ("ЭТАЖ", "1")], ["Ригель"], [("Длина", "1500")], "0")
+    r2 = ("en2", "Профиль", "Ригель", [("МАРКА", "М1"), ("ЭТАЖ", "2")], ["Ригель"], [("Длина", "1500")], "0")
+    r3 = ("en3", "Профиль", "Ригель", [("МАРКА", "М2"), ("ЭТАЖ", "1")], ["Ригель"], [("Длина", "2000")], "0")
+    r4 = ("en4", "Профиль", "Стойка", [("МАРКА", "М1"), ("ЭТАЖ", "1")], ["Стойка"], [("Длина", "1500")], "0")
+    r5 = ("en5", "Кронштейн", "Кр-1", [("МАРКА", "М1")], ["Кр-1"], [("Длина", "1500")], "0")
+    all_recs = [r1, r2, r3, r4, r5]
+
+    # 1. Выбран Блок без значения -> все вставки блока «Профиль» в чертеже
+    ens = sv_similar_ens(all_recs, "all", "", "", "", ["Профиль"], [])
+    check("подобное по Блоку без значения: все 4 вставки блока «Профиль»",
+          ens == ["en1", "en2", "en3", "en4"])
+
+    # 2. Выбран Блок со значением (Длина = 1500) -> вставки «Профиль» с длиной 1500
+    ens = sv_similar_ens(all_recs, "all", "", "", "*1500*", ["Профиль"], [])
+    check("подобное по Блоку со значением 1500: вставки «Профиль» длиной 1500",
+          ens == ["en1", "en2", "en4"])
+
+    # 3. Выбрана Видимость «Ригель» без значения -> все вставки с видимостью «Ригель»
+    ens = sv_similar_ens(all_recs, "vis", "", "", "", [], ["Ригель"])
+    check("подобное по Видимости без значения: все 3 вставки с видимостью «Ригель»",
+          ens == ["en1", "en2", "en3"])
+
+    # 4. Выбрана Видимость «Ригель» со значением 1500 -> вставки с видимостью «Ригель» и длиной 1500
+    entries_vis_val = sv_entries_from([r1], "vis", "", "", "*1500*")
+    adapted_vis = sv_adapt_sel_i(["Ригель"], entries_vis_val)
+    check("перенос выбора видимости при вводе значения: «Ригель» -> «Ригель | 1500 (Длина)»",
+          adapted_vis == ["Ригель | 1500 (Длина)"])
+    ens = sv_similar_ens(all_recs, "vis", "", "", "*1500*", [], adapted_vis)
+    check("подобное по Видимости со значением 1500: только «Ригель» длиной 1500 (en1, en2)",
+          ens == ["en1", "en2"])
+
+    # 5. Выбран Атрибут «МАРКА» без значения -> все вставки с атрибутом «МАРКА» (а при выборе блока — только этого блока)
+    ens_all_attr = sv_similar_ens(all_recs, "attr", "", "", "", [], ["МАРКА"])
+    ens_blk_attr = sv_similar_ens(all_recs, "attr", "", "", "", ["Профиль"], ["МАРКА"])
+    check("подобное по Атрибуту без значения: 5 вставок по чертежу, 4 вставки при выбранном блоке «Профиль»",
+          ens_all_attr == ["en1", "en2", "en3", "en4", "en5"] and ens_blk_attr == ["en1", "en2", "en3", "en4"])
+
+    # 6. Выбран Атрибут «МАРКА» со значением «М1» -> вставки с МАРКА = М1
+    entries_attr_val = sv_entries_from([r1], "attr", "", "", "*М1*")
+    adapted_attr = sv_adapt_sel_i(["МАРКА"], entries_attr_val)
+    check("перенос выбора атрибута при вводе значения: «МАРКА» -> «МАРКА | М1»",
+          adapted_attr == ["МАРКА | М1"])
+    ens = sv_similar_ens(all_recs, "attr", "", "", "*М1*", ["Профиль"], adapted_attr)
+    check("подобное по Атрибуту со значением «М1» и блоку «Профиль»: en1, en2, en4",
+          ens == ["en1", "en2", "en4"])
+
+    # 7. Возврат выбора при очистке поля «Значение»
+    entries_attr_plain = sv_entries_from([r1], "attr", "", "", "")
+    check("возврат выбора атрибута при очистке значения: «МАРКА | М1» -> «МАРКА»",
+          sv_adapt_sel_i(adapted_attr, entries_attr_plain) == ["МАРКА"])
+
+    # 8. Автоподстановка цели по предвыбранному образцу (scope_pre=True), когда строки в списках не кликнуты
+    b, i = sv_similar_targets("vis", "", "", "", [], [], [("Профиль", ["en1"])], [("Ригель", ["en1"])], True)
+    check("образец в режиме «Видимости» без клика в списке берёт видимость образца",
+          b == [] and i == ["Ригель"])
+
+
 def main():
     print("=== Тест размеров «Подсчёта» (поиск) ===")
     scenario_inch_glass()
@@ -568,6 +734,7 @@ def main():
     scenario_layout()
     scenario_sort()
     scenario_table()
+    scenario_similar()
     print("\nИтог: PASS %d, FAIL %d" % (PASS, FAIL))
     if FAIL == 0:
         print("[SEARCH][OK]")

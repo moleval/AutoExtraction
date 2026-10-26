@@ -12,6 +12,8 @@
 
 (setq *ae-sv-mode* "all")      ; "all" | "attr" | "vis"
 (setq *ae-sv-inserts* nil)      ; записи: (ename имя видимость атрибуты)
+(setq *ae-sv-all-inserts* nil)  ; записи всего чертежа для «Выбрать подобное»
+(setq *ae-sv-scope-pre* nil)    ; T — окно открыто по предварительно выбранному образцу
 (setq *ae-sv-rows* nil)         ; строки списка: (текст . имена вставок)
 (setq *ae-sv-scope-text* "")    ; текст области для строки статуса
 (setq *ae-sv-result* nil)       ; (набор строк выбрано пропущено) после «Выбрать»
@@ -289,16 +291,16 @@
 (defun ae-sv-hints ()
   (cond
     ((= *ae-sv-mode* "attr")
-     (list "Имя (по Enter):" "Атрибут (по Enter):" "Значение (по Enter):"))
+     (list "Блок (по Enter):" "Атрибут (по Enter):" "Значение (по Enter):"))
     ((= *ae-sv-mode* "vis")
-     (list "Имя (по Enter):" "Видимость (по Enter):" "Значение (по Enter):"))
+     (list "Блок (по Enter):" "Видимость (по Enter):" "Значение (по Enter):"))
     (T
-     (list "Имя (по Enter):" "" "Значение (по Enter):")))
+     (list "Блок (по Enter):" "" "Значение (по Enter):")))
 )
 
 (defun ae-sv-set-hints (/ h)
   (setq h (ae-sv-hints))
-  (if (= (ae-sv-str (get_tile "edt_name")) "")
+  (if (= (ae-sv-trim (ae-sv-clean (ae-sv-str (get_tile "edt_name")) (car h))) "")
     (set_tile "edt_name" (car h)))
   (set_tile "edt_query" (cadr h))
   (set_tile "edt_value" (caddr h))
@@ -404,9 +406,9 @@
     (list (list name name (car rec)))
     '()))
 
-(defun ae-sv-entries (qn qa qb / acc rec part)
+(defun ae-sv-entries-from (recs qn qa qb / acc rec part)
   (setq acc '())
-  (foreach rec *ae-sv-inserts*
+  (foreach rec recs
     (if (ae-sv-match (nth 1 rec) qn)
       (progn
         (setq part
@@ -416,6 +418,10 @@
             (T (ae-sv-vis-entries rec qa qb))))
         (setq acc (append (reverse part) acc)))))
   (reverse acc)
+)
+
+(defun ae-sv-entries (qn qa qb)
+  (ae-sv-entries-from *ae-sv-inserts* qn qa qb)
 )
 
 ;; Список 1 (блоки): если выбраны пункты списка 2 — только блоки с ними
@@ -474,6 +480,31 @@
   (vl-remove-if-not '(lambda (s) (assoc s rows)) sel)
 )
 
+;; Имя атрибута или видимости из строки второго списка (до « | »)
+(defun ae-sv-label-base (s / p)
+  (setq p (vl-string-search " | " s))
+  (if p (substr s 1 p) s)
+)
+
+;; Перенос выбора второго списка при вводе или очистке поля «Значение»:
+;; «МАРКА» <-> «МАРКА | М1», «Ригель» <-> «Ригель | 1500 (Длина)»
+(defun ae-sv-adapt-sel-i (sel-i entries / labels out s base e)
+  (if (null sel-i)
+    nil
+    (progn
+      (setq labels (mapcar 'cadr entries) out '())
+      (foreach s sel-i
+        (if (member s labels)
+          (if (not (member s out)) (setq out (cons s out)))
+          (progn
+            (setq base (ae-sv-label-base s))
+            (foreach e entries
+              (if (and (= (ae-sv-label-base (cadr e)) base)
+                       (not (member (cadr e) out)))
+                (setq out (cons (cadr e) out)))))))
+      (reverse out)))
+)
+
 (defun ae-sv-join-sp (lst / s)
   (setq s "")
   (foreach x lst
@@ -527,6 +558,7 @@
       (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
       (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))))
   (setq entries (ae-sv-entries-cached qn qa qb))
+  (setq sel-i (ae-sv-adapt-sel-i sel-i entries))
   (setq rows1 (ae-sv-list1 entries sel-i))
   (setq rows2 (if (= *ae-sv-mode* "all") nil (ae-sv-list2 entries sel-b)))
   (setq sel-b (ae-sv-keep sel-b rows1))
@@ -575,7 +607,7 @@
 )
 
 (defun ae-sv-on-mode (m)
-  ;; смена режима очищает «Видимость» и «Значение»; «Имя» сохраняется
+  ;; смена режима очищает «Видимость» и «Значение»; «Блок» сохраняется
   (setq *ae-sv-mode* m)
   (ae-sv-set-radios)
   (set_tile "edt_query" "")
@@ -585,35 +617,111 @@
   (ae-sv-refresh)
 )
 
+;; Завершение отбора вставок: фильтр слоёв и закрытие окна с выделением
+(defun ae-sv-finish-pick (ens / ss sel-n skipped en)
+  (if (null ens)
+    (set_tile "txt_status" "По выбранным строкам вставок нет.")
+    (progn
+      (setq ss (ssadd))
+      (setq sel-n 0 skipped 0)
+      (foreach en ens
+        (if (ae-sv-layer-skip-p en)
+          (setq skipped (1+ skipped))
+          (progn
+            (ssadd en ss)
+            (setq sel-n (1+ sel-n)))))
+      (if (= sel-n 0)
+        (set_tile "txt_status"
+          "Все вставки выбранных строк на замороженных, заблокированных или выключенных слоях.")
+        (progn
+          (setq *ae-sv-result* (list ss sel-n skipped))
+          (done_dialog 1)))))
+)
+
 ;; Кнопка «Выбрать»: отмечены блоки и/или пункты второго списка
-(defun ae-sv-on-pick (/ sel-b sel-i ens ss sel-n skipped en)
+(defun ae-sv-on-pick (/ sel-b sel-i ens)
+  (ae-sv-refresh)
   (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
   (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))
   (if (and (null sel-b) (null sel-i))
     (set_tile "txt_status" "Не выбрано ни одной строки. Отметьте блоки или пункты второго списка.")
     (progn
       (setq ens (ae-sv-final *ae-sv-entries* sel-b sel-i))
-      (if (null ens)
-        (set_tile "txt_status" "По выбранным строкам вставок нет.")
-        (progn
-          (setq ss (ssadd))
-          (setq sel-n 0 skipped 0)
-          (foreach en ens
-            (if (ae-sv-layer-skip-p en)
-              (setq skipped (1+ skipped))
-              (progn
-                (ssadd en ss)
-                (setq sel-n (1+ sel-n)))))
-          (if (= sel-n 0)
-            (set_tile "txt_status"
-              "Все вставки выбранных строк на замороженных, заблокированных или выключенных слоях.")
-            (progn
-              (setq *ae-sv-result* (list ss sel-n skipped))
-              (done_dialog 1))))))))
+      (ae-sv-finish-pick ens)))
+)
+
+;; Все вставки пространства модели (для «Выбрать подобное» — поиск всегда по всему чертежу)
+(defun ae-sv-all-records ()
+  (if *ae-sv-all-inserts*
+    *ae-sv-all-inserts*
+    (setq *ae-sv-all-inserts* (ae-sv-collect (ae-sv-all-model-inserts))))
+)
+
+;; Целевой выбор (sel-b sel-i) для «Выбрать подобное»: если строки в списках не отмечены,
+;; берутся строки, отобранные полями ввода или образцом
+(defun ae-sv-similar-targets (qn qa qb sel-b sel-i rows1 rows2 scope-pre / b i)
+  (setq b sel-b i sel-i)
+  (if (and (null b) (null i))
+    (cond
+      ((= *ae-sv-mode* "all")
+       (if (or (/= qn "") (/= qb "") scope-pre)
+         (setq b (mapcar 'car rows1))))
+      ((or (/= qa "") (/= qb ""))
+       (setq i (mapcar 'car rows2))
+       (if (/= qn "") (setq b (mapcar 'car rows1))))
+      ((/= qn "")
+       (setq b (mapcar 'car rows1)))
+      (scope-pre
+       (setq i (mapcar 'car rows2))
+       (if (null i) (setq b (mapcar 'car rows1)))))
+    (if (and b (null i) (/= *ae-sv-mode* "all") (or (/= qa "") (/= qb "")))
+      (setq i (mapcar 'car rows2))))
+  (list b i)
+)
+
+;; Поиск подобных вставок по записям всего чертежа:
+;; по Блоку, Видимости или Атрибуту (без Значения или со Значением, если оно введено)
+(defun ae-sv-similar-ens (all-recs qn qa qb sel-b sel-i / ens seen r all-entries)
+  (if (and sel-b (null sel-i) (= qa "") (= qb ""))
+    (progn
+      (setq ens '() seen (ssadd))
+      (foreach r all-recs
+        (if (and (ae-sv-match (nth 1 r) qn)
+                 (member (nth 1 r) sel-b)
+                 (not (ssmemb (car r) seen)))
+          (progn
+            (ssadd (car r) seen)
+            (setq ens (cons (car r) ens)))))
+      (reverse ens))
+    (progn
+      (setq all-entries (ae-sv-entries-from all-recs qn qa qb))
+      (reverse (ae-sv-final all-entries sel-b sel-i))))
+)
+
+;; Кнопка «Выбрать подобное»: выбор аналогичных элементов по всему чертежу
+(defun ae-sv-on-similar (/ h qn qa qb sel-b sel-i tg ens)
+  (ae-sv-refresh)
+  (setq h (ae-sv-hints))
+  (setq qn (ae-sv-norm (ae-sv-field "edt_name" (car h))))
+  (setq qa (ae-sv-norm (ae-sv-field "edt_query" (cadr h))))
+  (setq qb (ae-sv-norm (ae-sv-field "edt_value" (caddr h))))
+  (setq sel-b (ae-sv-selected "lst_blocks" *ae-sv-rows1*))
+  (setq sel-i (ae-sv-selected "lst_items" *ae-sv-rows2*))
+  (setq tg (ae-sv-similar-targets qn qa qb sel-b sel-i *ae-sv-rows1* *ae-sv-rows2* *ae-sv-scope-pre*))
+  (setq sel-b (car tg) sel-i (cadr tg))
+  (if (and (null sel-b) (null sel-i))
+    (if (or (/= qn "") (/= qa "") (/= qb ""))
+      (set_tile "txt_status" "По выбранным строкам вставок нет.")
+      (set_tile "txt_status" "Не выбрано ни одной строки. Отметьте блоки или пункты второго списка."))
+    (progn
+      (setq ens (ae-sv-similar-ens (ae-sv-all-records) qn qa qb sel-b sel-i))
+      (ae-sv-finish-pick ens)))
+)
 
 (defun ae-sv-init (/ r)
   (setq *ae-sv-shown* nil)
   (ae-sv-set-radios)
+  (set_tile "edt_name" "")
   (ae-sv-set-hints)
   (if *ae-sv-restore*
     (progn
@@ -643,6 +751,7 @@
   (action_tile "lst_blocks" "(ae-sv-refresh)")
   (action_tile "lst_items" "(ae-sv-refresh)")
   (action_tile "btn_select" "(ae-sv-on-pick)")
+  (action_tile "btn_similar" "(ae-sv-on-similar)")
   (action_tile "btn_count" "(ae-sv-on-count)")
   (action_tile "btn_reset" "(ae-sv-reset)")
   (action_tile "btn_cancel" "(done_dialog 0)")
@@ -1098,6 +1207,7 @@
 
 ;; Кнопка «Подсчёт» в окне поиска: закрыть поиск и открыть окно «Подсчёт»
 (defun ae-sv-on-count (/ names total)
+  (ae-sv-refresh)
   (setq *ae-sv-count-all-title* nil)
   (setq *ae-sv-restore* (ae-sv-snapshot))
   (setq *ae-sv-count-sel* (list (car *ae-sv-restore*) (cadr *ae-sv-restore*)))
@@ -1581,6 +1691,10 @@
 
 (defun ae-sv-load-scope (/ pre ens t0)
   (setq pre (ssget "_I"))
+  (if (and (null pre) (= (type ex-take-preselected) 'SUBR))
+    (setq pre (ex-take-preselected)))
+  (if (and (boundp '*extraction-preselected-set*) *extraction-preselected-set*)
+    (setq *extraction-preselected-set* nil))
   (setq ens (if pre (ae-sv-model-inserts pre) (ae-sv-all-model-inserts)))
   (cond
     ((and pre (null ens))
@@ -1590,11 +1704,13 @@
      (princ "\nВ чертеже нет вставок блоков. Поиск не запущен.")
      nil)
     (T
+     (setq *ae-sv-scope-pre* (if pre T nil))
      (setq *ae-sv-scope-text*
        (strcat (if pre "выделенные" "весь чертёж")
                " (" (itoa (length ens)) " вставок)"))
      (setq t0 (getvar "MILLISECS"))
      (setq *ae-sv-inserts* (ae-sv-collect ens))
+     (setq *ae-sv-all-inserts* (if pre nil *ae-sv-inserts*))
      (setq *ae-sv-entries-key* nil *ae-sv-entries-cache* nil)
      (princ (strcat "\nПоиск: вставок " (itoa (length ens))
                     ", сбор данных " (itoa (- (getvar "MILLISECS") t0)) " мс."))
@@ -1669,7 +1785,7 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
-        ("SEARCHBLOCK / ПОИСКБЛОК" "Поиск блоков: все блоки или выборка (Имя, Значение)")
+        ("SEARCHBLOCK / ПОИСКБЛОК" "Поиск блоков: все блоки или выборка (Блок, Значение)")
         ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)")
         ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
@@ -1679,4 +1795,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP — ред. 2: поиск по атрибутам и видимостям. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.
+;; SEARCHATTVIS.LSP — ред. 3: поиск блоков, атрибутов и видимостей, выбор подобного. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.

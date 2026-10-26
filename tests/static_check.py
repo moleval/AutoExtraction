@@ -1694,9 +1694,22 @@ def check_search_count() -> list[str]:
         ("(ae-settings-frame-allowance)", "припуск не берётся из настроек задачи ЗАПОЛНЕНИЕ"),
         ("(defun ae-sv-frame-p", "нет проверки имени блока по маскам припуска"),
         ("(ae-sv-frame-p rec masks)", "припуск не применяется в ae-sv-size-of"),
+        ('"Блок (по Enter):"', "первое поле поиска должно иметь подсказку «Блок (по Enter):»"),
+        ("(defun ae-sv-on-similar", "нет обработчика кнопки «Выбрать подобное»"),
+        ("(defun ae-sv-similar-targets", "нет отбора целевых строк для «Выбрать подобное»"),
+        ("(defun ae-sv-similar-ens", "нет поиска подобных вставок по всему чертежу"),
+        ("(defun ae-sv-adapt-sel-i", "нет сохранения выбора правого списка при вводе/очистке «Значения»"),
+        ('(action_tile "btn_similar" "(ae-sv-on-similar)")', "кнопка btn_similar не привязана к ae-sv-on-similar"),
     ):
         if need not in text:
             errors.append(f"Extraction/searchattvis.lsp: {what}")
+    if '"Имя (по Enter):"' in text:
+        errors.append("Extraction/searchattvis.lsp: осталась старая подсказка «Имя (по Enter):» вместо «Блок (по Enter):»")
+    dcl = ROOT / "Extraction/searchattvis.dcl"
+    if dcl.exists():
+        dcl_text = read_text(dcl)
+        if 'key = "btn_similar";' not in dcl_text or 'label = "Выбрать подобное";' not in dcl_text:
+            errors.append("Extraction/searchattvis.dcl: нет кнопки btn_similar («Выбрать подобное»)")
     return errors
 
 
