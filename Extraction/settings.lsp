@@ -68,6 +68,10 @@
   '("*Облицовка*" "*Кассет*" "*Керамогранит*")
 )
 
+(defun ae-settings-ui-default-length ()
+  '("ДЛИНА")
+)
+
 (defun ae-settings-ui-load-task (/ task section layers blocks)
   (setq task *AE-SETTINGS-UI-TASK*
         section (strcat "task." (strcase (vl-princ-to-string task))))
@@ -101,6 +105,12 @@
       (ae-settings-ui-set "edt_block_names" "")
     )
   )
+
+  ;; Свойства длины — только у задач, которые режут по длине.
+  (ae-settings-ui-set "edt_block_length"
+    (if (member task '(FASONKA SUBSYSTEM CUTLINE))
+      (ae-settings-ui-list-text (ae-settings-task-length-props task))
+      ""))
 
   ;; Припуск на раму — только у ЗАПОЛНЕНИЯ, у прочих задач поле пустое
   (ae-settings-ui-set "edt_frame_allowance"
@@ -137,6 +147,8 @@
   (mode_tile "edt_block_layers" (if (eq task 'CLADDING) 0 1))
   (mode_tile "edt_block_names" (if (eq task 'CLADDING) 0 1))
   (mode_tile "edt_frame_allowance" (if (eq task 'ZAPOLNENIE) 0 1))
+  (mode_tile "edt_block_length"
+    (if (member task '(FASONKA SUBSYSTEM CUTLINE)) 0 1))
   (mode_tile "edt_table_layer"
     (if (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE)) 0 1))
   (mode_tile "edt_block_template" (if (member task '(CUTLINE CUTSHEET)) 0 1))
@@ -181,6 +193,9 @@
      (ae-settings-set section "output.insert.layer" "CURRENT")
      (ae-settings-set section "output.frame.layer" "Невидимые"))
   )
+  (if (member task '(FASONKA SUBSYSTEM CUTLINE))
+    (ae-settings-set-list section "input.block.length"
+      (ae-settings-ui-default-length)))
   (ae-settings-ui-load-task)
 )
 
@@ -221,6 +236,14 @@
      (setq values (ae-settings-split-list (get_tile "edt_blocks")))
      (if (null values) (setq ok nil)
        (ae-settings-set-list section "input.block" values))
+     ;; Свойства длины — только у задач раскроя по длине.
+     (if (member task '(FASONKA SUBSYSTEM CUTLINE))
+       (progn
+         (setq values (ae-settings-split-list (get_tile "edt_block_length")))
+         (if (null values) (setq ok nil)
+           (ae-settings-set-list section "input.block.length" values))
+       )
+     )
      ;; Припуск: целое неотрицательное. Мусор или минус — отказ
      ;; сохранения, иначе заготовка окажется меньше проёма.
      (if (eq task 'ZAPOLNENIE)

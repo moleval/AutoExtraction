@@ -234,11 +234,13 @@
     '("Фасонка*" "Железо*"))
   (ae-settings-ensure-list "task.FASONKA" "input.block" '("*"))
   (ae-settings-ensure-value "task.FASONKA" "output.table.layer" "CURRENT")
+  (ae-settings-ensure-list "task.FASONKA" "input.block.length" '("ДЛИНА"))
 
   (ae-settings-ensure-list "task.SUBSYSTEM" "input.layer"
     '("Подсистема" "Подсистема алюминиевая" "Подсистема оцинкованная"))
   (ae-settings-ensure-list "task.SUBSYSTEM" "input.block" '("*"))
   (ae-settings-ensure-value "task.SUBSYSTEM" "output.table.layer" "CURRENT")
+  (ae-settings-ensure-list "task.SUBSYSTEM" "input.block.length" '("ДЛИНА"))
 
   (ae-settings-ensure-list "task.CLADDING" "input.polyline.layer"
     '("*Облицовка*" "*Кассет*" "*Керамогранит*"))
@@ -267,6 +269,7 @@
 
   (ae-settings-ensure-list "task.CUTLINE" "input.layer" '("*"))
   (ae-settings-ensure-list "task.CUTLINE" "input.block" '("*"))
+  (ae-settings-ensure-list "task.CUTLINE" "input.block.length" '("ДЛИНА"))
   (ae-settings-ensure-value "task.CUTLINE" "output.block.template" "Раскрой {DWG}")
   (ae-settings-ensure-value "task.CUTLINE" "output.insert.layer" "CURRENT")
   (ae-settings-ensure-value "task.CUTLINE" "output.frame.layer" "Невидимые")
@@ -323,8 +326,15 @@
   (ae-settings-list
     (strcat "task." (strcase (vl-princ-to-string task)))
     "input.polyline.layer"
-    '("*Облицовка*" "*Кассет*" "*Керамогранит*"))
-)
+    '("*Облицовка*" "*Кассет*" "*Керамогранит*")))
+
+;; ---------- ИМЯ СВОЙСТВА ДЛИНЫ ДЛЯ ЗАДАЧИ ----------
+;; Список имён динамических свойств блока, которые считаются длиной,
+;; в порядке приоритета (точное совпадение, затем подстрока).
+;; По умолчанию «ДЛИНА» — совместимо со старым хардкодом su-get-length.
+(defun ae-settings-task-length-props (task / section)
+  (setq section (strcat "task." (strcase (vl-princ-to-string task))))
+  (ae-settings-list section "input.block.length" '("ДЛИНА")))
 
 (defun ae-settings-task-block-layers (task)
   (ae-settings-list
@@ -441,10 +451,12 @@
     ((= section "task.FASONKA")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("Фасонка*" "Железо*")))
      (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*")))
+     (ae-settings-write-list f section "input.block.length" (ae-settings-task-length-props 'FASONKA))
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'FASONKA "output.table.layer" "CURRENT")))
     ((= section "task.SUBSYSTEM")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("Подсистема" "Подсистема алюминиевая" "Подсистема оцинкованная")))
      (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*")))
+     (ae-settings-write-list f section "input.block.length" (ae-settings-task-length-props 'SUBSYSTEM))
      (ae-settings-write-entry f "output.table.layer" (ae-settings-output 'SUBSYSTEM "output.table.layer" "CURRENT")))
     ((= section "task.CLADDING")
      (ae-settings-write-list f section "input.polyline.layer" (ae-settings-task-polyline-layers 'CLADDING))
@@ -464,6 +476,7 @@
     ((= section "task.CUTLINE")
      (ae-settings-write-list f section "input.layer" (ae-settings-list section "input.layer" '("*")))
      (ae-settings-write-list f section "input.block" (ae-settings-list section "input.block" '("*")))
+     (ae-settings-write-list f section "input.block.length" (ae-settings-task-length-props 'CUTLINE))
      (ae-settings-write-entry f "output.block.template" (ae-settings-output 'CUTLINE "output.block.template" "Раскрой {DWG}"))
      (ae-settings-write-entry f "output.insert.layer" (ae-settings-output 'CUTLINE "output.insert.layer" "CURRENT"))
      (ae-settings-write-entry f "output.frame.layer" (ae-settings-output 'CUTLINE "output.frame.layer" "Невидимые")))

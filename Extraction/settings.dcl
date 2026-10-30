@@ -30,6 +30,12 @@ settings_dialog : dialog {
     }
 
     : edit_box {
+      key = "edt_block_length";
+      label = "Свойства длины (маски через ;):";
+      edit_width = 62;
+    }
+
+    : edit_box {
       key = "edt_poly_layers";
       label = "Облицовка: слои полилиний:";
       edit_width = 62;

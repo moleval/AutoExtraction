@@ -300,7 +300,7 @@
         (setq ent (nth i inserts)
               obj (vlax-ename->vla-object ent)
               effname (su-get-effective-name obj)
-              len  (su-get-length obj))
+              len  (su-get-length obj (ae-settings-task-length-props 'FASONKA)))
 
         (if (and effname (numberp len) (> len 0.0))
           (progn
@@ -451,8 +451,8 @@
   (princ)
 )
 
-;; FASONKA.LSP загружен (ред. 1: FAST_TABLES). Команды: FASONKA, ФАСОНКА
+;; FASONKA.LSP загружен (ред. 2: имя свойства длины из настроек задачи). Команды: FASONKA, ФАСОНКА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "FASONKA" '(
-      ("FASONKA / ФАСОНКА" "выборка фасонок в таблицу" "1"))))
+      ("FASONKA / ФАСОНКА" "выборка фасонок в таблицу" "2"))))
 (princ)

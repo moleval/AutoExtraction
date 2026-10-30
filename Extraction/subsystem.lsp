@@ -273,7 +273,7 @@
     (setq obj (vlax-ename->vla-object ent))
 
     (setq name (subsystem-element-name obj))
-    (setq len  (su-get-length obj))
+    (setq len  (su-get-length obj (ae-settings-task-length-props 'SUBSYSTEM)))
 
     ;; Один и тот же элемент с одинаковой длиной объединяется.
     ;; Штучный элемент (nil) группируется отдельно.
@@ -1083,8 +1083,8 @@
   (c:subsystem)
 )
 
-;; SUBSYSTEM.LSP загружен (ред. 1: FAST_TABLES). Команды: SUBSYSTEM, ПОДСИСТЕМА
+;; SUBSYSTEM.LSP загружен (ред. 2: имя свойства длины из настроек задачи). Команды: SUBSYSTEM, ПОДСИСТЕМА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "1"))))
+      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "2"))))
 (princ)

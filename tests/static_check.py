@@ -710,6 +710,48 @@ PLUGIN_LOCALS = ("plugin-items", "plugin-seen", "plugin-rec", "plugin-name",
                  "plugin-resolved", "plugin-taken")
 
 
+BLOCK_LENGTH_MUST = [
+    ("common/settings-utils.lsp", "(defun ae-settings-task-length-props",
+     "чтения масок длины из настроек задачи"),
+    ("common/settings-utils.lsp", '"input.block.length"',
+     "ключа настроек input.block.length"),
+    ("common/select-utils.lsp", "(defun su-get-length (obj candidates",
+     "передачи масок длины в su-get-length"),
+    ("common/select-utils.lsp", "(defun su-get-length-by-masks",
+     "поиска длины по маскам свойств"),
+    ("common/select-utils.lsp", '(vl-string-search "ШИРИНА" pname)',
+     "исключения ШИРИНЫ из масок длины"),
+    ("Extraction/fasonka.lsp", "(ae-settings-task-length-props 'FASONKA)",
+     "масок длины ФАСОНКИ из настроек"),
+    ("Extraction/subsystem.lsp", "(ae-settings-task-length-props 'SUBSYSTEM)",
+     "масок длины ПОДСИСТЕМЫ из настроек"),
+    ("Extraction/cutline.lsp", "(ae-settings-task-length-props 'CUTLINE)",
+     "масок длины CUTLINE из настроек"),
+    ("Extraction/settings.lsp", '(get_tile "edt_block_length")',
+     "поля «Свойства длины» в окне настроек"),
+    ("Extraction/settings.dcl", 'key = "edt_block_length"',
+     "поля edt_block_length в settings.dcl"),
+]
+
+
+def check_block_length_setting() -> list[str]:
+    """Имя свойства длины — настройка задачи, а не хардкод в модулях.
+
+    Маски длины обязаны читаться из task.<TASK> / input.block.length: иначе
+    у блока с другим именем свойства («LENGTH», «Длина изделия») пропадает
+    погонаж, а отчёт молча теряет позиции.
+    """
+    errors: list[str] = []
+    for rel, needle, what in BLOCK_LENGTH_MUST:
+        path = ROOT / rel
+        if not path.exists():
+            errors.append(f"{rel}: нет файла для проверки масок длины")
+            continue
+        if needle not in read_text(path):
+            errors.append(f"{rel}: маски длины: нет {what}")
+    return errors
+
+
 SETTINGS_PLUGINS_MUST = [
     ("(ae-settings-set-plugins *AE-SETTINGS-UI-PLUGINS*)",
      "переноса буфера плагинов в память перед записью settings.ini (иначе «Сохранить» не пишет реестр)"),
@@ -1928,6 +1970,7 @@ def main() -> int:
     errors += check_reload_chkload_guard()
     errors += check_reload_plugins_guard()
     errors += check_settings_plugins_guard()
+    errors += check_block_length_setting()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -1989,7 +2032,8 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
-        f" / mark-labels / fill-allowance / search-count / summary-marks / search-count-window"
+        f" / mark-labels / fill-allowance / block-length / search-count"
+        f" / summary-marks / search-count-window"
     )
     print("RESULT: PASS")
     return 0

@@ -369,12 +369,96 @@
 ;; ============================================================
 ;; Получение длины блока (Р3.2): двухступенчатый поиск из кэша
 ;; ============================================================
-(defun su-get-length (obj / p len)
-  (setq p (su-get-block-props obj))
-  (setq len (if (car p) (nth 3 p) (nth 4 p)))
+(defun su-get-length (obj candidates / p len)
+  (if candidates
+    (setq len (su-get-length-by-masks obj candidates))
+    (progn
+      (setq p (su-get-block-props obj))
+      (setq len (if (car p) (nth 3 p) (nth 4 p)))
+    )
+  )
   (if (numberp len)
     (atoi (rtos len 2 0))
     nil
+  )
+)
+
+;; Совпадение имени динамического свойства с маской целиком (wcmatch).
+(defun su-prop-mask-exact-p (pname masks / found m)
+  (setq found nil)
+  (foreach m masks
+    (if (and (= (type m) 'STR)
+             (wcmatch pname (strcase m)))
+      (setq found T)
+    )
+  )
+  found
+)
+
+;; Мягкое совпадение: маска входит в имя свойства как подстрока.
+;; Для умолчания «ДЛИНА» это ловит «ДЛИНА ОБЩАЯ», как раньше.
+;; ШИРИНА и ВЫСОТА длиной не считаются никогда.
+(defun su-prop-mask-soft-p (pname masks / found m)
+  (if (or (vl-string-search "ШИРИНА" pname)
+          (vl-string-search "ВЫСОТА" pname))
+    nil
+    (progn
+      (setq found nil)
+      (foreach m masks
+        (if (and (= (type m) 'STR)
+                 (wcmatch pname (strcat "*" (strcase m) "*")))
+          (setq found T)
+        )
+      )
+      found
+    )
+  )
+)
+
+;; Длина по маскам имён динамических свойств (настройка input.block.length).
+;; Точное совпадение приоритетнее подстроки независимо от порядка свойств
+;; в блоке: «Длина» важнее «Длина хвоста».
+(defun su-get-length-by-masks (obj masks / dynprops prop pname pval exact soft)
+  (setq dynprops
+    (vl-catch-all-apply 'vlax-invoke
+      (list obj 'GetDynamicBlockProperties)))
+  (if (vl-catch-all-error-p dynprops)
+    nil
+    (progn
+      (setq exact nil soft nil)
+      (foreach prop dynprops
+        (setq pname
+          (vl-catch-all-apply 'vla-get-PropertyName (list prop)))
+        (if (and (not (vl-catch-all-error-p pname))
+                 pname
+                 (= (type pname) 'STR))
+          (progn
+            (setq pname (strcase (vl-string-trim " \t\r\n" pname)))
+            ;; Значение читается только у подходящего свойства:
+            ;; ActiveX-вызов на каждое свойство блока — лишняя работа.
+            (if (and (null exact) (su-prop-mask-exact-p pname masks))
+              (progn
+                (setq pval
+                  (vl-catch-all-apply 'vla-get-Value (list prop)))
+                (if (not (vl-catch-all-error-p pval))
+                  (setq exact (su-value-to-number pval))
+                )
+              )
+            )
+            (if (and (null soft) (su-prop-mask-soft-p pname masks))
+              (progn
+                (setq pval
+                  (vl-catch-all-apply 'vla-get-Value (list prop)))
+                (if (not (vl-catch-all-error-p pval))
+                  (setq soft (su-value-to-number pval))
+                )
+              )
+            )
+          )
+        )
+      )
+      (if exact exact soft)
+    )
   )
 )
 
@@ -761,5 +845,5 @@
   )
 )
 
-;; SELECT-UTILS.LSP загружен (ред. 4).
+;; SELECT-UTILS.LSP загружен (ред. 5: длина блока по маскам свойств из настроек).
 (princ)
