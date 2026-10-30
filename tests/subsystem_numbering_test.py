@@ -75,6 +75,10 @@ def build_flat_items(data):
             names.append(rec[0])
     names.sort()
 
+    # Пустая строка-разделитель: только когда есть и штучные, и мерные.
+    if pieces_count > 0 and names:
+        items.append(("separator",))
+
     for name in names:
         group_index += 1
         rows = [r for r in data if r[0] == name and r[1] is not None]
@@ -124,6 +128,10 @@ def max_number_len(items, pieces):
     """Порт предварительного прохода по кускам в subsystem-create-table-detail."""
     texts = number_column(items, pieces)
     return max([3] + [len(s) for s in texts])
+
+
+def separator_positions(items):
+    return [i for i, item in enumerate(items) if item[0] == "separator"]
 
 
 def subtotal_numbers(items):
@@ -284,6 +292,52 @@ def scenario_number_column_width():
           column_width(longest) == 15.0)
 
 
+def scenario_separator():
+    """Пустая строка между штучными и мерными.
+
+    В таблице она объединяет все ячейки и номера не получает; вставляется
+    только когда есть и штучные позиции, и мерные группы.
+    """
+    print("\n--- Разделитель штучных и мерных ---")
+
+    data = [
+        ("Кронштейн К-1", None, 10),
+        ("Кронштейн К-2", None, 2),
+        ("Профиль П-1", 2500, 3),
+    ]
+    items = build_flat_items(data)
+    seps = separator_positions(items)
+    check("разделитель ровно один: %s" % seps, len(seps) == 1)
+    check("стоит между штучными и мерными (позиция 2): %s" % seps, seps == [2])
+    check("перед разделителем — штучные",
+          all(items[i][0] == "data" and items[i][1] == 1 for i in range(seps[0])))
+    check("после разделителя — мерные",
+          items[seps[0] + 1][0] == "data" and items[seps[0] + 1][1] == 3)
+    check("номеров у разделителя нет",
+          "separator" not in number_column(items, has_pieces(data)))
+    check("подитоги не сдвинулись: %s" % subtotal_numbers(items),
+          subtotal_numbers(items) == [3])
+
+    data = [("Штучная %d" % i, None, 1) for i in range(1, 14)]
+    data += [("Несущая", 1430 + i, 1) for i in range(16)]
+    data += [("Т-обр.", 275 + i, 1) for i in range(23)]
+    items = build_flat_items(data)
+    check("13 штучных: разделитель сразу после них (позиция 13): %s"
+          % separator_positions(items), separator_positions(items) == [13])
+    check("13 штучных: номера не сдвинулись",
+          number_column(items, True)[:13] == [str(i) for i in range(1, 14)])
+
+    data = [("А", 1000, 1), ("Б", 2000, 2)]
+    items = build_flat_items(data)
+    check("только мерные — разделителя нет",
+          separator_positions(items) == [])
+
+    data = [("Кронштейн К-1", None, 10), ("Кронштейн К-2", None, 2)]
+    items = build_flat_items(data)
+    check("только штучные — разделителя нет",
+          separator_positions(items) == [])
+
+
 def main():
     print("=== Тест нумерации таблицы Подсистемы ===")
     scenario_only_measured()
@@ -293,6 +347,7 @@ def main():
     scenario_only_pieces()
     scenario_three_groups_no_pieces()
     scenario_number_column_width()
+    scenario_separator()
 
     print("\nPASS: %d, FAIL: %d" % (PASS, FAIL))
     if FAIL:

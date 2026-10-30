@@ -530,6 +530,11 @@
   )
   (setq groups (vl-sort groups '(lambda (a b) (subsystem-sort-less a b))))
 
+  ;; Пустая строка-разделитель между штучными и мерными позициями:
+  ;; в таблице она объединяет все ячейки и номера не получает.
+  (if (and (> piecesCount 0) groups)
+    (setq items (append items (list (list 'separator)))))
+
   (foreach grp groups
     (setq groupIndex (1+ groupIndex))
     (setq groupName (car grp))
@@ -659,7 +664,8 @@
                 (setq row 2)
 
                 (foreach item items
-                  (if (eq (car item) 'data)
+                  (cond
+                    ((eq (car item) 'data)
                     ;; Строка данных
                     (progn
                       (setq groupIdx (cadr item))
@@ -694,9 +700,16 @@
                       (vla-SetCellAlignment tbl row 3 5)
                       (vla-SetCellAlignment tbl row 4 5)
 
-                      (setq row (1+ row)))
+                      (setq row (1+ row))))
+
+                    ;; Разделитель штучных и мерных: пустая строка,
+                    ;; все ячейки объединены, номера нет.
+                    ((eq (car item) 'separator)
+                     (ts-ac-total tbl row "" 0 (1- nCols) 5)
+                     (setq row (1+ row)))
 
                     ;; Подитог группы
+                    (T
                     (progn
                       (setq groupName (nth 2 item))
                       (setq totalSum  (nth 3 item))
@@ -706,7 +719,7 @@
                       (vla-SetText tbl row 4 (rtos totalSum 2 2))
                       (vla-SetCellAlignment tbl row 4 5)
 
-                      (setq row (1+ row)))))
+                      (setq row (1+ row))))))
 
                 (ts-ac-fast-end tbl)
                 (princ (strcat "\nТаблица Подсистемы "
@@ -1147,8 +1160,8 @@
   (c:subsystem)
 )
 
-;; SUBSYSTEM.LSP загружен (ред. 8: имя элемента из общей su-element-name). Ред. 7: анонимные *U-блоки берут имя родителя. Ред. 5: ширина столбца № по длине номера. Ред. 4: нумерация сквозная — мерные группы продолжают счёт штучных позиций). Команды: SUBSYSTEM, ПОДСИСТЕМА
+;; SUBSYSTEM.LSP загружен (ред. 9: пустая строка между штучными и мерными). Ред. 8: имя элемента из общей su-element-name. Ред. 7: анонимные *U-блоки берут имя родителя. Ред. 5: ширина столбца № по длине номера. Ред. 4: нумерация сквозная — мерные группы продолжают счёт штучных позиций). Команды: SUBSYSTEM, ПОДСИСТЕМА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "8"))))
+      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "9"))))
 (princ)

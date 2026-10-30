@@ -843,6 +843,45 @@ def check_subsystem_numbering() -> list[str]:
     return errors
 
 
+def check_subsystem_separator() -> list[str]:
+    """Подсистема: пустая строка между штучными и мерными.
+
+    Пользователь просил визуально разделять блоки таблицы. Разделитель —
+    отдельный элемент плоского списка, поэтому он входит в счёт строк
+    куска и режется вместе с ним (tc-partition-flat режет только перед
+    'data). В таблице строка объединяет все ячейки и номера не получает.
+    """
+    path = ROOT / "Extraction" / "subsystem.lsp"
+    if not path.exists():
+        return [f"{_rel(path)}: нет модуля Подсистемы"]
+    text = read_text(path)
+    rel = _rel(path)
+    errors: list[str] = []
+
+    flat = _defun_body(text, "su-build-flat-items")
+    if flat is None:
+        errors.append(f"{rel}: не найдена форма (defun su-build-flat-items ...)")
+    else:
+        if "(list 'separator)" not in flat:
+            errors.append(
+                f"{rel}: нет строки-разделителя между штучными и мерными")
+        if "(> piecesCount 0)" not in flat:
+            errors.append(
+                f"{rel}: разделитель не привязан к наличию штучных — "
+                f"пустая строка появится и без них")
+
+    detail = _defun_body(text, "subsystem-create-table-detail")
+    if detail is None:
+        errors.append(f"{rel}: не найдена форма (defun subsystem-create-table-detail ...)")
+    else:
+        if "'separator" not in detail:
+            errors.append(f"{rel}: разметка не обрабатывает строку-разделитель")
+        if "ts-ac-total" not in detail:
+            errors.append(
+                f"{rel}: ячейки разделителя не объединяются (нужен ts-ac-total)")
+    return errors
+
+
 def check_element_name_shared() -> list[str]:
     """Имя элемента: одна общая функция на все задачи.
 
@@ -2322,6 +2361,7 @@ def main() -> int:
     errors += check_settings_save_guard()
     errors += check_subsystem_numbering()
     errors += check_element_name_shared()
+    errors += check_subsystem_separator()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2386,7 +2426,7 @@ def main() -> int:
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
-        f" / subsystem-numbering / element-name-shared"
+        f" / subsystem-numbering / subsystem-separator / element-name-shared"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )
