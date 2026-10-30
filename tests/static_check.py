@@ -766,6 +766,57 @@ def check_powershell_encoding() -> list[str]:
     return errors
 
 
+def check_subsystem_numbering() -> list[str]:
+    """Подсистема: нумерация DETAIL-таблицы начинается с 1.
+
+    Группа 1 закреплена за штучными позициями, но у мерных подсистем
+    штучных часто нет вовсе. Пока номер группы стартовал с зашитой
+    единицы и инкрементировался ДО первой группы, пустая группа 1
+    съедала номер: таблица начиналась с «2.1», хотя первая строка в ней
+    первая. Проверяются три вещи: штучные пишутся в группу 1 явно,
+    стартовый номер зависит от их наличия, и «простой номер» включается
+    по признаку штучных, а не по номеру группы (иначе первая мерная
+    группа получила бы вид «1» вместо «1.1»).
+    """
+    path = ROOT / "Extraction" / "subsystem.lsp"
+    if not path.exists():
+        return [f"{_rel(path)}: нет модуля Подсистемы"]
+    text = read_text(path)
+    rel = _rel(path)
+    errors: list[str] = []
+
+    flat = _defun_body(text, "su-build-flat-items")
+    if flat is None:
+        errors.append(f"{rel}: не найдена форма (defun su-build-flat-items ...)")
+    else:
+        must = [
+            ("(cons 'data (cons 1 rec))",
+             "явной записи штучных в группу 1"),
+            ("(setq groupIndex (if items 1 0))",
+             "старта нумерации с 1, когда штучных позиций нет"),
+        ]
+        for needle, what in must:
+            if needle not in flat:
+                errors.append(f"{rel}: нумерация Подсистемы: нет {what}")
+        if "(setq groupIndex 1)" in flat:
+            errors.append(
+                f"{rel}: нумерация Подсистемы: группа 1 зарезервирована жёстко "
+                f"- таблица начнётся с «2.1», если штучных нет")
+
+    detail = _defun_body(text, "subsystem-create-table-detail")
+    if detail is None:
+        errors.append(f"{rel}: не найдена форма (defun subsystem-create-table-detail ...)")
+    else:
+        if "(if (and hasPieces (= groupIdx 1))" not in detail:
+            errors.append(
+                f"{rel}: нумерация Подсистемы: простой номер не привязан к "
+                f"признаку штучных (нужен (and hasPieces (= groupIdx 1)))")
+        if "hasPieces" not in detail.split("/", 1)[0] + detail.split("/", 1)[-1][:400]:
+            errors.append(
+                f"{rel}: нумерация Подсистемы: hasPieces не объявлена локальной")
+    return errors
+
+
 SETTINGS_SAVE_MUST = [
     ("(and (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))",
      "своей проверки пустого поля слоя таблицы"),
@@ -2159,6 +2210,7 @@ def main() -> int:
     errors += check_crlf_tolerance()
     errors += check_test_console_encoding()
     errors += check_settings_save_guard()
+    errors += check_subsystem_numbering()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2223,6 +2275,7 @@ def main() -> int:
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
+        f" / subsystem-numbering"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )

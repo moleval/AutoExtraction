@@ -471,19 +471,23 @@
 ;; Кускование Подсистемы — подготовка плоского списка
 ;; Штучные — группа 1 (без подитога).
 ;; Мерные — каждая группа по имени, с подитогом.
+;;
+;; Группа 1 закреплена за штучными. Если штучных в выборке нет, группа
+;; пуста, и первый номер достаётся первой мерной группе: иначе таблица
+;; начиналась бы с «2.1», хотя первая строка в ней — первая.
 ;; ============================================================
 
 (defun su-build-flat-items (data / items groups grp groupName groupRows
                              rec len cnt totalSum groupIndex)
   (setq items '())
-  (setq groupIndex 1)
 
   ;; Штучные позиции — группа 1
   (foreach rec data
     (if (null (cadr rec))
-      (setq items (append items (list (cons 'data (cons groupIndex rec)))))
+      (setq items (append items (list (cons 'data (cons 1 rec)))))
     )
   )
+  (setq groupIndex (if items 1 0))
 
   ;; Мерные группы
   (setq groups '())
@@ -539,7 +543,7 @@
 (defun subsystem-create-table-detail (data /
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     nCols nRows space tbl row oldEcho doc
-    lastGroupIdx rowInGroup maxNameLen nameStr
+    lastGroupIdx rowInGroup maxNameLen nameStr hasPieces
     name len cnt sum totalSum)
 
   (if (null data)
@@ -570,6 +574,13 @@
 
           ;; Нумерация продолжается через куски
           (setq lastGroupIdx -1 rowInGroup 0)
+
+          ;; Есть ли в выборке штучные позиции: простой номер только у них.
+          ;; Признак считается по ВСЕЙ выборке, а не по куску — иначе во
+          ;; втором куске таблицы штучные получили бы вид «1.5».
+          (setq hasPieces nil)
+          (foreach rec data
+            (if (null (cadr rec)) (setq hasPieces T)))
 
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
@@ -611,7 +622,7 @@
                           (setq rowInGroup 0)))
                       (setq rowInGroup (1+ rowInGroup))
 
-                      (if (= groupIdx 1)
+                      (if (and hasPieces (= groupIdx 1))
                         (vla-SetText tbl row 0 (itoa rowInGroup))
                         (vla-SetText tbl row 0
                           (strcat (itoa groupIdx) "." (itoa rowInGroup))))
@@ -1083,8 +1094,8 @@
   (c:subsystem)
 )
 
-;; SUBSYSTEM.LSP загружен (ред. 2: имя свойства длины из настроек задачи). Команды: SUBSYSTEM, ПОДСИСТЕМА
+;; SUBSYSTEM.LSP загружен (ред. 3: нумерация групп начинается с 1, когда штучных позиций нет). Команды: SUBSYSTEM, ПОДСИСТЕМА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "2"))))
+      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "3"))))
 (princ)
