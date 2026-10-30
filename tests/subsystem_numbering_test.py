@@ -149,6 +149,33 @@ def scenario_with_pieces():
     check("подитог первой мерной группы — 2", subtotal_numbers(items) == [2])
 
 
+def scenario_three_pieces():
+    """Штучные — ОДНА группа, сколько бы строк в ней ни было.
+
+    Их номера 1, 2, 3 не сдвигают счёт групп: первая мерная группа всё
+    равно 2, а не 4. Номер группы — идентификатор группы (он же стоит в
+    строке подитога), а не продолжение сквозной нумерации строк.
+    """
+    print("\n--- Три штучные + мерные: группа считается по группам ---")
+    data = [
+        ("Кронштейн К-1", None, 10),
+        ("Кронштейн К-2", None, 2),
+        ("Кронштейн К-3", None, 5),
+        ("Профиль П-1", 2500, 3),
+        ("Профиль П-1", 3000, 1),
+        ("Уголок У-2", 1200, 4),
+    ]
+    items = build_flat_items(data)
+    texts = number_column(items, has_pieces(data))
+
+    check("штучные: 1, 2, 3", texts[:3] == ["1", "2", "3"])
+    check("первая мерная группа — 2.1, а не 4.1: %s" % texts[3], texts[3] == "2.1")
+    check("полная колонка №: %s" % " | ".join(texts),
+          texts == ["1", "2", "3", "2.1", "2.2", "3.1"])
+    check("подитоги групп: %s" % subtotal_numbers(items),
+          subtotal_numbers(items) == [2, 3])
+
+
 def scenario_only_pieces():
     """Только штучные: мерных групп нет, подитогов нет."""
     print("\n--- Только штучные позиции ---")
@@ -178,6 +205,7 @@ def main():
     print("=== Тест нумерации таблицы Подсистемы ===")
     scenario_only_measured()
     scenario_with_pieces()
+    scenario_three_pieces()
     scenario_only_pieces()
     scenario_three_groups_no_pieces()
 
