@@ -870,6 +870,39 @@ def check_reload_plugins_guard() -> list[str]:
     return errors
 
 
+def check_crlf_tolerance() -> list[str]:
+    """CRLF в .lsp - норма для Windows-копии, одиночный CR - дефект.
+
+    Windows-копия репозитория отдаёт файлы с `\r\n` (core.autocrlf=true),
+    и проверка лексики валила КАЖДЫЙ .lsp: «управляющий символ (код 13)»
+    на всех строках, где сканер доходил до конца (строки с `;`-комментарием
+    обрывались раньше и в список не попадали). На Linux-клоне дефекта не
+    видно: там LF. Тест держит оба конца: CRLF проходит, а одиночный `\r`
+    внутри строки кода по-прежнему ловится.
+    """
+    import tempfile
+
+    errors: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        crlf = Path(tmp) / "crlf.lsp"
+        crlf.write_bytes(
+            ("; комментарий\r\n"
+             "(defun c:CRLFTEST ()\r\n"
+             "  (princ \"ok\"))\r\n").encode("cp1251"))
+        got = check_lisp_lexical([crlf])
+        if got:
+            errors.append(
+                f"crlf-tolerance: CRLF в .lsp считается дефектом: {got[0]}")
+
+        lone = Path(tmp) / "lone.lsp"
+        lone.write_bytes(b'(princ "a")\r(princ "b")\n')
+        if not check_lisp_lexical([lone]):
+            errors.append(
+                "crlf-tolerance: одиночный CR внутри строки кода перестал "
+                "ловиться (нормализация задела не только CRLF)")
+    return errors
+
+
 def check_lisp_lexical(files=None) -> list[str]:
     """Причины «синтаксической ошибки» при целом балансе скобок.
 
@@ -889,6 +922,11 @@ def check_lisp_lexical(files=None) -> list[str]:
         except UnicodeDecodeError as exc:
             errors.append(f"{rel}: байт 0x{raw[exc.start]:02X} не читается как ANSI (cp1251)")
             continue
+        # Рабочая копия на Windows приходит с CRLF (core.autocrlf=true):
+        # `\r` в конце строки - это перевод строки, а не управляющий символ
+        # внутри кода. Нормализуем ТОЛЬКО пару CRLF; одиночный `\r` остаётся
+        # и по-прежнему считается дефектом.
+        text = text.replace("\r\n", "\n")
         for ln, line in enumerate(text.split("\n"), 1):
             i = 0
             in_str = False
@@ -2023,6 +2061,7 @@ def main() -> int:
     errors += check_settings_plugins_guard()
     errors += check_block_length_setting()
     errors += check_powershell_encoding()
+    errors += check_crlf_tolerance()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2085,6 +2124,7 @@ def main() -> int:
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
+        f" / crlf-tolerance"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )
