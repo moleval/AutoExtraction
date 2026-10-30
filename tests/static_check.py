@@ -807,17 +807,39 @@ def check_subsystem_numbering() -> list[str]:
                 f"при 13 штучных позициях мерные группы начнутся с 2, "
                 f"и в таблице будет скачок «13 -> 2.1»")
 
+    fmt = _defun_body(text, "su-item-number-text")
+    if fmt is None:
+        errors.append(f"{rel}: не найдена форма (defun su-item-number-text ...)")
+    elif "(and hasPieces (= groupIdx 1))" not in fmt:
+        errors.append(
+            f"{rel}: нумерация Подсистемы: простой номер не привязан к "
+            f"признаку штучных (нужен (and hasPieces (= groupIdx 1)))")
+
     detail = _defun_body(text, "subsystem-create-table-detail")
     if detail is None:
         errors.append(f"{rel}: не найдена форма (defun subsystem-create-table-detail ...)")
     else:
-        if "(if (and hasPieces (= groupIdx 1))" not in detail:
+        if "(su-item-number-text groupIdx rowInGroup hasPieces)" not in detail:
             errors.append(
-                f"{rel}: нумерация Подсистемы: простой номер не привязан к "
-                f"признаку штучных (нужен (and hasPieces (= groupIdx 1)))")
+                f"{rel}: нумерация Подсистемы: разметка не использует общий "
+                f"формат номера su-item-number-text")
         if "hasPieces" not in detail.split("/", 1)[0] + detail.split("/", 1)[-1][:400]:
             errors.append(
                 f"{rel}: нумерация Подсистемы: hasPieces не объявлена локальной")
+
+        # Ширина столбца «№»: фиксированные 15 мм ломали «11.10» и «12.13»
+        # на перенос внутри ячейки.
+        if "(vla-SetColumnWidth tbl 0 15.0)" in detail:
+            errors.append(
+                f"{rel}: ширина столбца № зашита 15 мм - номера вида «11.10» "
+                f"переносятся внутри ячейки")
+        if "(vla-SetColumnWidth tbl 0 col0Width)" not in detail:
+            errors.append(
+                f"{rel}: ширина столбца № не берётся из расчёта col0Width")
+        if "su-number-column-width" not in detail:
+            errors.append(
+                f"{rel}: нет расчёта ширины столбца № через "
+                f"su-number-column-width")
     return errors
 
 

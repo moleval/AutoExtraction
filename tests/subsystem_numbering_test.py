@@ -87,6 +87,13 @@ def build_flat_items(data):
     return items
 
 
+def item_number_text(group_idx, row_in_group, pieces):
+    """Порт su-item-number-text: текст номера строки."""
+    if pieces and group_idx == 1:
+        return str(row_in_group)
+    return "%d.%d" % (group_idx, row_in_group)
+
+
 def number_column(items, pieces):
     """Разметка колонки «№» из subsystem-create-table-detail.
 
@@ -103,12 +110,20 @@ def number_column(items, pieces):
             last_group = group_idx
             row_in_group = 0
         row_in_group += 1
-        if pieces and group_idx == 1:
-            # Группа штучных: простой номер.
-            out.append(str(row_in_group))
-        else:
-            out.append("%d.%d" % (group_idx, row_in_group))
+        # Группа штучных: простой номер, остальные — «группа.строка».
+        out.append(item_number_text(group_idx, row_in_group, pieces))
     return out
+
+
+def column_width(max_len):
+    """Порт su-number-column-width: 3.5 мм на символ + 1 на поля, минимум 15."""
+    return max(15.0, (max_len + 1) * 3.5)
+
+
+def max_number_len(items, pieces):
+    """Порт предварительного прохода по кускам в subsystem-create-table-detail."""
+    texts = number_column(items, pieces)
+    return max([3] + [len(s) for s in texts])
 
 
 def subtotal_numbers(items):
@@ -233,6 +248,42 @@ def scenario_three_groups_no_pieces():
     check("подитоги: %s" % subtotal_numbers(items), subtotal_numbers(items) == [1, 2, 3])
 
 
+def scenario_number_column_width():
+    """Ширина столбца «№» растёт по длине номера.
+
+    На рабочем чертеже «11.10», «12.13» и «14.16» переносились внутри
+    ячейки: столбец был зашит 15 мм и не вмещал пять символов.
+    """
+    print("\n--- Ширина столбца «№» ---")
+
+    check("короткий номер 1.1 -> минимум 15 мм: %s" % column_width(3),
+          column_width(3) == 15.0)
+    check("13.1 (4 символа) -> 17.5 мм: %s" % column_width(4),
+          column_width(4) == 17.5)
+    check("11.10 (5 символов) -> 21.0 мм: %s" % column_width(5),
+          column_width(5) == 21.0)
+    check("12.13 (5 символов) -> 21.0 мм: %s" % column_width(5),
+          column_width(5) == 21.0)
+
+    data = [("Штучная %d" % i, None, 1) for i in range(1, 14)]
+    data += [("Несущая", 1430 + i, 1) for i in range(16)]
+    data += [("Т-обр.", 275 + i, 1) for i in range(23)]
+    data += [("Шляпный", 210 + i, 1) for i in range(7)]
+    items = build_flat_items(data)
+    pieces = has_pieces(data)
+    longest = max_number_len(items, pieces)
+    check("13 штучных: самый длинный номер — 5 символов (%d)" % longest,
+          longest == 5)
+    check("13 штучных: ширина столбца 21.0 мм (%s)" % column_width(longest),
+          column_width(longest) == 21.0)
+
+    data = [("А", 1000, 1), ("Б", 2000, 2), ("В", 3000, 3)]
+    items = build_flat_items(data)
+    longest = max_number_len(items, has_pieces(data))
+    check("без штучных: ширина остаётся минимальной (%s)" % column_width(longest),
+          column_width(longest) == 15.0)
+
+
 def main():
     print("=== Тест нумерации таблицы Подсистемы ===")
     scenario_only_measured()
@@ -241,6 +292,7 @@ def main():
     scenario_screenshot_13_pieces()
     scenario_only_pieces()
     scenario_three_groups_no_pieces()
+    scenario_number_column_width()
 
     print("\nPASS: %d, FAIL: %d" % (PASS, FAIL))
     if FAIL:

@@ -468,6 +468,33 @@
 )
 
 ;; ============================================================
+;; “екст номера строки DETAIL-таблицы
+;;
+;; Ўтучные позиции Ч простой номер (1, 2, 3...), мерные Ч
+;; Ђгруппа.строкаї (14.1, 14.2...). ‘ормат задаЄтс€ в одном
+;; месте, чтобы разметка и расчЄт ширины столбца не разошлись.
+;; ============================================================
+
+(defun su-item-number-text (groupIdx rowInGroup hasPieces)
+  (if (and hasPieces (= groupIdx 1))
+    (itoa rowInGroup)
+    (strcat (itoa groupIdx) "." (itoa rowInGroup))
+  )
+)
+
+;; ============================================================
+;; Ўирина столбца Ђєї
+;;
+;; 3.5 мм на символ плюс один символ запаса под пол€ €чейки;
+;; ниже 15 мм не опускаемс€. “а же формула, что в ќблицовке:
+;; без неЄ Ђ11.10ї и Ђ12.13ї переносились внутри €чейки.
+;; ============================================================
+
+(defun su-number-column-width (maxLen)
+  (max 15.0 (* (+ maxLen 1) 3.5))
+)
+
+;; ============================================================
 ;;  ускование ѕодсистемы Ч подготовка плоского списка
 ;; Ўтучные Ч простые номера 1, 2, 3... (без подитога).
 ;; ћерные Ч кажда€ группа по имени, с подитогом.
@@ -551,6 +578,7 @@
     pt pt_wcs units total-chunks chunk-idx is-last chunk items item
     nCols nRows space tbl row oldEcho doc
     lastGroupIdx rowInGroup maxNameLen nameStr hasPieces
+    maxNumLen numStr col0Width groupIdx groupName
     name len cnt sum totalSum)
 
   (if (null data)
@@ -589,6 +617,26 @@
           (foreach rec data
             (if (null (cadr rec)) (setq hasPieces T)))
 
+          ;; Ўирина столбца Ђєї Ч по самому длинному номеру всей выборки,
+          ;; чтобы все таблицы-куски получили одинаковую ширину.
+          (setq maxNumLen 3 lastGroupIdx -1 rowInGroup 0)
+          (foreach chunk units
+            (foreach item (cdr chunk)
+              (if (eq (car item) 'data)
+                (progn
+                  (setq groupIdx (cadr item))
+                  (if (/= groupIdx lastGroupIdx)
+                    (progn
+                      (setq lastGroupIdx groupIdx)
+                      (setq rowInGroup 0)))
+                  (setq rowInGroup (1+ rowInGroup))
+                  (setq numStr (su-item-number-text groupIdx rowInGroup hasPieces))
+                  (if (> (strlen numStr) maxNumLen)
+                    (setq maxNumLen (strlen numStr)))))))
+          (setq col0Width (su-number-column-width maxNumLen))
+          ;; Ќумераци€ в боевом проходе начинаетс€ заново.
+          (setq lastGroupIdx -1 rowInGroup 0)
+
           (foreach chunk units
             (setq is-last (tu-is-last-chunk chunk-idx total-chunks))
             (setq nRows (+ 2 (car chunk)))
@@ -601,7 +649,7 @@
               (princ (strcat "\nќшибка создани€ таблицы ѕодсистемы: "
                              (vl-catch-all-error-message tbl)))
               (progn
-                (vla-SetColumnWidth tbl 0 15.0)
+                (vla-SetColumnWidth tbl 0 col0Width)
                 (vla-SetColumnWidth tbl 1 (* maxNameLen 3.0))
                 (vla-SetColumnWidth tbl 2 25.0)
                 (vla-SetColumnWidth tbl 3 25.0)
@@ -629,10 +677,8 @@
                           (setq rowInGroup 0)))
                       (setq rowInGroup (1+ rowInGroup))
 
-                      (if (and hasPieces (= groupIdx 1))
-                        (vla-SetText tbl row 0 (itoa rowInGroup))
-                        (vla-SetText tbl row 0
-                          (strcat (itoa groupIdx) "." (itoa rowInGroup))))
+                      (vla-SetText tbl row 0
+                        (su-item-number-text groupIdx rowInGroup hasPieces))
                       (vla-SetText tbl row 1 name)
 
                       (if len
@@ -1101,8 +1147,8 @@
   (c:subsystem)
 )
 
-;; SUBSYSTEM.LSP загружен (ред. 4: нумераци€ сквозна€ Ч мерные группы продолжают счЄт штучных позиций).  оманды: SUBSYSTEM, ѕќƒ—»—“≈ћј
+;; SUBSYSTEM.LSP загружен (ред. 5: ширина столбца є по длине номера). –ед. 4: нумераци€ сквозна€ Ч мерные группы продолжают счЄт штучных позиций).  оманды: SUBSYSTEM, ѕќƒ—»—“≈ћј
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ѕќƒ—»—“≈ћј" "выборка подсистем в таблицу" "4"))))
+      ("SUBSYSTEM / ѕќƒ—»—“≈ћј" "выборка подсистем в таблицу" "5"))))
 (princ)
