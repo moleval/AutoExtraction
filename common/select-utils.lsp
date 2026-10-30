@@ -358,6 +358,38 @@
 )
 
 ;; ============================================================
+;; »м€ элемента дл€ таблиц (общее дл€ всех задач)
+;;
+;; su-block-name Ч им€ блока без учЄта видимости:
+;;   1. EffectiveName, если он не анонимный;
+;;   2. анонимное вхождение (*U5385) Ч им€ родительского блока;
+;;   3. родител€ нет Ч nil (элемент не показываетс€).
+;;
+;; su-element-name Ч дл€ задач, где видимость задаЄт тип элемента:
+;;   свойство видимости (¬идимость1 / VISIBILITY / ¬»ƒ»ћќ—“№),
+;;   иначе su-block-name.
+;; ============================================================
+
+(defun su-block-name (obj / effname parent)
+  (setq effname (su-get-effective-name obj))
+  (cond
+    ((null effname) "Ѕез имени")
+    ((and (= (type effname) 'STR) (/= (substr effname 1 1) "*")) effname)
+    ((setq parent (su-anon-parent-name (vlax-vla-object->ename obj)))
+      parent)
+    (T nil)
+  )
+)
+
+(defun su-element-name (obj / vis)
+  (setq vis (su-get-visibility obj))
+  (if (and vis (= (type vis) 'STR) (/= vis ""))
+    vis
+    (su-block-name obj)
+  )
+)
+
+;; ============================================================
 ;; ѕроверки свойств блоков через кэш (–3.3)
 ;; ============================================================
 

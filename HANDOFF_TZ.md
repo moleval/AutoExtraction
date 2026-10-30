@@ -10,6 +10,34 @@
 
 ---
 
+## 2026-10-30 — ИМЯ ЭЛЕМЕНТА: ОДНА ОБЩАЯ ФУНКЦИЯ (SUBSYSTEM ред. 8, CLADDING 32, ZAPOLNENIE 31, FASONKA 3)
+
+**Зачем.** Обработка анонимных `*U`-блоков была только в Подсистеме. Облицовка, Заполнение
+и Фасонка строили имя по старой схеме, поэтому `*U5385` попадал в их таблицы как есть.
+
+**Разделение (важно).** В `common/select-utils.lsp` две функции:
+- `su-block-name` — имя блока без учёта видимости: EffectiveName, для `*U` — имя родителя,
+  без родителя nil. Её использует **Фасонка**: там видимость тип не задаёт, раньше брался
+  EffectiveName, и подмена на значение видимости изменила бы таблицу.
+- `su-element-name` — видимость, иначе `su-block-name`. Её используют **Подсистема,
+  Облицовка, Заполнение** (у них видимость задаёт тип элемента и была приоритетной).
+
+**Подключение.**
+- `subsystem.lsp`: локальная `subsystem-element-name` удалена, `subsystem-aggregate` зовёт
+  `su-element-name`; nil-вхождения пропускаются со счётчиком.
+- `cladding.lsp`: `display` = `su-element-name`; имя родителя добавлено в список значений
+  для масок `input.block.name` и в проверку «подрезная».
+- `zapolnenie.lsp`: `zapolnenie-element-name` → `su-element-name` (nil → «Без имени»).
+- `fasonka.lsp`: `effname` → `su-block-name`.
+
+**Регресс.** `tests/element_name_test.py` (бывший `subsystem_names_test.py`) — 24 проверки,
+включая «`su-block-name` не зависит от видимости». `static_check` — группа
+`element-name-shared`: общие функции существуют, Фасонка зовёт `su-block-name`, остальные
+три — `su-element-name`.
+
+**Проверка на месте.** `RELOAD`; в баннере редакции: SUBSYSTEM 8, CLADDING 32,
+ZAPOLNENIE 31, FASONKA 3.
+
 ## 2026-10-30 — АНОНИМНЫЕ *U-БЛОКИ БЕРУТ ИМЯ РОДИТЕЛЯ (SUBSYSTEM ред. 7)
 
 **Что было.** Ред. 6 отсеивала наименования без букв. В AutoCAD `ascii` возвращает код

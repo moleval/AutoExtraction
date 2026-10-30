@@ -292,22 +292,29 @@
       (if (or (null name) (vl-catch-all-error-p name)) (setq name ""))
       (setq vis (su-get-visibility obj))
       (if (or (null vis) (vl-catch-all-error-p vis)) (setq vis ""))
-      (setq display (if (> (strlen vis) 0) vis name))
+      ;; Имя для таблицы: анонимное вхождение *U берёт имя родителя.
+      (setq display (su-element-name obj))
+      (if (or (null display) (vl-catch-all-error-p display))
+        (setq display (if (> (strlen vis) 0) vis name)))
+      (if (/= (type display) 'STR) (setq display ""))
       (setq is-target
         (if (= (type ae-settings-task-blocks) 'SUBR)
           (su-block-values-match-p
-            (list name vis)
+            (list name vis display)
             (ae-settings-task-blocks 'CLADDING))
           (or (vl-string-search "КАССЕТА" (strcase name))
               (vl-string-search "ПАНЕЛЬ"  (strcase name))
               (vl-string-search "КАССЕТА" (strcase vis))
-              (vl-string-search "ПАНЕЛЬ"  (strcase vis)))))
+              (vl-string-search "ПАНЕЛЬ"  (strcase vis))
+              (vl-string-search "КАССЕТА" (strcase display))
+              (vl-string-search "ПАНЕЛЬ"  (strcase display)))))
       (if (not is-target)
         nil
         (progn
           (setq is-cut
             (or (vl-string-search "ПОДРЕЗНАЯ" (strcase name))
-                (vl-string-search "ПОДРЕЗНАЯ" (strcase vis))))
+                (vl-string-search "ПОДРЕЗНАЯ" (strcase vis))
+                (vl-string-search "ПОДРЕЗНАЯ" (strcase display))))
           (setq props (cl-block-all-props obj))
           (setq B (cl-block-get-num props "Высота"))
           (setq C (cl-block-get-num props "Ширина"))
@@ -1487,9 +1494,9 @@
   )
 )
 
-;; CLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 31: FAST_TABLES). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS
+;; CLADDING.LSP загружен (К1-К3, Б1-Б4, ред. 32: имя родителя *U-блока). Команды: CLADDING / ОБЛИЦОВКА, CLBLOCKS
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "CLADDING" '(
-      ("CLADDING / ОБЛИЦОВКА" "облицовка К1-К3, Б1-Б4" "31")
+      ("CLADDING / ОБЛИЦОВКА" "облицовка К1-К3, Б1-Б4" "32")
        ("CLBLOCKS" "блоки облицовки" "31"))))
 (princ)

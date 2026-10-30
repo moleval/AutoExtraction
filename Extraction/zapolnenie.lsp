@@ -87,12 +87,9 @@
     (< (strcase a) (strcase b))))
 
 ;; ---------- ИМЯ ЭЛЕМЕНТА (ТИП) ----------
-(defun zapolnenie-element-name (obj / effname vis)
-  (setq effname (su-get-effective-name obj))
-  (setq vis (su-get-visibility obj))
-  (if (and vis (/= vis ""))
-    vis
-    (if effname effname "Без имени")))
+(defun zapolnenie-element-name (obj / name)
+  (setq name (su-element-name obj))
+  (if (= (type name) 'STR) name "Без имени"))
 
 ;; ---------- ПОИСК СВОЙСТВА (точное совпадение -> подстрока) ----------
 (defun zapolnenie-find-property (obj keyword / dynprops prop pname value result)
@@ -1096,8 +1093,8 @@
 
 (defun c:ЗАПОЛНЕНИЕ () (c:zapolnenie))
 
-;; ZAPOLNENIE.LSP загружен (ред. 30: припуск на раму из настроек; колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ
+;; ZAPOLNENIE.LSP загружен (ред. 31: имя элемента из общей su-element-name; припуск на раму из настроек, колонка Марка, точные суммы, быстрые таблицы). Команды: ZAPOLNENIE, ЗАПОЛНЕНИЕ
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "ZAPOLNENIE" '(
-      ("ZAPOLNENIE / ЗАПОЛНЕНИЕ" "заполнения: припуск на раму из настроек" "30"))))
+      ("ZAPOLNENIE / ЗАПОЛНЕНИЕ" "заполнения: припуск на раму из настроек" "31"))))
 (princ)

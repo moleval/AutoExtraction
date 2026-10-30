@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Порт выбора имени элемента Подсистемы.
+"""Порт выбора имени элемента — общего для всех задач.
 
-Модель повторяет `subsystem-element-name` из `Extraction/subsystem.lsp`
-и поиск родителя `su-anon-parent-name` из `common/select-utils.lsp`:
+Модель повторяет `su-element-name` и поиск родителя `su-anon-parent-name`
+из `common/select-utils.lsp`. Функцию вызывают Подсистема, Облицовка,
+Заполнение и Фасонка:
 
 - есть свойство видимости — берётся его значение;
 - иначе EffectiveName, если он не анонимный;
@@ -37,10 +38,10 @@ def check(name, ok):
     global PASS, FAIL
     if ok:
         PASS += 1
-        print("[SUBSYSTEM-NAMES][PASS] %s" % name)
+        print("[ELEMENT-NAME][PASS] %s" % name)
     else:
         FAIL += 1
-        print("[SUBSYSTEM-NAMES][FAIL] %s" % name)
+        print("[ELEMENT-NAME][FAIL] %s" % name)
 
 
 def is_anonymous(name):
@@ -54,15 +55,20 @@ def parent_name_by_handle(raw):
     return raw
 
 
-def element_name(effname, vis, parent):
-    """Порт subsystem-element-name. None на выходе = блок отбрасывается."""
-    if vis and vis != "":
-        return vis
+def block_name(effname, parent):
+    """Порт su-block-name: имя блока без учёта видимости."""
     if effname is None:
         return "Без имени"
     if not is_anonymous(effname):
         return effname
     return parent
+
+
+def element_name(effname, vis, parent):
+    """Порт su-element-name. None на выходе = блок отбрасывается."""
+    if vis and vis != "":
+        return vis
+    return block_name(effname, parent)
 
 
 def aggregate_names(rows):
@@ -141,17 +147,34 @@ def scenario_anonymous_without_parent():
     check("это «Шляпный профиль»", kept[0][0] == "Шляпный профиль")
 
 
+def scenario_block_name_without_visibility():
+    """Фасонка берёт имя блока, видимость её не касается."""
+    print("\n--- su-block-name: без приоритета видимости ---")
+    check("видимость не подменяет имя блока",
+          block_name("Профиль П-1", None) == "Профиль П-1")
+    check("видимость не подменяет имя блока (с vis)",
+          block_name("Профиль П-1", "Несущий") == "Профиль П-1")
+    check("анонимный *U берёт родителя",
+          block_name("*U5385", "Профиль направляющий") == "Профиль направляющий")
+    check("анонимный без родителя -> None", block_name("*U9999", None) is None)
+    check("su-element-name при видимости отдаёт видимость",
+          element_name("Профиль П-1", "Несущий", None) == "Несущий")
+    check("su-element-name без видимости = su-block-name",
+          element_name("Профиль П-1", None, None) == block_name("Профиль П-1", None))
+
+
 def main():
     print("=== Тест имён элементов Подсистемы ===")
     scenario_visibility_first()
     scenario_plain_names()
     scenario_anonymous_parent()
     scenario_anonymous_without_parent()
+    scenario_block_name_without_visibility()
 
     print("\nPASS: %d, FAIL: %d" % (PASS, FAIL))
     if FAIL:
         return 1
-    print("[SUBSYSTEM-NAMES][OK]")
+    print("[ELEMENT-NAME][OK]")
     return 0
 
 

@@ -843,22 +843,17 @@ def check_subsystem_numbering() -> list[str]:
     return errors
 
 
-def check_subsystem_anon_parent() -> list[str]:
-    """Подсистема: анонимное вхождение *U берёт имя родительского блока.
+def check_element_name_shared() -> list[str]:
+    """Имя элемента: одна общая функция на все задачи.
 
-    Пользователь видел в таблице строки «*U5385» — это изменённые динамические
-    блоки. Выбрасывать их нельзя (первая попытка отсева выбросила рабочие
-    блоки), имя нужно брать у родителя. Проверяется: поиск родителя есть,
-    handle отвергает анонимное имя, разметка вызывает поиск, а вхождение
-    без родителя не попадает в данные.
+    Анонимное вхождение *U5385 — изменённый динамический блок; имя берётся
+    у родителя (Block Representation / XData). Проверяется, что правило живёт
+    в common/select-utils.lsp и его вызывают Подсистема, Облицовка,
+    Заполнение и Фасонка — иначе поведение задач разъедется.
     """
     sel = ROOT / "common" / "select-utils.lsp"
-    sub = ROOT / "Extraction" / "subsystem.lsp"
     if not sel.exists():
         return [f"{_rel(sel)}: нет общих утилит выбора"]
-    if not sub.exists():
-        return [f"{_rel(sub)}: нет модуля Подсистемы"]
-
     errors: list[str] = []
     rel_sel = _rel(sel)
     sel_text = read_text(sel)
@@ -885,22 +880,49 @@ def check_subsystem_anon_parent() -> list[str]:
             f"{rel_sel}: handle не проверяется на анонимное имя - родителем "
             f"может стать сам *U-блок")
 
-    rel_sub = _rel(sub)
-    sub_text = read_text(sub)
-
-    elem = _defun_body(sub_text, "subsystem-element-name")
-    if elem is None:
-        errors.append(f"{rel_sub}: не найдена форма (defun subsystem-element-name ...)")
-    elif "su-anon-parent-name" not in elem:
+    common = _defun_body(sel_text, "su-element-name")
+    if common is None:
+        errors.append(f"{rel_sel}: не найдена общая форма (defun su-element-name ...)")
+    elif "su-block-name" not in common:
         errors.append(
-            f"{rel_sub}: имя элемента не берёт родителя для анонимного блока")
+            f"{rel_sel}: su-element-name не учитывает видимость через su-block-name")
 
-    agg = _defun_body(sub_text, "subsystem-aggregate")
-    if agg is None:
-        errors.append(f"{rel_sub}: не найдена форма (defun subsystem-aggregate ...)")
-    elif "(if name" not in agg:
+    block_name = _defun_body(sel_text, "su-block-name")
+    if block_name is None:
+        errors.append(f"{rel_sel}: не найдена общая форма (defun su-block-name ...)")
+    elif "su-anon-parent-name" not in block_name:
         errors.append(
-            f"{rel_sub}: входящий без имени не пропускается - *U-блок без "
+            f"{rel_sel}: общая функция имени не берёт родителя для *U-блока")
+
+    # Проверяем ТЕЛА функций, а не весь файл: упоминание в комментарии
+    # маркера редакции иначе маскирует откат на локальную схему.
+    # Фасонке нужен именно имя блока (видимость там тип не задаёт),
+    # остальным задачам — su-element-name с приоритетом видимости.
+    targets = (
+        ("subsystem.lsp", "subsystem-aggregate", "su-element-name"),
+        ("cladding.lsp", "cl-block-record", "su-element-name"),
+        ("zapolnenie.lsp", "zapolnenie-element-name", "su-element-name"),
+        ("fasonka.lsp", "fasonka-main", "su-block-name"),
+    )
+    for fname, fn_name, name_fn in targets:
+        path = ROOT / "Extraction" / fname
+        rel = _rel(path)
+        if not path.exists():
+            errors.append(f"{rel}: нет модуля задачи")
+            continue
+        body = _defun_body(read_text(path), fn_name)
+        if body is None:
+            errors.append(f"{rel}: не найдена форма (defun {fn_name} ...)")
+        elif name_fn not in body:
+            errors.append(
+                f"{rel}: {fn_name} строит имя локально, а не через {name_fn} - "
+                f"*U-блоки попадут в таблицу как есть")
+
+    sub = ROOT / "Extraction" / "subsystem.lsp"
+    agg = _defun_body(read_text(sub), "subsystem-aggregate") if sub.exists() else None
+    if agg is not None and "(if name" not in agg:
+        errors.append(
+            f"{_rel(sub)}: вхождение без имени не пропускается - *U-блок без "
             f"родителя попадёт в спецификацию")
     return errors
 
@@ -2299,7 +2321,7 @@ def main() -> int:
     errors += check_test_console_encoding()
     errors += check_settings_save_guard()
     errors += check_subsystem_numbering()
-    errors += check_subsystem_anon_parent()
+    errors += check_element_name_shared()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2364,7 +2386,7 @@ def main() -> int:
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
-        f" / subsystem-numbering / subsystem-anon-parent"
+        f" / subsystem-numbering / element-name-shared"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )
