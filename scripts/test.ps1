@@ -103,7 +103,8 @@ $logicTests = @(
     "tests\layer_filter_logic_test.py",
     "tests\mark_logic_test.py",
     "tests\fill_allowance_test.py",
-    "tests\search_count_test.py"
+    "tests\search_count_test.py",
+    "tests\settings_save_test.py"
 )
 
 $logicFailed = @()

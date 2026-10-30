@@ -274,15 +274,19 @@
      )
     )
   )
-  (if (or (= (ae-settings-trim (get_tile "edt_table_layer")) "")
-          (= (ae-settings-trim (get_tile "edt_insert_layer")) ""))
-    ;; ѕустое поле означает прежнее безопасное поведение.
-    (progn
-      (if (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))
-        (ae-settings-set section "output.table.layer" "CURRENT"))
-      (if (member task '(CUTLINE CUTSHEET))
-        (ae-settings-set section "output.insert.layer" "CURRENT"))
-    )
+  ;; ѕустое поле означает прежнее безопасное поведение. ѕроверка Ч —¬ќя дл€
+  ;; каждого пол€: они принадлежат разным задачам. ” ‘ј—ќЌ » (и прочих задач
+  ;; выборки) поле сло€ вставки всегда пустое Ч оно ей не нужно; у CUTLINE
+  ;; пустое поле сло€ таблицы. ќбща€ проверка на два пол€ из-за этого стирала
+  ;; в CURRENT только что заданное значение: слой таблицы не сохран€лс€ ни у
+  ;; одной задачи, слой вставки Ч у обоих раскроев.
+  (if (and (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))
+           (= (ae-settings-trim (get_tile "edt_table_layer")) ""))
+    (ae-settings-set section "output.table.layer" "CURRENT")
+  )
+  (if (and (member task '(CUTLINE CUTSHEET))
+           (= (ae-settings-trim (get_tile "edt_insert_layer")) ""))
+    (ae-settings-set section "output.insert.layer" "CURRENT")
   )
   (if (= (ae-settings-trim (get_tile "edt_frame_layer")) "")
     (if (member task '(CUTLINE CUTSHEET))
@@ -568,5 +572,5 @@
   (princ)
 )
 
-;; SETTINGS.LSP загружен.
+;; SETTINGS.LSP загружен (ред. 1: слой таблицы и слой вставки карты сохран€ютс€).
 (princ)

@@ -766,6 +766,50 @@ def check_powershell_encoding() -> list[str]:
     return errors
 
 
+SETTINGS_SAVE_MUST = [
+    ("(and (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))",
+     "своей проверки пустого поля слоя таблицы"),
+    ('(= (ae-settings-trim (get_tile "edt_table_layer")) "")',
+     "проверки пустого поля edt_table_layer"),
+    ("(and (member task '(CUTLINE CUTSHEET))",
+     "своей проверки пустого поля слоя вставки"),
+    ('(= (ae-settings-trim (get_tile "edt_insert_layer")) "")',
+     "проверки пустого поля edt_insert_layer"),
+]
+
+SETTINGS_SAVE_FORBIDDEN = [
+    ('(or (= (ae-settings-trim (get_tile "edt_table_layer")) "")',
+     "общей проверки на два поля: поле чужой задачи всегда пустое, и "
+     "заданный слой стирается в CURRENT"),
+]
+
+
+def check_settings_save_guard() -> list[str]:
+    """Окно настроек: пустое поле одной задачи не должно стирать поле другой.
+
+    Диалог очищает неактивные поля (у ФАСОНКИ поле слоя вставки пустое, у
+    CUTLINE - поле слоя таблицы). Общая проверка `(or пусто-таблица
+    пусто-вставка)` из-за этого срабатывала ВСЕГДА и переписывала заданный
+    слой в CURRENT: слой таблицы не сохранялся ни у одной задачи, слой
+    вставки - у обоих раскроев. Пользователь видел «задаю, не запоминает».
+    """
+    path = ROOT / "Extraction" / "settings.lsp"
+    if not path.exists():
+        return [f"{_rel(path)}: нет файла окна настроек"]
+    body = _defun_body(read_text(path), "ae-settings-ui-save-task")
+    if body is None:
+        return [f"{_rel(path)}: не найдена форма (defun ae-settings-ui-save-task ...)"]
+    errors: list[str] = []
+    rel = _rel(path)
+    for needle, what in SETTINGS_SAVE_MUST:
+        if needle not in body:
+            errors.append(f"{rel}: сохранение настроек: нет {what}")
+    for needle, what in SETTINGS_SAVE_FORBIDDEN:
+        if needle in body:
+            errors.append(f"{rel}: сохранение настроек: осталась {what}")
+    return errors
+
+
 def check_test_console_encoding() -> list[str]:
     """Тексты тестов обязаны печататься в консоли с cp1251.
 
@@ -2114,6 +2158,7 @@ def main() -> int:
     errors += check_powershell_encoding()
     errors += check_crlf_tolerance()
     errors += check_test_console_encoding()
+    errors += check_settings_save_guard()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2177,7 +2222,7 @@ def main() -> int:
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
-        f" / crlf-tolerance / console-encoding"
+        f" / crlf-tolerance / console-encoding / settings-save"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )
