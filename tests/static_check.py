@@ -766,6 +766,37 @@ def check_powershell_encoding() -> list[str]:
     return errors
 
 
+def check_test_console_encoding() -> list[str]:
+    """Тексты тестов обязаны печататься в консоли с cp1251.
+
+    Символ вне ANSI-кодировки (U+2212 MINUS SIGN в названии проверки)
+    ронял прогон: Python кодировал вывод в cp1251 и падал с
+    UnicodeEncodeError посреди сценария, поэтому «хвост» теста не
+    выполнялся вовсе. Теперь вывод дополнительно защищён
+    (PYTHONIOENCODING в scripts\test.ps1 и sys.stdout.reconfigure(errors="replace")
+    в самих тестах), но экзотический символ всё равно превратится в '?',
+    то есть сообщение станет бесполезным. Проще не пускать его в исходники.
+    """
+    errors: list[str] = []
+    for path in sorted((ROOT / "tests").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        bad = sorted({c for c in text if _not_cp1251(c)})
+        if bad:
+            shown = ", ".join(f"U+{ord(c):04X}" for c in bad)
+            errors.append(
+                f"{_rel(path)}: символы вне cp1251 ({shown}) - консоль "
+                f"напечатает '?' или упадёт UnicodeEncodeError")
+    return errors
+
+
+def _not_cp1251(ch: str) -> bool:
+    try:
+        ch.encode("cp1251")
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
 BLOCK_LENGTH_MUST = [
     ("common/settings-utils.lsp", "(defun ae-settings-task-length-props",
      "чтения масок длины из настроек задачи"),
@@ -2082,6 +2113,7 @@ def main() -> int:
     errors += check_block_length_setting()
     errors += check_powershell_encoding()
     errors += check_crlf_tolerance()
+    errors += check_test_console_encoding()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2145,7 +2177,7 @@ def main() -> int:
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
-        f" / crlf-tolerance"
+        f" / crlf-tolerance / console-encoding"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )

@@ -26,6 +26,17 @@ import fnmatch
 import re
 import sys
 
+# Вывод в PowerShell идёт через пайп, поэтому Python кодирует текст в
+# ANSI-кодировку системы (cp1251). Любой символ вне неё ронял прогон
+# UnicodeEncodeError прямо посреди проверок — так случилось с U+2212
+# MINUS SIGN в названии одной из проверок. Заменяем непечатаемое на '?',
+# чтобы тест доходил до итога. Основное лечение — PYTHONIOENCODING=utf-8
+# в scripts/test.ps1; это страховка на случай прямого запуска.
+try:
+    sys.stdout.reconfigure(errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 PASS = 0
 FAIL = 0
 
@@ -549,7 +560,7 @@ def scenario_table():
     tot_m = sum(w + 2 for w in WIDTHS["m"])
     one = cnt_display([area], ("ВН-2 Б6",))
     head_line = one[0]
-    check("заголовок: название блока — первая строка таблицы, по центру (пробелы слева = (ширина − длина) / 2 + 1)",
+    check("заголовок: название блока — первая строка таблицы, по центру (пробелы слева = (ширина - длина) / 2 + 1)",
           head_line.strip() == "ВН-2 Б6" and len(head_line) - len(head_line.lstrip(" ")) == (tot_m - len("ВН-2 Б6")) // 2 + 1)
 
 
