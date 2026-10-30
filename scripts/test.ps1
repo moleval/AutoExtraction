@@ -1,7 +1,10 @@
 ﻿[CmdletBinding()]
 param(
     [switch]$AutoCAD,
-    [switch]$Quiet
+    [switch]$Quiet,
+    # Проверять только проект, не трогая плагины из реестра settings.ini
+    # (сторонние модули в разработке могут быть ещё не приведены в порядок).
+    [switch]$NoPlugins
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,7 +59,10 @@ if (-not (Test-Path $checker)) {
     exit 1
 }
 
-& $python @pythonArgs $checker
+$checkerArgs = @()
+if ($NoPlugins) { $checkerArgs += "--no-plugins" }
+
+& $python @pythonArgs $checker @checkerArgs
 $rc = $LASTEXITCODE
 
 if ($rc -ne 0) {

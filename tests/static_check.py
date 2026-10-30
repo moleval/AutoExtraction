@@ -40,6 +40,11 @@ SETTINGS_INI = ROOT / "settings.ini"
 # но баланс и лексика проверяются отдельно: chkparens.lsp автозагружает RELOAD.
 TEST_DIR = ROOT / "tests"
 
+# --no-plugins: проверять только проект, не трогая плагины из реестра.
+# Нужно, когда чужой модуль в разработке (D:\MarkZ, D:\ReplaceDBlock ...)
+# ещё не приведён в порядок, а прогнать проверки самого репозитория надо.
+PLUGINS_ENABLED = True
+
 # ----------------------------------------------------------------------
 # Whitelist
 # ----------------------------------------------------------------------
@@ -176,6 +181,8 @@ def plugin_files():
     Путь из реестра приоритетен; пустой путь - Plugins\\<имя>. Файла может не
     быть на этой машине: тогда плагин пропускается, это не ошибка проверки.
     """
+    if not PLUGINS_ENABLED:
+        return
     seen: set[str] = set()
     for name, path in plugin_registry():
         cand = Path(path) if path else ROOT / "Plugins" / name
@@ -1199,7 +1206,14 @@ def check_defun_duplicates_in_file(files=None) -> list[str]:
     tests/*.lsp, которые в общий поиск дубликатов не входят.
     """
     errors: list[str] = []
+    # Плагины реестра проверяет общий поиск дублей (check_duplicates):
+    # там seen глобальный по всем файлам, поэтому дубль внутри плагина
+    # виден и без этой группы. Иначе один дефект печатался дважды -
+    # по-английски из общего поиска и по-русски отсюда.
+    plugin_paths = {str(p).lower() for p in plugin_files()}
     for path in (files if files is not None else all_lisp_files()):
+        if str(path).lower() in plugin_paths:
+            continue
         seen: dict[str, int] = {}
         for name, line in find_defuns(path):
             key = name.upper()
@@ -1333,7 +1347,7 @@ CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p", "rec")
 
 
 def check_chkparens_plugins_guard() -> list[str]:
-    """CHKALL достаёт плагины: и Plugins\, и каталоги разработки.
+    r"""CHKALL достаёт плагины: и Plugins\, и каталоги разработки.
 
     Без этого обхода у плагина не остаётся ни одной проверки внутри
     AutoCAD: RELOAD сканирует скобки только ПОСЛЕ ошибки загрузки
@@ -2033,6 +2047,12 @@ def check_search_count_window() -> list[str]:
 
 
 def main() -> int:
+    global PLUGINS_ENABLED
+    if "--no-plugins" in sys.argv[1:]:
+        PLUGINS_ENABLED = False
+    if "--plugins" in sys.argv[1:]:
+        PLUGINS_ENABLED = True
+
     errors: list[str] = []
 
     errors += check_required_files()
@@ -2116,7 +2136,8 @@ def main() -> int:
 
     print(
         f"PASS: lisp={lisp_count} dcl={dcl_count} tests={tests_count} "
-        f"plugins={plugins_count} "
+        f"plugins={plugins_count}"
+        f"{'' if PLUGINS_ENABLED else ' (--no-plugins)'} "
         f"checks: required / balance / defun-dup / dcl-keys / dcl-syntax / mains"
         f" / cutline-wrap-guard / cutsheet-wrap-guard / reload-chkload-guard"
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
