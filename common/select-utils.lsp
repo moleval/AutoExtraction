@@ -383,24 +383,37 @@
   )
 )
 
+;; ШИРИНА и ВЫСОТА длиной не считаются никогда - ни по точной маске,
+;; ни по подстроке. Иначе маска "*" (пользователь хотел «любое свойство»)
+;; принесла бы в погонаж ширину: раньше точное совпадение было только
+;; с литералом «ДЛИНА», и такой ошибки быть не могло.
+(defun su-prop-name-width-height-p (pname)
+  (or (vl-string-search "ШИРИНА" pname)
+      (vl-string-search "ВЫСОТА" pname))
+)
+
 ;; Совпадение имени динамического свойства с маской целиком (wcmatch).
 (defun su-prop-mask-exact-p (pname masks / found m)
-  (setq found nil)
-  (foreach m masks
-    (if (and (= (type m) 'STR)
-             (wcmatch pname (strcase m)))
-      (setq found T)
+  (if (su-prop-name-width-height-p pname)
+    nil
+    (progn
+      (setq found nil)
+      (foreach m masks
+        (if (and (= (type m) 'STR)
+                 (wcmatch pname (strcase m)))
+          (setq found T)
+        )
+      )
+      found
     )
   )
-  found
 )
 
 ;; Мягкое совпадение: маска входит в имя свойства как подстрока.
 ;; Для умолчания «ДЛИНА» это ловит «ДЛИНА ОБЩАЯ», как раньше.
 ;; ШИРИНА и ВЫСОТА длиной не считаются никогда.
 (defun su-prop-mask-soft-p (pname masks / found m)
-  (if (or (vl-string-search "ШИРИНА" pname)
-          (vl-string-search "ВЫСОТА" pname))
+  (if (su-prop-name-width-height-p pname)
     nil
     (progn
       (setq found nil)

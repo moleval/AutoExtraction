@@ -721,6 +721,8 @@ BLOCK_LENGTH_MUST = [
      "поиска длины по маскам свойств"),
     ("common/select-utils.lsp", '(vl-string-search "ШИРИНА" pname)',
      "исключения ШИРИНЫ из масок длины"),
+    ("common/select-utils.lsp", "(defun su-prop-name-width-height-p",
+     "общего исключения ШИРИНЫ и ВЫСОТЫ для обоих проходов"),
     ("Extraction/fasonka.lsp", "(ae-settings-task-length-props 'FASONKA)",
      "масок длины ФАСОНКИ из настроек"),
     ("Extraction/subsystem.lsp", "(ae-settings-task-length-props 'SUBSYSTEM)",
