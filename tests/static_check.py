@@ -710,6 +710,55 @@ PLUGIN_LOCALS = ("plugin-items", "plugin-seen", "plugin-rec", "plugin-name",
                  "plugin-resolved", "plugin-taken")
 
 
+POWERSHELL_SUFFIXES = (".ps1", ".psm1")
+
+# Символы, которые PowerShell принимает за кавычки. Если такой символ попал
+# в .ps1 из чужой кодировки, строка рвётся посреди кода и скрипт не разбирается.
+POWERSHELL_SMART_QUOTES = "\u2018\u2019\u201a\u201c\u201d\u201e"
+
+
+def check_powershell_encoding() -> list[str]:
+    """Скрипты PowerShell обязаны быть ASCII или UTF-8 с BOM.
+
+    Windows PowerShell 5.1 читает .ps1 без BOM как ANSI (в русской локали
+    cp1251). Кириллица в UTF-8 превращается в мусор, а из байтов рождаются
+    типографские кавычки „ ’ “ ”, которые PowerShell считает разделителями
+    строк: `Write-Host "SKIP: $t (файл не найден)"` разбирался как обрыв
+    строки, и scripts\test.ps1 падал с «Отсутствует закрывающий знак }»
+    ещё до первой проверки. BOM снимает вопрос: PS 5.1 и PS 7 читают файл
+    как UTF-8.
+    """
+    errors: list[str] = []
+    for path in sorted(ROOT.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in POWERSHELL_SUFFIXES:
+            continue
+        if ".git" in path.parts:
+            continue
+        raw = path.read_bytes()
+        rel = _rel(path)
+        try:
+            raw.decode("ascii")
+            continue  # чистый ASCII читается одинаково в любой кодировке
+        except UnicodeDecodeError:
+            pass
+        if not raw.startswith(b"\xef\xbb\xbf"):
+            errors.append(
+                f"{rel}: нет BOM UTF-8 - Windows PowerShell 5.1 прочитает "
+                f"кириллицу как ANSI и скрипт не разберётся")
+            continue
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            errors.append(f"{rel}: не UTF-8: {exc}")
+            continue
+        bad = sorted({c for c in text if c in POWERSHELL_SMART_QUOTES})
+        if bad:
+            errors.append(
+                f"{rel}: типографские кавычки {''.join(bad)!r} - PowerShell "
+                f"принимает их за разделители строк")
+    return errors
+
+
 BLOCK_LENGTH_MUST = [
     ("common/settings-utils.lsp", "(defun ae-settings-task-length-props",
      "чтения масок длины из настроек задачи"),
@@ -1973,6 +2022,7 @@ def main() -> int:
     errors += check_reload_plugins_guard()
     errors += check_settings_plugins_guard()
     errors += check_block_length_setting()
+    errors += check_powershell_encoding()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2034,7 +2084,8 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / call-arity / xls-marks"
-        f" / mark-labels / fill-allowance / block-length / search-count"
+        f" / mark-labels / fill-allowance / block-length / ps-encoding"
+        f" / search-count"
         f" / summary-marks / search-count-window"
     )
     print("RESULT: PASS")
