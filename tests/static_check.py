@@ -843,6 +843,52 @@ def check_subsystem_numbering() -> list[str]:
     return errors
 
 
+def check_subsystem_service_names() -> list[str]:
+    """Подсистема: служебные блоки не попадают в спецификацию.
+
+    У блока без свойства видимости в наименование идёт EffectiveName.
+    У служебных блоков он выглядит как «№5.385» — букв нет, только цифры
+    и знаки, и такой блок попадал в таблицу штучной позицией с количеством 1.
+    Проверяется: правило «нет букв -> служебное» существует, заглушка
+    «Без имени» тоже считается служебной, и отсев реально вызывается в
+    subsystem-aggregate (до таблицы и выгрузок).
+    """
+    path = ROOT / "Extraction" / "subsystem.lsp"
+    if not path.exists():
+        return [f"{_rel(path)}: нет модуля Подсистемы"]
+    text = read_text(path)
+    rel = _rel(path)
+    errors: list[str] = []
+
+    letters = _defun_body(text, "su-name-has-letters-p")
+    if letters is None:
+        errors.append(f"{rel}: не найдена форма (defun su-name-has-letters-p ...)")
+    elif not ("(ascii ch)" in letters or "wcmatch" in letters):
+        errors.append(
+            f"{rel}: проверка букв не перебирает символы - диапазоны wcmatch "
+            f"для кириллицы зависят от кодовой страницы")
+
+    service = _defun_body(text, "su-service-name-p")
+    if service is None:
+        errors.append(f"{rel}: не найдена форма (defun su-service-name-p ...)")
+    else:
+        if "su-name-has-letters-p" not in service:
+            errors.append(
+                f"{rel}: служебное имя не проверяется на отсутствие букв")
+        if '"Без имени"' not in service:
+            errors.append(
+                f"{rel}: заглушка «Без имени» не считается служебным именем")
+
+    agg = _defun_body(text, "subsystem-aggregate")
+    if agg is None:
+        errors.append(f"{rel}: не найдена форма (defun subsystem-aggregate ...)")
+    elif "su-service-name-p" not in agg:
+        errors.append(
+            f"{rel}: служебные блоки не отсеиваются - «№5.385» попадёт в "
+            f"таблицу штучной позицией")
+    return errors
+
+
 SETTINGS_SAVE_MUST = [
     ("(and (member task '(FASONKA SUBSYSTEM CLADDING VITRAZH ZAPOLNENIE))",
      "своей проверки пустого поля слоя таблицы"),
@@ -2237,6 +2283,7 @@ def main() -> int:
     errors += check_test_console_encoding()
     errors += check_settings_save_guard()
     errors += check_subsystem_numbering()
+    errors += check_subsystem_service_names()
     errors += check_chkparens_plugins_guard()
     errors += check_lisp_lexical()
 
@@ -2301,7 +2348,7 @@ def main() -> int:
         f" / chkparens-plugins-guard / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
-        f" / subsystem-numbering"
+        f" / subsystem-numbering / subsystem-service-names"
         f" / search-count"
         f" / summary-marks / search-count-window"
     )

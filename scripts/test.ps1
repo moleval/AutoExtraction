@@ -105,7 +105,8 @@ $logicTests = @(
     "tests\fill_allowance_test.py",
     "tests\search_count_test.py",
     "tests\settings_save_test.py",
-    "tests\subsystem_numbering_test.py"
+    "tests\subsystem_numbering_test.py",
+    "tests\subsystem_names_test.py"
 )
 
 $logicFailed = @()
