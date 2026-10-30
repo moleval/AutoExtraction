@@ -11,22 +11,25 @@
 ;; ------------------------------------------------------------
 ;; Формирование имени элемента
 ;; ------------------------------------------------------------
-;; Если есть свойство Видимость1 / VISIBILITY / ВИДИМОСТЬ —
-;; используем его значение.
-;; Если свойства видимости нет — сохраняем ПОЛНЫЙ EffectiveName.
-;; Никакой очистки префикса здесь нет.
+;; 1. Есть свойство Видимость1 / VISIBILITY / ВИДИМОСТЬ —
+;;    используем его значение.
+;; 2. Иначе — EffectiveName, если он не анонимный.
+;; 3. Анонимное вхождение (*U5385) — это изменённый динамический
+;;    блок: берём имя родительского блока (su-anon-parent-name).
+;;    Если родителя нет, возвращаем nil — блок не элемент подсистемы.
 ;; ------------------------------------------------------------
 
-(defun subsystem-element-name (obj / effname vis)
+(defun subsystem-element-name (obj / effname vis parent)
   (setq effname (su-get-effective-name obj))
   (setq vis (su-get-visibility obj))
 
-  (if (and vis (/= vis ""))
-    vis
-    (if effname
-      effname
-      "Без имени"
-    )
+  (cond
+    ((and vis (/= vis "")) vis)
+    ((null effname) "Без имени")
+    ((/= (substr effname 1 1) "*") effname)
+    ((setq parent (su-anon-parent-name (vlax-vla-object->ename obj)))
+      parent)
+    (T nil)
   )
 )
 
@@ -266,6 +269,8 @@
 
   (setq acc '())
   (setq i 0)
+  ;; Сколько вхождений отброшено как анонимные без родителя.
+  (setq *su-skipped-anon* 0)
 
   (repeat (length inserts)
 
@@ -273,35 +278,45 @@
     (setq obj (vlax-ename->vla-object ent))
 
     (setq name (subsystem-element-name obj))
-    (setq len  (su-get-length obj (ae-settings-task-length-props 'SUBSYSTEM)))
 
-    ;; Один и тот же элемент с одинаковой длиной объединяется.
-    ;; Штучный элемент (nil) группируется отдельно.
-    (setq found nil)
+    ;; Анонимное вхождение без родительского имени — не элемент подсистемы.
+    (if name
 
-    (foreach rec acc
-      (if
-        (and
-          (= (car rec) name)
-          (equal (cadr rec) len)
+      (progn
+
+        (setq len (su-get-length obj (ae-settings-task-length-props 'SUBSYSTEM)))
+
+        ;; Один и тот же элемент с одинаковой длиной объединяется.
+        ;; Штучный элемент (nil) группируется отдельно.
+        (setq found nil)
+
+        (foreach rec acc
+          (if
+            (and
+              (= (car rec) name)
+              (equal (cadr rec) len)
+            )
+            (setq found rec)
+          )
         )
-        (setq found rec)
-      )
-    )
 
-    (if found
-      (setq
-        acc
-        (subst
-          (list name len (1+ (caddr found)))
-          found
-          acc
+        (if found
+          (setq
+            acc
+            (subst
+              (list name len (1+ (caddr found)))
+              found
+              acc
+            )
+          )
+          (setq
+            acc
+            (cons (list name len 1) acc)
+          )
         )
       )
-      (setq
-        acc
-        (cons (list name len 1) acc)
-      )
+
+      (setq *su-skipped-anon* (1+ *su-skipped-anon*))
     )
 
     (setq i (1+ i))
@@ -871,6 +886,10 @@
 
       (setq data (subsystem-aggregate inserts))
 
+      (if (> *su-skipped-anon* 0)
+        (princ (strcat "\nПропущено анонимных блоков без родителя: "
+                       (itoa *su-skipped-anon*))))
+
       (if data
 
         (progn
@@ -1147,8 +1166,8 @@
   (c:subsystem)
 )
 
-;; SUBSYSTEM.LSP загружен (ред. 5: ширина столбца № по длине номера). Ред. 4: нумерация сквозная — мерные группы продолжают счёт штучных позиций). Команды: SUBSYSTEM, ПОДСИСТЕМА
+;; SUBSYSTEM.LSP загружен (ред. 7: анонимные *U-блоки берут имя родителя). Ред. 5: ширина столбца № по длине номера. Ред. 4: нумерация сквозная — мерные группы продолжают счёт штучных позиций). Команды: SUBSYSTEM, ПОДСИСТЕМА
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "SUBSYSTEM" '(
-      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "5"))))
+      ("SUBSYSTEM / ПОДСИСТЕМА" "выборка подсистем в таблицу" "7"))))
 (princ)

@@ -295,6 +295,69 @@
 )
 
 ;; ============================================================
+;; Имя родительского блока для анонимного вхождения
+;;
+;; После изменения параметров динамический блок живёт как
+;; анонимное вхождение *U5385, и EffectiveName у него уже не
+;; помогает. Исходное имя достаётся из Block Representation
+;; (acdbblockrepbtag) или из XData определения блока: там
+;; лежит handle на родительский блок.
+;; ============================================================
+
+(defun su-parent-name-by-handle (hdl / ent name)
+  (setq ent (handent hdl))
+  (if ent
+    (setq name (cdr (assoc 2 (entget ent))))
+  )
+  (if (and name (= (type name) 'STR) (/= name "")
+           (/= (substr name 1 1) "*"))
+    name
+    nil
+  )
+)
+
+(defun su-anon-parent-name (ent / blk def rep pair found)
+  (setq found nil)
+  (setq blk (cdr (assoc 2 (entget ent))))
+  (if (and blk (= (substr blk 1 1) "*"))
+    (progn
+      (setq def (tblobjname "BLOCK" blk))
+      (if def
+        (progn
+          ;; 1) Block Representation — так оформлены варианты динамических блоков.
+          (setq rep (cdr (assoc -3 (entget def '("ACDBBLOCKREPBTAG")))))
+          (if rep
+            (progn
+              (setq pair (assoc 1005 (cdadr rep)))
+              (if pair
+                (setq found (su-parent-name-by-handle (cdr pair)))
+              )
+            )
+          )
+          ;; 2) Прочие приложения XData: handle на исходный блок.
+          (if (not found)
+            (progn
+              (foreach app (cdr (assoc -3 (entget def '("*"))))
+                (if (not found)
+                  (progn
+                    (foreach pair (cdr app)
+                      (if (and (not found) (= (car pair) 1005))
+                        (setq found (su-parent-name-by-handle (cdr pair)))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  found
+)
+
+;; ============================================================
 ;; Проверки свойств блоков через кэш (Р3.3)
 ;; ============================================================
 
