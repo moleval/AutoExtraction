@@ -1604,9 +1604,9 @@ CHKPARENS_PLUGINS_MUST = [
      "стражи типа резолвера: CHKALL обязан работать и без reload.lsp"),
     ("(setq p (ae-reload-plugin-resolve (car rec) (cadr rec)))",
      "резолвера ae-reload-plugin-resolve: CHKALL обязан брать тот же путь, что и RELOAD"),
-    ("(setq total (+ total (chk-parens-scan p)))",
+    ("(setq total (+ total (chk-parens-scan p quiet)))",
      "самого сканирования плагина (иголка с setq, потому что голое "
-     "(chk-parens-scan p) есть ещё в c:CHKFILE)"),
+     "(chk-parens-scan p quiet) есть ещё в c:CHKFILE)"),
 ]
 
 CHKPARENS_PLUGINS_FORBIDDEN = [
@@ -1619,6 +1619,33 @@ CHKPARENS_PLUGINS_FORBIDDEN = [
 ]
 
 CHKALL_LOCALS = ("root", "d", "files", "f", "total", "p", "rec")
+
+
+def check_reload_chkall_on_error() -> list[str]:
+    """RELOAD: CHKALL только при сбое загрузки, с флагом отключения.
+
+    Полный прогон на каждый RELOAD давал 27 файлов по две строки - его
+    запускал плагин MARKZ (TEST 00 -> c:CHKALL). В проекте проверка нужна
+    только когда что-то не загрузилось: тогда она показывает все битые
+    файлы, а не первый упавший.
+    """
+    path = ROOT / "reload.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = _rel(path)
+    errors: list[str] = []
+    for needle, what in (
+        ("*ae-reload-chkall-on-error*", "флага отключения автопроверки"),
+        ("(and (> errors 0)", "условия «только при сбое загрузки»"),
+        ("(vl-catch-all-apply 'chk-all-run (list T))",
+         "запуска CHKALL в тихом режиме после сбоя"),
+        ("(chk-parens-scan fullpath nil)",
+         "пост-диагностики упавшего файла (quiet = nil, подробно)"),
+    ):
+        if needle not in text:
+            errors.append(f"{rel}: CHKALL при сбое: нет {what}")
+    return errors
 
 
 def check_chkparens_plugins_guard() -> list[str]:
@@ -1653,18 +1680,35 @@ def check_chkparens_plugins_guard() -> list[str]:
             continue
         head, name, args = node[1][0], node[1][1], node[1][2]
         if (head[0] == "atom" and head[1].lower() == "defun"
-                and name[0] == "atom" and name[1].lower() == "c:chkall"
+                and name[0] == "atom" and name[1].lower() == "chk-all-run"
                 and args[0] == "list"):
             locals_found = [a[1].lower() for a in args[1][1:] if a[0] == "atom"]
             break
     if locals_found is None:
-        errors.append(f"{rel}: CHKALL и плагины: не найдена форма (defun c:CHKALL ...)")
+        errors.append(f"{rel}: CHKALL и плагины: не найдена форма (defun chk-all-run ...)")
     else:
         for var in CHKALL_LOCALS:
             if var not in locals_found:
                 errors.append(
                     f"{rel}: CHKALL и плагины: '{var}' не среди локальных "
-                    f"переменных c:CHKALL")
+                    f"переменных chk-all-run")
+
+    # Тихий режим: c:CHKALL зовёт MARKZ на каждой загрузке, полный отчёт
+    # по 27 файлам засорял лог. Краткий отчёт - chk-all-run с флагом,
+    # подробный - отдельная команда CHKALLFULL.
+    for needle, what in (
+        ("*ae-chk-quiet*", "переменной тихого режима *ae-chk-quiet*"),
+        ("(defun c:chkallfull", "команды CHKALLFULL для подробного отчёта"),
+        ("(chk-all-run", "общего обхода chk-all-run"),
+        ("(chk-parens-scan (strcat d f) quiet)",
+         "передачи quiet в обход common/Extraction"),
+        ('(if (not quiet)\n        (princ (strcat "\\n[CHK] " path " размер "',
+         "тихого подавления строки «размер» у целых файлов"),
+        ("((not quiet)\n            (princ (strcat \"\\n[CHK] \" path \" ИТОГ: 0 (OK)\"))",
+         "тихого подавления строки «ИТОГ: 0 (OK)»"),
+    ):
+        if needle not in text:
+            errors.append(f"{rel}: тихий CHKALL: нет {what}")
     return errors
 
 
@@ -2363,6 +2407,7 @@ def main() -> int:
     errors += check_element_name_shared()
     errors += check_subsystem_separator()
     errors += check_chkparens_plugins_guard()
+    errors += check_reload_chkall_on_error()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2423,7 +2468,7 @@ def main() -> int:
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
-        f" / chkparens-plugins-guard / call-arity / xls-marks"
+        f" / chkparens-plugins-guard / reload-chkall-on-error / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"
