@@ -10,6 +10,16 @@
 
 ---
 
+## 2026-10-30 — ТЗ ДЛЯ MARKZ: ПРОВЕРКИ КОДА — ЗОНА AutoExtraction
+
+`tests/chkparens.lsp` и `reload.lsp` доработаны так, что проверки кода целиком принадлежат
+AutoExtraction. Ответная часть — задание в MarkZ: `docs/tz-markz-checks.md`. Суть: убрать
+`(mark:test-parens)` из хвоста MARKZ.lsp (он печатался на каждом RELOAD и вызывал
+`c:CHKALL`), убрать `TEST 00` из `mark:diagnostics`, удалить `mark:test-parens`,
+`mark:scan-parens`, `mark:has-command?`. `TEST 01–16` (данные чертежа) остаются — наш доктор
+их не заменяет. `mark:find-source` и `*mark:source-candidates*` остаются: их использует
+`mark:snapshot-path`.
+
 ## 2026-10-30 — CHKALL: ТИХИЙ РЕЖИМ И АВТОЗАПУСК ТОЛЬКО ПРИ СБОЕ
 
 **Откуда взялся прогон на каждый RELOAD.** Не из AutoExtraction. Плагин MARKZ
