@@ -1712,6 +1712,35 @@ def check_chkparens_plugins_guard() -> list[str]:
     return errors
 
 
+CHKPARENS_HELPERS = (
+    "chk-line-balances", "chk-load-try", "chk-temp-name", "chk-load-find")
+
+
+def check_chkparens_helpers() -> list[str]:
+    r"""Каждая chk-* функция, которую зовут, обязана быть определена.
+
+    Регресс 25d914c: правка тихого режима вырезала из tests/chkparens.lsp
+    chk-load-find вместе с помощниками (chk-line-balances, chk-load-try,
+    chk-temp-name), а c:CHKLOAD продолжал их звать. Файл грузился молча,
+    команда CHKLOAD падала с «no function definition», и reload.lsp
+    печатал «chk-load-find: нет» в сверке версий.
+    """
+    path = TEST_DIR / "chkparens.lsp"
+    if not path.exists():
+        return []
+    text = read_text(path)
+    rel = path.relative_to(ROOT)
+    errors: list[str] = []
+    defined = {m.lower() for m in re.findall(r"^\(defun\s+([^\s()]+)", text, re.M)}
+    called = {m.lower() for m in re.findall(r"\((chk-[a-z0-9?*:_-]+)", text, re.I)}
+    for name in sorted(called - defined):
+        errors.append(f"{rel}: зовётся ({name} ...), а (defun {name} ...) нет")
+    for name in CHKPARENS_HELPERS:
+        if name not in defined:
+            errors.append(f"{rel}: нет помощника {name} — CHKLOAD без него не работает")
+    return errors
+
+
 XLS_MARKS_MUST = {
     "Extraction/cutsheet.lsp": [
         ('(defun cs-xls-has-marks (',
@@ -2408,6 +2437,7 @@ def main() -> int:
     errors += check_subsystem_separator()
     errors += check_chkparens_plugins_guard()
     errors += check_reload_chkall_on_error()
+    errors += check_chkparens_helpers()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2468,7 +2498,8 @@ def main() -> int:
         f" / lexical / tests-balance / tests-lexical / reload-balance / special-forms"
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
-        f" / chkparens-plugins-guard / reload-chkall-on-error / call-arity / xls-marks"
+        f" / chkparens-plugins-guard / reload-chkall-on-error / chkparens-helpers"
+        f" / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"
