@@ -710,185 +710,156 @@
 ;; ============================================================
 ;; КОПИРОВАНИЕ БЛОКА С СОХРАНЕНИЕМ ДИНАМИЧЕСКИХ СВОЙСТВ
 ;;
-;; Штатный путь: WBLOCK определения во временный DWG -> vla-InsertBlock
-;; -> переименование определения в <имя>_N.
+;; Копируется ОПРЕДЕЛЕНИЕ блока, а не вставка. Способ: определение
+;; выгружается в промежуточный документ ObjectDBX, там получает новое
+;; имя и возвращается в чертёж. Так дублируются параметры и операции
+;; динамического блока, а исходное определение не затрагивается.
 ;;
-;; Почему не «в лоб», как было раньше:
-;;   - каталог для временного файла выбирается по ФАКТУ записи
-;;     (TEMPPREFIX -> TEMP -> TMP -> папка чертежа):
-;;     подставленный несуществующий/закрытый каталог давал «файл не создан»
-;;     без объяснения причины;
-;;   - -WBLOCK идёт через command-s: незавершённая команда падает
-;;     ошибкой, а не оставляет висящий запрос в командной строке
-;;     (в логе он потом перехватывает ввод следующей команды);
-;;   - файл проверяется по размеру, а не только по findfile;
-;;   - если WBLOCK не сработал, копия строится напрямую (entmake-клон
-;;     содержимого определения). Динамические свойства в этом режиме
-;;     не переносятся, и модуль об этом прямо пишет.
+;; Почему не WBLOCK (ред. 3):
+;;   - WBLOCK динамического блока пишет в файл ВСТАВКУ, а не
+;;     определение: INSERT такого файла создаёт обёртку, внутри которой
+;;     лежит исходный блок, - «муляж» без своих ручек;
+;;   - если имя совпадает с уже имеющимся в чертеже, AutoCAD подставляет
+;;     СУЩЕСТВУЮЩЕЕ определение: копия становится ссылкой на исходник;
+;;   - vla-get-EffectiveName у вставки динамического блока возвращает имя
+;;     ДИНАМИЧЕСКОГО блока (а не анонимного *U...), поэтому переименование
+;;     по EffectiveName уводило имя у ИСХОДНОГО определения - блок
+;;     «исчезал» из чертежа. Теперь имя копии задаётся только в
+;;     промежуточном документе, до возврата в чертёж.
 ;; ============================================================
 
-;; Каталог с завершающим разделителем.
-(defun blockrename-dir-slash (dir)
-  (if (and (blockrename-string-p dir) (> (strlen dir) 0))
-    (if (wcmatch dir "*[\\/]") dir (strcat dir "\\")))
+;; Промежуточный документ ObjectDBX. nil - интерфейс недоступен
+;; (LT, урезанная установка): тогда копию определения не сделать.
+(defun blockrename-objectdbx ( / app vrs progid dbx)
+  (setq app (vlax-get-acad-object))
+  (setq vrs (atoi (getvar "ACADVER")))
+  (setq progid
+    (if (< vrs 16)
+      "objectdbx.axdbdocument"
+      (strcat "objectdbx.axdbdocument." (itoa vrs))))
+  (setq dbx
+    (vl-catch-all-apply 'vla-getinterfaceobject (list app progid)))
+  (if (or (null dbx)
+          (vl-catch-all-error-p dbx)
+          (/= (type dbx) 'VLA-OBJECT))
+    nil
+    dbx)
 )
 
-;; Первый каталог из кандидатов, в который реально можно писать.
-;; Проверка настоящая: создаём пробный файл и удаляем его.
-(defun blockrename-writable-dir ( / dirs dir probe f found)
-  (setq dirs (list (getvar "TEMPPREFIX")
-                   (getenv "TEMP")
-                   (getenv "TMP")
-                   (getvar "DWGPREFIX")))
-  (foreach dir dirs
-    (if (and (null found) (blockrename-string-p dir) (> (strlen dir) 0))
-      (progn
-        (setq dir (blockrename-dir-slash dir))
-        (setq probe (strcat dir "ae_probe_"
-                            (itoa (fix (getvar "MILLISECS"))) ".tmp"))
-        (setq f (vl-catch-all-apply 'open (list probe "w")))
-        (if (and (not (vl-catch-all-error-p f)) f)
-          (progn
-            (close f)
-            (vl-file-delete probe)
-            (setq found dir)
-          )
-        )
-      )
-    )
-  )
-  found
-)
-
-;; Имя временного файла. vl-filename-mktemp создаёт пустой файл -
-;; удаляем его, иначе проверка «файл появился» всегда истинна.
-(defun blockrename-temp-name (dir / name mktemp)
-  (setq mktemp
-    (vl-catch-all-apply 'vl-filename-mktemp (list "ae_br_" dir ".dwg")))
-  (if (and mktemp
-           (not (vl-catch-all-error-p mktemp))
-           (= (type mktemp) 'STR)
-           (> (strlen mktemp) 0))
-    (progn
-      (vl-file-delete mktemp)
-      (setq name mktemp))
-    (setq name (strcat dir "ae_br_"
-                       (itoa (fix (getvar "MILLISECS"))) ".dwg"))
-  )
-  name
-)
-
-;; Выгрузка определения блока во временный DWG.
-;; Возвращает (OK путь) | (ERROR "причина").
-(defun blockrename-wblock (blkName tempFile / saved res ok size)
-  (setq saved (tu-sysvar-save '("CMDECHO" "FILEDIA" "EXPERT")))
-  (setvar "CMDECHO" 0)
-  (setvar "FILEDIA" 0)
-  (setvar "EXPERT" 5)
-
-  (if (findfile tempFile) (vl-file-delete tempFile))
-
-  (setq res
-    (if (member "COMMAND-S" (atoms-family 1))
-      (vl-catch-all-apply 'command-s (list "_.-WBLOCK" tempFile blkName))
-      (vl-catch-all-apply 'command   (list "_.-WBLOCK" tempFile blkName))
-    )
-  )
-
-  (tu-sysvar-restore saved)
-
-  (setq ok (findfile tempFile))
-  (setq size (if ok (vl-catch-all-apply 'vl-file-size (list ok))))
-  (if (or (null size) (vl-catch-all-error-p size)) (setq size 0))
+;; Копия определения oldName под именем newName.
+;; Возвращает (OK newName) | (ERROR "причина").
+(defun blockrename-copy-definition
+       (oldName newName / acad doc blocks src dbx dbxBlocks dbxDef
+        cp rn res)
 
   (cond
-    ((and ok (> size 0))
-     (list 'OK ok))
+    ((not (tblsearch "BLOCK" oldName))
+     (list 'ERROR (strcat "определение \"" oldName "\" не найдено")))
 
-    ((vl-catch-all-error-p res)
-     (list 'ERROR (vl-catch-all-error-message res)))
+    ((tblsearch "BLOCK" newName)
+     (list 'ERROR (strcat "имя \"" newName "\" уже занято")))
 
-    (T
-     (list 'ERROR (strcat "файл не создан: " tempFile)))
-  )
-)
-
-;; Данные объекта для entmake-клона: без дескриптора, владельца,
-;; словарей и XDATA - их выдаёт заново сам entmake.
-(defun blockrename-clone-data (data / out stop pair)
-  (setq out '() stop nil)
-  (foreach pair data
-    (cond
-      (stop nil)
-      ((= (car pair) 1001) (setq stop T))
-      ((member (car pair) '(5 330 360 102 1005)) nil)
-      (T (setq out (cons pair out)))
-    )
-  )
-  (reverse out)
-)
-
-;; Копия определения без WBLOCK: новое определение + перенос объектов.
-;; Возвращает (OK всего объектов, не перенесено) | (ERROR "причина").
-(defun blockrename-clone-block (srcName newName / rec base e data made total failed)
-  (setq rec (tblsearch "BLOCK" srcName))
-  (cond
-    ((null rec)
-     (list 'ERROR (strcat "определение \"" srcName "\" не найдено")))
+    ((null (setq dbx (blockrename-objectdbx)))
+     (list 'ERROR
+       "ObjectDBX недоступен: копия определения невозможна"))
 
     (T
-     (setq base (cdr (assoc 10 rec)))
-     (if (null base) (setq base '(0.0 0.0 0.0)))
+     (setq acad (vlax-get-acad-object))
+     (setq doc (vla-get-ActiveDocument acad))
+     (setq blocks (vla-get-Blocks doc))
+     (setq dbxBlocks (vla-get-Blocks dbx))
+     (setq res (list 'ERROR "копирование определения не удалось"))
 
-     (setq made
-       (entmake (list '(0 . "BLOCK")
-                      '(100 . "AcDbEntity")
-                      '(8 . "0")
-                      '(100 . "AcDbBlockBegin")
-                      (cons 2 newName)
-                      '(70 . 0)
-                      (cons 10 base))))
+     (setq src (vl-catch-all-apply 'vla-Item (list blocks oldName)))
 
      (cond
-       ((null made)
-        (list 'ERROR (strcat "не удалось создать определение \"" newName "\"")))
+
+       ((or (null src) (vl-catch-all-error-p src))
+        (setq res (list 'ERROR
+                    (strcat "не открыто определение \"" oldName "\""))))
 
        (T
-        (setq e (tblobjname "BLOCK" srcName))
-        (setq total 0 failed 0)
-        (while (and e
-                    (setq e (entnext e))
-                    (setq data (entget e))
-                    (/= (cdr (assoc 0 data)) "ENDBLK"))
-          (setq total (1+ total))
-          (if (null (entmake (blockrename-clone-data data)))
-            (setq failed (1+ failed))
+        ;; 1. Определение -> промежуточный документ.
+        (setq cp
+          (vl-catch-all-apply 'vlax-invoke
+            (list doc 'CopyObjects (list src) dbxBlocks)))
+
+        (cond
+
+          ((vl-catch-all-error-p cp)
+           (setq res (list 'ERROR
+                       (vl-catch-all-error-message cp))))
+
+          (T
+           (setq dbxDef
+             (vl-catch-all-apply 'vla-Item (list dbxBlocks oldName)))
+
+           (cond
+
+             ((or (null dbxDef) (vl-catch-all-error-p dbxDef))
+              (setq res (list 'ERROR
+                          "копия определения не появилась в промежуточном документе")))
+
+             (T
+              ;; 2. Переименование ТОЛЬКО в промежуточном документе:
+              ;;    определение чертежа ещё не тронуто.
+              (setq rn
+                (vl-catch-all-apply 'vla-put-Name (list dbxDef newName)))
+
+              (cond
+
+                ((vl-catch-all-error-p rn)
+                 (setq res
+                   (list 'ERROR
+                     (strcat "переименование копии: "
+                             (vl-catch-all-error-message rn)))))
+
+                (T
+                 ;; 3. Обратно в чертёж - уже под новым именем.
+                 (setq cp
+                   (vl-catch-all-apply 'vlax-invoke
+                     (list dbx 'CopyObjects (list dbxDef) blocks)))
+
+                 (cond
+
+                   ((vl-catch-all-error-p cp)
+                    (setq res (list 'ERROR
+                                (vl-catch-all-error-message cp))))
+
+                   ((not (tblsearch "BLOCK" newName))
+                    (setq res (list 'ERROR
+                                "новое определение не появилось в чертеже")))
+
+                   (T
+                    (setq res (list 'OK newName))))
+                )
+              )
+             )
+           )
           )
         )
-        (entmake (list '(0 . "ENDBLK")
-                       '(100 . "AcDbEntity")
-                       '(100 . "AcDbBlockEnd")))
-        (list 'OK total failed))
+       )
      )
-    )
+
+     (if (= (type dbx) 'VLA-OBJECT)
+       (vl-catch-all-apply 'vlax-release-object (list dbx)))
+
+     res)
   )
 )
 
-;; Вставка копии в точку. source - путь к DWG или имя определения.
-;; fromFile=T: определение пришло из файла, его надо переименовать.
-;; Возвращает (OK имя) | (ERROR "причина").
-(defun blockrename-insert-copy
-       (source newName insPt fromFile / acad doc blocks ms cell obj
-        effName blkDef)
+;; Вставка ссылки на определение в точку.
+;; Возвращает (OK вставка динамическая) | (ERROR "причина").
+(defun blockrename-insert-reference
+       (defName insPt / acad doc ms cell obj dyn)
 
   (setq acad (vlax-get-acad-object))
   (setq doc (vla-get-ActiveDocument acad))
-  (setq blocks (vla-get-Blocks doc))
   (setq ms (vla-get-ModelSpace doc))
 
   (setq cell
     (ex-safe-call 'vla-InsertBlock
-      (list ms (vlax-3d-point insPt) source 1.0 1.0 1.0 0.0)))
+      (list ms (vlax-3d-point insPt) defName 1.0 1.0 1.0 0.0)))
 
   (cond
     ((not (ex-safe-ok-p cell))
@@ -896,33 +867,14 @@
 
     (T
      (setq obj (ex-safe-value cell))
-
-     (if fromFile
-       (progn
-         (setq effName (vl-catch-all-apply 'vla-get-EffectiveName (list obj)))
-         (if (vl-catch-all-error-p effName) (setq effName nil))
-         (if (and effName
-                  (/= effName newName)
-                  (not (tblsearch "BLOCK" newName)))
-           (progn
-             (setq blkDef (vl-catch-all-apply 'vla-Item (list blocks effName)))
-             (if (and (not (vl-catch-all-error-p blkDef)) blkDef)
-               (vl-catch-all-apply 'vla-put-Name (list blkDef newName))
-             )
-           )
-         )
-       )
-     )
-
-     (if (tblsearch "BLOCK" newName)
-       (list 'OK newName)
-       (list 'ERROR "определение с новым именем не появилось"))
-    )
+     (setq dyn (vl-catch-all-apply 'vla-get-IsDynamicBlock (list obj)))
+     (if (vl-catch-all-error-p dyn) (setq dyn nil))
+     (list 'OK obj (if dyn T nil)))
   )
 )
 
 (defun blockrename-copy-block
-       (old-name / new-name insPt uDoc dir tempFile attempt res clone msg)
+       (old-name / new-name insPt uDoc res cell dyn)
 
   (cond
 
@@ -950,68 +902,60 @@
 
        (T
         (setq uDoc (tu-undo-begin))
-        (setq res (list 'ERROR "копия не создана"))
 
-        ;; 1. Штатный путь: WBLOCK определения во временный файл.
-        (setq dir (blockrename-writable-dir))
-        (if (null dir)
-          (setq attempt (list 'ERROR "нет каталога, доступного для записи"))
-          (progn
-            (setq tempFile (blockrename-temp-name dir))
-            (setq attempt (blockrename-wblock old-name tempFile))
-          )
-        )
+        ;; 1. Копия определения под новым именем.
+        (setq res (blockrename-copy-definition old-name new-name))
 
         (cond
 
-          ;; 2. WBLOCK сработал: вставляем из файла и переименовываем.
-          ((ex-safe-ok-p attempt)
-           (setq res (blockrename-insert-copy
-                       (ex-safe-value attempt) new-name insPt T)))
-
-          ;; 3. WBLOCK не сработал: копия напрямую, без динамики.
-          (T
-           (setq msg (ex-safe-message attempt))
-           (princ (strcat "\n[BLOCKCOPY] WBLOCK не сработал: " msg))
-           (setq clone (blockrename-clone-block old-name new-name))
-           (cond
-             ((ex-safe-ok-p clone)
-              (princ (strcat "\n[BLOCKCOPY] копия построена напрямую: объектов "
-                             (itoa (cadr clone))
-                             (if (> (caddr clone) 0)
-                               (strcat ", не перенесено " (itoa (caddr clone)))
-                               "")
-                             "; динамические свойства не перенесены."))
-              (setq res (blockrename-insert-copy
-                          new-name new-name insPt nil)))
-             (T
-              (setq res (list 'ERROR (ex-safe-message clone)))))
-          )
-        )
-
-        ;; 4. Временный файл больше не нужен.
-        (if (and tempFile (findfile tempFile))
-          (vl-file-delete tempFile)
-        )
-
-        ;; 5. Итог.
-        (cond
-          ((ex-safe-ok-p res)
-           (setq *BLOCKRENAME-ALL* (blockrename-all-names))
-           (blockrename-sticky-add new-name)
-           (setq *BLOCKRENAME-SELECTED* new-name)
-           (princ (strcat "\nСоздана копия: \"" old-name "\" -> \""
-                          new-name "\""))
-           T)
-
-          (T
-           (alert (strcat "Не удалось создать копию блока \"" old-name "\".\n"
+          ((not (ex-safe-ok-p res))
+           (princ (strcat "\n[BLOCKCOPY] " (ex-safe-message res)))
+           (alert (strcat "Копия блока \"" old-name "\" не создана.\n"
                           (ex-safe-message res)))
+           (tu-undo-end uDoc)
            nil)
-        )
 
-        (tu-undo-end uDoc)
-        (if (ex-safe-ok-p res) T nil)
+          (T
+           ;; 2. Ссылка на копию в указанной точке.
+           (setq cell (blockrename-insert-reference new-name insPt))
+
+           (cond
+
+             ((not (ex-safe-ok-p cell))
+              (princ (strcat "\n[BLOCKCOPY] " (ex-safe-message cell)))
+              (alert (strcat "Копия блока \"" old-name "\" не вставлена.\n"
+                             (ex-safe-message cell)))
+              (tu-undo-end uDoc)
+              nil)
+
+             (T
+              (setq dyn (caddr cell))
+
+              ;; 3. Исходное определение обязано остаться на месте.
+              (if (tblsearch "BLOCK" old-name)
+                (progn
+                  (setq *BLOCKRENAME-ALL* (blockrename-all-names))
+                  (blockrename-sticky-add new-name)
+                  (setq *BLOCKRENAME-SELECTED* new-name)
+                  (princ (strcat "\nСоздана копия: \"" old-name "\" -> \""
+                                 new-name "\" (" (if dyn "динамический" "статический")
+                                 ")"))
+                  (if (not dyn)
+                    (princ (strcat "\n[BLOCKCOPY] внимание: определение "
+                                   "скопировано без параметров динамики")))
+                  (setq res T))
+                (progn
+                  (princ (strcat "\n[BLOCKCOPY] ИСХОДНОЕ определение \""
+                                 old-name "\" исчезло из чертежа"))
+                  (alert (strcat "Исходный блок \"" old-name
+                                 "\" пропал из чертежа.\nОтмените операцию: U"))
+                  (setq res nil)))
+
+              (tu-undo-end uDoc)
+              res)
+           )
+          )
+        )
        )
      )
     )
@@ -1297,9 +1241,9 @@
 ;; ЗАВЕРШЕНИЕ
 ;; ============================================================
 
-;; BLOCKRENAME.LSP загружен (ред. 3: копия блока через проверенный каталог + прямой клон). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ
+;; BLOCKRENAME.LSP загружен (ред. 4: копия определения через ObjectDBX, без WBLOCK). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "BLOCKRENAME" '(
-      ("BLOCKCOPY / КОПИЯБЛОКА" "копия блока (панель «Блоки»)" "3")
+      ("BLOCKCOPY / КОПИЯБЛОКА" "копия блока (панель «Блоки»)" "4")
        ("BLOCKRENAME / ПЕРЕИМЕНОВАТЬ" "переименование блока" "2"))))
 (princ)

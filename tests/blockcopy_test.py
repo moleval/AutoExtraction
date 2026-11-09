@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
 """BLOCKCOPY / КОПИЯБЛОКА: порт логики копирования блока.
 
-Проверяет контракт blockrename-copy-block (Extraction/blockrename.lsp):
+Проверяет контракт ред. 4 (Extraction/blockrename.lsp):
 
- 1. каталог для временного файла выбирается по факту записи:
-    TEMPPREFIX -> TEMP -> TMP -> папка чертежа -> Мои документы;
- 2. WBLOCK считается успешным только при файле ненулевого размера;
- 3. если WBLOCK не сработал, копия строится напрямую клоном определения,
-    а причина печатается, а не пропадает;
- 4. entmake-клон не переносит дескриптор, владельца, словари и XDATA.
+ 1. копируется ОПРЕДЕЛЕНИЕ блока через промежуточный документ ObjectDBX:
+    переименование делается там, до возврата в чертёж;
+ 2. исходное определение не переименовывается и не удаляется;
+ 3. копия вставляется ссылкой на новое определение, а не файлом и не
+    вложением исходного блока;
+ 4. WBLOCK не используется: он пишет вставку, а не определение, и даёт
+    обёртку-«муляж»;
+ 5. результат сообщает, динамическая копия или нет.
 
-Порт держится за исходник: список кодов для клона и точка отсечения
-XDATA вычитываются прямо из .lsp, поэтому правка кода без правки теста
-даёт расхождение.
-
-Почему появился: пользователь получил «Не удалось создать временный файл
-для блока "Козырёк Кз-2"» без причины - старый код игнорировал результат
--WBLOCK и проверял только findfile.
+Почему появился (ред. 4): пользователь получил копию, которая оказалась
+вложенной (WBLOCK -> INSERT создал обёртку), а исходный блок при этом
+потерял имя — переименование шло по vla-get-EffectiveName, который у
+динамического блока возвращает имя динамического блока, то есть имя
+ИСХОДНОГО определения.
 """
 from __future__ import annotations
 
@@ -44,9 +44,6 @@ def expect(name: str, condition: bool, detail: str = "") -> None:
         FAILURES.append(f"{name}: {detail}" if detail else name)
 
 
-# ---------------------------------------------------------------
-# Исходник: коды, которые вырезает клон
-# ---------------------------------------------------------------
 def lisp_text(path: Path) -> str:
     raw = path.read_bytes()
     try:
@@ -58,10 +55,40 @@ def lisp_text(path: Path) -> str:
 text = lisp_text(SOURCE)
 
 
+def strip_comments(src: str) -> str:
+    """Код без построчных комментариев (строковые литералы не трогаем)."""
+    out = []
+    for line in src.split("\n"):
+        kept = []
+        in_string = False
+        escaped = False
+        for ch in line:
+            if in_string:
+                kept.append(ch)
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                kept.append(ch)
+            elif ch == ";":
+                break
+            else:
+                kept.append(ch)
+        out.append("".join(kept))
+    return "\n".join(out)
+
+
+code = strip_comments(text)
+
+
 def defun_body(name: str) -> str:
-    """Тело (defun name ...) до следующей формы верхнего уровня."""
-    pattern = re.compile(r"\(defun\s+" + re.escape(name) + r"[\s(]")
-    found = pattern.search(text)
+    """Тело (defun name ...) до закрывающей скобки формы."""
+    found = re.search(r"\(defun\s+" + re.escape(name) + r"[\s(]", text)
     if not found:
         return ""
     start = found.start()
@@ -96,119 +123,125 @@ def defun_body(name: str) -> str:
     return text[start:]
 
 
-clone_body = defun_body("blockrename-clone-data")
-match = re.search(r"'\(([\d\s]+)\)", clone_body)
-dropped = {int(code) for code in match.group(1).split()} if match else set()
-stop_match = re.search(r"\(= \(car pair\) (\d+)\)", clone_body)
-stop_code = int(stop_match.group(1)) if stop_match else -1
-
-expect("коды клона читаются из исходника", bool(dropped), "не найден список кодов")
-expect("точка отсечения XDATA читается из исходника", stop_code > 0, "не найден код 1001")
+copy_block = defun_body("blockrename-copy-block")
+copy_def = defun_body("blockrename-copy-definition")
+insert_ref = defun_body("blockrename-insert-reference")
 
 # ---------------------------------------------------------------
-# Порт 1: выбор каталога
+# Порт 1: генерация имени копии
 # ---------------------------------------------------------------
-def pick_dir(candidates: list[str], writable: set[str]) -> str | None:
-    for candidate in candidates:
-        if not candidate:
-            continue
-        if candidate in writable:
-            return candidate
-    return None
+def unique_name(base: str, existing: set[str]) -> str:
+    n = 1
+    while f"{base}_{n}" in existing:
+        n += 1
+    return f"{base}_{n}"
 
 
-cands = ["", "Z:\\нет-такого\\", "C:\\Temp\\", "C:\\Чертёж\\"]
-expect("пустой кандидат пропускается",
-       pick_dir(cands, {"C:\\Temp\\", "C:\\Чертёж\\"}) == "C:\\Temp\\")
-expect("нерабочий TEMPPREFIX пропускается",
-       pick_dir(cands, {"C:\\Чертёж\\"}) == "C:\\Чертёж\\")
-expect("нет ни одного рабочего каталога",
-       pick_dir(cands, set()) is None)
+expect("свежее имя - _1", unique_name("Козырёк Кз-2", set()) == "Козырёк Кз-2_1")
+expect("занятое имя обходится",
+       unique_name("Козырёк Кз-2", {"Козырёк Кз-2_1"}) == "Козырёк Кз-2_2")
+expect("несколько занятых подряд",
+       unique_name("Б", {"Б_1", "Б_2", "Б_3"}) == "Б_4")
 
 # ---------------------------------------------------------------
-# Порт 2: классификация результата WBLOCK
+# Порт 2: порядок операций копирования определения
 # ---------------------------------------------------------------
-def wblock_result(exists: bool, size: int, error: str | None) -> tuple[str, str]:
-    if exists and size > 0:
-        return ("OK", "ok")
-    if error:
-        return ("ERROR", error)
-    return ("ERROR", "файл не создан")
+def copy_steps(has_dbx: bool, src_ok: bool, rename_ok: bool,
+               back_ok: bool) -> tuple[str, str]:
+    if not has_dbx:
+        return ("ERROR", "ObjectDBX недоступен")
+    if not src_ok:
+        return ("ERROR", "не открыто определение")
+    if not rename_ok:
+        return ("ERROR", "переименование копии")
+    if not back_ok:
+        return ("ERROR", "новое определение не появилось")
+    return ("OK", "копия")
 
 
-expect("WBLOCK с файлом ненулевого размера - успех",
-       wblock_result(True, 2048, None)[0] == "OK")
-expect("пустой файл после сбойной команды - не успех",
-       wblock_result(True, 0, "Function cancelled")[0] == "ERROR")
-expect("причина из команды доходит до вызывающего",
-       wblock_result(False, 0, "Неверное имя файла")[1] == "Неверное имя файла")
-expect("без ошибки команды причина называет файл",
-       "файл не создан" in wblock_result(False, 0, None)[1])
-
-# ---------------------------------------------------------------
-# Порт 3: фильтр данных для entmake-клона
-# ---------------------------------------------------------------
-def clone_data(data: list[tuple[int, object]]) -> list[tuple[int, object]]:
-    out: list[tuple[int, object]] = []
-    stop = False
-    for pair in data:
-        code = pair[0]
-        if stop:
-            continue
-        if code == stop_code:
-            stop = True
-            continue
-        if code in dropped:
-            continue
-        out.append(pair)
-    return out
-
-
-sample = [
-    (0, "INSERT"), (5, "2A7"), (330, "1F"), (100, "AcDbEntity"),
-    (8, "0"), (100, "AcDbBlockReference"), (2, "Козырёк Кз-2"),
-    (10, (0.0, 0.0, 0.0)), (360, "2B1"), (102, "{ACAD_XDICTIONARY"),
-    (1001, "PLUGIN"), (1000, "данные"),
-]
-result = clone_data(sample)
-codes = [code for code, _ in result]
-expect("дескриптор объекта не переносится", 5 not in codes)
-expect("владелец не переносится", 330 not in codes)
-expect("словарь не переносится", 102 not in codes and 360 not in codes)
-expect("XDATA обрезается целиком", 1001 not in codes and 1000 not in codes)
-expect("тип и слой объекта сохранены", 0 in codes and 8 in codes)
-expect("подклассы AcDb сохранены", codes.count(100) == 2)
-expect("имя вложенного блока сохранено", (2, "Козырёк Кз-2") in result)
+expect("полный успех", copy_steps(True, True, True, True)[0] == "OK")
+expect("без ObjectDBX копии нет",
+       copy_steps(False, True, True, True) ==
+       ("ERROR", "ObjectDBX недоступен"))
+expect("сбой переименования в промежуточном документе отменяет возврат",
+       copy_steps(True, True, False, True)[0] == "ERROR")
+expect("сбой возврата в чертёж - ошибка, а не молчание",
+       copy_steps(True, True, True, False)[0] == "ERROR")
 
 # ---------------------------------------------------------------
-# Связь порта с кодом
+# Порт 3: опознание динамической копии
 # ---------------------------------------------------------------
-copy_body = defun_body("blockrename-copy-block")
+def report_kind(is_dynamic: bool) -> str:
+    return "динамический" if is_dynamic else "статический"
 
-expect("каталог выбирается проверкой записи",
-       "ae_probe_" in defun_body("blockrename-writable-dir"),
-       "в blockrename-writable-dir нет пробного файла")
-expect("WBLOCK идёт через command-s с резервом command",
-       "command-s" in defun_body("blockrename-wblock"),
-       "в blockrename-wblock нет command-s")
-expect("размер файла проверяется, а не только findfile",
-       "vl-file-size" in defun_body("blockrename-wblock"),
-       "в blockrename-wblock нет vl-file-size")
-expect("при сбое WBLOCK строится прямой клон",
-       "blockrename-clone-block old-name new-name" in copy_body,
-       "blockrename-copy-block не зовёт blockrename-clone-block")
-expect("причина сбоя печатается в командную строку",
-       "WBLOCK не сработал" in copy_body,
-       "нет сообщения о причине сбоя WBLOCK")
-expect("в диалоге сбоя есть причина",
-       "(ex-safe-message res)" in copy_body,
-       "alert не показывает причину")
-expect("временный файл удаляется после копирования",
-       "vl-file-delete tempFile" in copy_body,
-       "нет удаления временного файла")
+
+expect("динамическая копия называется динамической",
+       report_kind(True) == "динамический")
+expect("статическая копия называется статической",
+       report_kind(False) == "статический")
+
+# ---------------------------------------------------------------
+# Связь порта с исходником
+# ---------------------------------------------------------------
+expect("WBLOCK больше не используется",
+       "WBLOCK" not in code.upper(),
+       "в модуле остался WBLOCK - он пишет вставку, а не определение")
+expect("временные файлы не создаются",
+       "vl-filename-mktemp" not in code,
+       "осталось создание временного файла")
+copy_path = copy_block + copy_def + insert_ref
+expect("в пути копирования нет EffectiveName",
+       "EffectiveName" not in copy_path,
+       "EffectiveName динамического блока = имя исходного определения")
+expect("используется промежуточный документ ObjectDBX",
+       "objectdbx.axdbdocument" in text,
+       "нет строки ProgID ObjectDBX")
+expect("ProgID собирается по версии AutoCAD",
+       "(itoa vrs)" in text or "(itoa (atoi" in text,
+       "ProgID не учитывает версию")
+
+expect("определение копируется из Blocks чертежа",
+       "(list doc 'CopyObjects (list src) dbxBlocks)" in copy_def,
+       "нет копирования определения в промежуточный документ")
+expect("переименование идёт в промежуточном документе",
+       "(list dbxDef newName)" in copy_def,
+       "переименование адресовано не копии в ObjectDBX")
+expect("переименовывается только объект промежуточного документа",
+       copy_def.count("vla-put-Name") == 1,
+       "в копировании больше одного переименования")
+expect("переименование стоит ДО возврата в чертёж",
+       copy_def.find("(list dbxDef newName)") <
+       copy_def.find("(list dbx 'CopyObjects (list dbxDef) blocks)"),
+       "переименование после возврата - снова риск задеть исходник")
+expect("определение возвращается в Blocks чертежа",
+       "(list dbx 'CopyObjects (list dbxDef) blocks)" in copy_def,
+       "нет возврата определения")
+expect("проверяется, что новое имя появилось",
+       "(tblsearch \"BLOCK\" newName)" in copy_def,
+       "нет проверки результата копирования")
+expect("промежуточный документ освобождается",
+       "vlax-release-object" in copy_def,
+       "утечка ObjectDBX-документа")
+
+expect("ссылка вставляется по имени определения",
+       "defName 1.0 1.0 1.0 0.0" in insert_ref,
+       "вставка идёт не по имени определения")
+expect("динамика вставки проверяется",
+       "IsDynamicBlock" in insert_ref,
+       "нет проверки vla-get-IsDynamicBlock")
+
+expect("исходное определение проверяется после копии",
+       "(tblsearch \"BLOCK\" old-name)" in copy_block,
+       "нет проверки, что исходный блок остался")
+expect("о потере исходного блока сообщается",
+       "исчезло из чертежа" in copy_block,
+       "нет сообщения о пропаже исходного определения")
 expect("копия входит в одну группу UNDO",
-       "tu-undo-begin" in copy_body and "tu-undo-end" in copy_body,
+       "tu-undo-begin" in copy_block and "tu-undo-end" in copy_block,
        "нет undo-группы")
+expect("сбой копирования не оставляет молчания",
+       "не создана" in copy_block,
+       "нет сообщения о сбое")
 
 # ---------------------------------------------------------------
 if FAILURES:
@@ -218,7 +251,7 @@ if FAILURES:
     print(f"PASS: {PASS}, FAIL: {FAIL}")
     raise SystemExit(1)
 
-print("каталог: проверка записи; WBLOCK: command-s и размер файла")
-print("сбой WBLOCK: прямой клон + причина в логе")
+print("копия: определение через ObjectDBX, переименование до возврата")
+print("исходный блок не переименовывается; WBLOCK не используется")
 print(f"PASS: {PASS}, FAIL: {FAIL}")
 print("[BLOCKCOPY][OK]")
