@@ -2321,6 +2321,23 @@ def check_search_same() -> list[str]:
         if keep not in text:
             errors.append(f"Extraction/searchattvis.lsp: пропала существующая часть {keep}")
 
+    # Тишина в командной строке. Команда, возвращающая selection set,
+    # заставляет AutoCAD печатать его как "<Selection set: 9d>" сразу после
+    # сообщения - строка нечитаемая и выглядит как мусор. Завершающая (princ)
+    # возвращает nil, и эхо пропадает; сам набор остаётся в *ae-sv-same-result*.
+    for name in ("c:ПОИСКИДВИД", "c:SEARCHSAMEVIS", "c:ПОИСКИДАТР", "c:SEARCHSAMEATTR"):
+        body = (_defun_body(text, name) or "").rstrip()
+        inner = body[:-1].rstrip() if body.endswith(")") else body
+        if not inner.endswith("(princ)"):
+            errors.append(
+                f"Extraction/searchattvis.lsp: {name} не заканчивается (princ) - "
+                "AutoCAD напечатает <Selection set: ...> в командной строке")
+
+    if run is not None and "*ae-sv-same-result*" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: набор не кладётся в *ae-sv-same-result* - "
+            "после (princ) команда не сможет отдать результат")
+
     return errors
 
 

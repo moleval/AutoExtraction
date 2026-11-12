@@ -82,12 +82,17 @@
 
 ;; ---------- служебное: запуск команды и проверки ----------
 
-;; Образец кладётся в подразумеваемое выделение, команда вызывается как функция
-(defun sst-run (cmd en / res)
+;; Образец кладётся в подразумеваемое выделение, команда вызывается как функция.
+;; Результат берём из *ae-sv-same-result*: команды заканчиваются (princ), чтобы
+;; AutoCAD не печатал <Selection set: ...> в командной строке, и потому сами
+;; набор не возвращают. Возврат функции оставлен запасным путём для старой загрузки.
+(defun sst-run (cmd en / res out)
+  (setq *ae-sv-same-result* nil)
   (sssetfirst nil (ssadd en))
   (setq res (vl-catch-all-apply cmd '()))
+  (setq out (if (= (type res) 'PICKSET) res *ae-sv-same-result*))
   (sssetfirst nil nil)
-  (if (vl-catch-all-error-p res) nil res)
+  (if (vl-catch-all-error-p res) nil out)
 )
 
 (defun sst-count (ss)

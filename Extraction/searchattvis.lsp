@@ -1,7 +1,8 @@
 ;;; ============================================================
 ;;; Extraction/searchattvis.lsp Ч поиск по атрибутам и видимост€м блоков
 ;;;  оманды: ѕќ»— ј“– (режим Ђјтрибутыї), ѕќ»— ¬»ƒ (режим Ђ¬идимость блокаї),
-;;; ѕќ»— —ѕ»—ќ  (без окна: перечень в командной строке)
+;;; ѕќ»— —ѕ»—ќ  (без окна: перечень в командной строке),
+;;; ѕќ»— »ƒ¬»ƒ / ѕќ»— »ƒј“– (без окна: выделить идентичные вставки)
 ;;; ќкно: Extraction/searchattvis.dcl Ч одно на обе команды.
 ;;;
 ;;; ќбласть: предварительное выделение (если есть) или весь чертЄж.
@@ -20,6 +21,7 @@
 (setq *ae-sv-entries* nil)     ; записи окна: (блок лейбл en)
 (setq *ae-sv-rows1* nil)       ; список блоков: (блок . вставки)
 (setq *ae-sv-rows2* nil)       ; список атрибутов/видимостей: (лейбл . вставки)
+(setq *ae-sv-same-result* nil)  ; набор последнего ѕќ»— »ƒ¬»ƒ / ѕќ»— »ƒј“–
 
 ;; ============================================================
 ;; —троки
@@ -1788,8 +1790,12 @@
 ;;
 ;;  оманды не открывают диалог и не мен€ют чертЄж: берут текущее
 ;; выделение (или прос€т один блок), сравнивают записи ae-sv-collect
-;; и выдел€ют совпадени€ через sssetfirst. ¬озвращают selection set Ч
-;; можно звать из LISP: (c:ѕќ»— »ƒ¬»ƒ).
+;; и выдел€ют совпадени€ через sssetfirst.
+;;
+;;  оманды заканчиваютс€ (princ): иначе AutoCAD печатает возвращЄнный
+;; набор в командной строке как <Selection set: 9d> Ч строку, которую
+;; нельз€ прочитать. Ќабор остаЄтс€ в *ae-sv-same-result*, а движок
+;; ae-sv-same-run по-прежнему возвращает его напр€мую.
 ;;
 ;; √лобальные переменные модул€ (*ae-sv-inserts*, *ae-sv-rows* и т.п.)
 ;; не трогаютс€: всЄ в локальных переменных, окно ѕќ»— ј“–/ѕќ»— ¬»ƒ
@@ -1915,8 +1921,34 @@
   (reverse out)
 )
 
+;; —писок строк в одну строку через зап€тую
+(defun ae-sv-same-join (lst / out)
+  (setq out "")
+  (foreach x lst
+    (setq out (if (= out "") x (strcat out ", " x))))
+  out
+)
+
+;; „итаема€ строка об образце: команда, блок, слой и что сравниваетс€.
+;; ѕечатаетс€ перед итогом, чтобы было видно, по какому блоку идЄт поиск.
+(defun ae-sv-same-sample (kind ref / vals)
+  (setq vals
+    (if (= kind "vis")
+      (mapcar '(lambda (x) (strcat "\"" x "\"")) (nth 4 ref))
+      '()))
+  (strcat "\n[SEARCHATTVIS] "
+          (if (= kind "vis") "ѕќ»— »ƒ¬»ƒ" "ѕќ»— »ƒј“–")
+          ": блок \"" (ae-sv-nz (nth 1 ref)) "\""
+          ", слой \"" (ae-sv-nz (nth 6 ref)) "\""
+          (if (= kind "vis")
+            (strcat ", видимость " (if vals (ae-sv-same-join vals) "\"\""))
+            (strcat ", атрибутов " (itoa (length (nth 3 ref)))))
+          ".")
+)
+
 ;; ќбщий движок команд. ¬озвращает selection set или nil.
 (defun ae-sv-same-run (kind / en ref recs ss sel-n skipped ename)
+  (setq *ae-sv-same-result* nil)
   (setq en (ae-sv-same-source))
   (if (null en)
     nil
@@ -1955,42 +1987,65 @@
 
          (cond
            ((= sel-n 0)
-            (princ "\n—овпадений нет.")
+            (princ (strcat "\n[SEARCHATTVIS] —овпадений нет"
+                           (if (> skipped 0)
+                             (strcat " Ч все похожие вставки на пропущенных сло€х: "
+                                     (itoa skipped))
+                             "")
+                           ".\n"))
             nil)
 
            ;; —овпал только сам образец: выдел€ем его, набор возвращаем
            ((and (= sel-n 1) (eq (ssname ss 0) en))
             (sssetfirst nil ss)
-            (princ (strcat "\n[SEARCHATTVIS] ѕохожих блоков нет Ч найден только исходный"
+            (princ (ae-sv-same-sample kind ref))
+            (princ (strcat "\n[SEARCHATTVIS] ѕохожих блоков нет Ч выделен только исходный"
                            (if (> skipped 0)
                              (strcat " (пропущено на сло€х: " (itoa skipped) ")")
-                             "")))
+                             "")
+                           ".\n"))
+            (setq *ae-sv-same-result* ss)
             ss)
 
            (T
             (sssetfirst nil ss)
-            (princ (strcat "\n[SEARCHATTVIS] Ќайдено " (itoa sel-n)
+            (princ (ae-sv-same-sample kind ref))
+            (princ (strcat "\n[SEARCHATTVIS] Ќайдено " (itoa (+ sel-n skipped))
                            " идентичных по "
                            (if (= kind "vis") "видимости" "атрибутам")
+                           ": выделено " (itoa sel-n)
                            (if (> skipped 0)
-                             (strcat " (пропущено на сло€х: " (itoa skipped) ")")
-                             "")))
+                             (strcat ", пропущено на сло€х " (itoa skipped))
+                             "")
+                           ".\n"))
+            (setq *ae-sv-same-result* ss)
             ss))))))
 )
 
-;; »дентичные по видимости: тот же блок и то же состо€ние видимости
+;; »дентичные по видимости: тот же блок и то же состо€ние видимости.
+;; ѕоследн€€ форма Ч (princ): без неЄ AutoCAD печатает возвращЄнный набор
+;; в командной строке как <Selection set: 9d>.
+;; Ќабор Ч в *ae-sv-same-result*, из LISP Ч (ae-sv-same-run "vis").
 (defun c:ѕќ»— »ƒ¬»ƒ ()
   (ae-sv-same-run "vis")
+  (princ)
 )
 
-(defun c:SEARCHSAMEVIS () (c:ѕќ»— »ƒ¬»ƒ))
+(defun c:SEARCHSAMEVIS ()
+  (c:ѕќ»— »ƒ¬»ƒ)
+  (princ)
+)
 
 ;; »дентичные по атрибутам: тот же блок, те же теги и значени€
 (defun c:ѕќ»— »ƒј“– ()
   (ae-sv-same-run "attr")
+  (princ)
 )
 
-(defun c:SEARCHSAMEATTR () (c:ѕќ»— »ƒј“–))
+(defun c:SEARCHSAMEATTR ()
+  (c:ѕќ»— »ƒј“–)
+  (princ)
+)
 
 ; “аблица команд: при ручной загрузке печатаетс€ сразу; при RELOAD
 ;; (тиха€ загрузка) строки регистрируютс€, а таблицу печатает RELOAD.
@@ -2000,8 +2055,8 @@
         ("SEARCHBLOCK / ѕќ»— ЅЋќ " "поиск блоков: все блоки или выборка (Ѕлок, «начение)" "3")
         ("SEARCHATTR / ѕќ»— ј“–" "поиск блоков по атрибутам (окно)" "3")
         ("SEARCHVIS / ѕќ»— ¬»ƒ" "поиск блоков по видимост€м (окно)" "3")
-        ("SEARCHSAMEVIS / ѕќ»— »ƒ¬»ƒ" "выделить блоки с той же видимостью" "4")
-        ("SEARCHSAMEATTR / ѕќ»— »ƒј“–" "выделить блоки с теми же атрибутами" "4")))
+        ("SEARCHSAMEVIS / ѕќ»— »ƒ¬»ƒ" "выделить блоки с той же видимостью" "5")
+        ("SEARCHSAMEATTR / ѕќ»— »ƒј“–" "выделить блоки с теми же атрибутами" "5")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
@@ -2009,4 +2064,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP Ч ред. 4: добавлены ѕќ»— »ƒ¬»ƒ (SEARCHSAMEVIS) и ѕќ»— »ƒј“– (SEARCHSAMEATTR) Ч выделение идентичных вставок без окна.  оманды: ѕќ»— ЅЋќ , ѕќ»— ј“–, ѕќ»— ¬»ƒ, ѕќ»— —ѕ»—ќ , ѕќ»— »ƒ¬»ƒ, ѕќ»— »ƒј“–.
+;; SEARCHATTVIS.LSP Ч ред. 5: ѕќ»— »ƒ¬»ƒ (SEARCHSAMEVIS) и ѕќ»— »ƒј“– (SEARCHSAMEATTR) печатают образец и итог человеческим текстом и выход€т через (princ), без <Selection set: Е> в командной строке.  оманды: ѕќ»— ЅЋќ , ѕќ»— ј“–, ѕќ»— ¬»ƒ, ѕќ»— —ѕ»—ќ , ѕќ»— »ƒ¬»ƒ, ѕќ»— »ƒј“–.
