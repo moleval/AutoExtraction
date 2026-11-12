@@ -2210,6 +2210,120 @@ def check_search_count() -> list[str]:
     return errors
 
 
+def check_search_same() -> list[str]:
+    """Идентичные блоки: ПОИСКИДВИД / ПОИСКИДАТР в searchattvis.lsp.
+
+    Инварианты:
+    1. команды и их английские алиасы определены;
+    2. образец берётся из текущего выделения, а не из окна;
+    3. кандидаты идут через общий обход модели и общий фильтр слоёв,
+       исходный блок в результате остаётся всегда;
+    4. видимость сравнивается позиционно, атрибуты — по набору тегов;
+    5. окно существующих команд и чужие префиксы не затронуты.
+    """
+    sv = ROOT / "Extraction/searchattvis.lsp"
+    if not sv.exists():
+        return ["Extraction/searchattvis.lsp: нет модуля поиска блоков"]
+    text = read_text(sv)
+    errors: list[str] = []
+
+    # Определения ищутся разбором форм: подстрока "(defun c:X" совпала бы
+    # и с "(defun c:X-TMP" - ровно так мутация проходила незамеченной.
+    for name, what in (
+        ("c:ПОИСКИДВИД", "нет команды ПОИСКИДВИД"),
+        ("c:SEARCHSAMEVIS", "нет алиаса SEARCHSAMEVIS"),
+        ("c:ПОИСКИДАТР", "нет команды ПОИСКИДАТР"),
+        ("c:SEARCHSAMEATTR", "нет алиаса SEARCHSAMEATTR"),
+        ("ae-sv-same-run", "нет общего движка ae-sv-same-run"),
+        ("ae-sv-same-source", "нет получения образца"),
+        ("ae-sv-same-vis-p", "нет сравнения видимости"),
+        ("ae-sv-same-attr-p", "нет сравнения атрибутов"),
+    ):
+        if _defun_body(text, name) is None:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+
+    source = _defun_body(text, "ae-sv-same-source") or ""
+    if '(ssget "_I")' not in source:
+        errors.append(
+            "Extraction/searchattvis.lsp: образец не берётся из текущего выделения")
+    if "ssgetfirst" not in source.lower():
+        errors.append(
+            "Extraction/searchattvis.lsp: не читается gripped-набор (ssgetfirst)")
+
+    ens = _defun_body(text, "ae-sv-same-ens") or ""
+    if "ae-sv-all-model-inserts" not in ens:
+        errors.append(
+            "Extraction/searchattvis.lsp: нет обхода пространства модели")
+    if "ae-sv-same-quick-name" not in ens:
+        errors.append(
+            "Extraction/searchattvis.lsp: нет быстрого отбора по имени")
+
+    run_src = _defun_body(text, "ae-sv-same-run") or ""
+    if "vl-some" not in run_src:
+        errors.append(
+            "Extraction/searchattvis.lsp: образец не добавляется в список принудительно - "
+            "вставка вне обхода модели выпадет из результата")
+    if "ae-sv-layer-skip-p" not in run_src:
+        errors.append(
+            "Extraction/searchattvis.lsp: слои не фильтруются общим правилом")
+    if "sssetfirst" not in run_src.lower():
+        errors.append(
+            "Extraction/searchattvis.lsp: нет выделения результата (sssetfirst)")
+
+    for need, what in (
+        ('"SEARCHSAMEVIS / ПОИСКИДВИД"', "нет строки баннера ПОИСКИДВИД"),
+        ('"SEARCHSAMEATTR / ПОИСКИДАТР"', "нет строки баннера ПОИСКИДАТР"),
+        ("У блока нет параметра видимости", "нет сообщения об отсутствии видимости"),
+        ("У блока нет атрибутов", "нет сообщения об отсутствии атрибутов"),
+        ("Похожих блоков нет", "нет сообщения «найден только исходный»"),
+        ("Совпадений нет", "нет сообщения об отсутствии совпадений"),
+        ("идентичных по", "нет итоговой строки о числе найденных"),
+    ):
+        if need not in text:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+
+    low = text.lower()
+    for bad in ("zp-", "zaporno"):
+        if bad in low:
+            errors.append(
+                f"Extraction/searchattvis.lsp: остался префикс чужого проекта «{bad}»")
+
+    vis = _defun_body(text, "ae-sv-same-vis-p")
+    if vis is None:
+        errors.append("Extraction/searchattvis.lsp: не найдена форма (defun ae-sv-same-vis-p ...)")
+    else:
+        if "(car va)" not in vis or "(car vb)" not in vis:
+            errors.append(
+                "Extraction/searchattvis.lsp: видимость не сравнивается позиционно - "
+                "перестановка значений станет «совпадением»")
+        if "member" in vis:
+            errors.append(
+                "Extraction/searchattvis.lsp: видимость ищется по вхождению - "
+                "порядок значений перестал быть значимым")
+
+    attr = _defun_body(text, "ae-sv-same-attr-p")
+    if attr is None:
+        errors.append("Extraction/searchattvis.lsp: не найдена форма (defun ae-sv-same-attr-p ...)")
+    elif "assoc" not in attr:
+        errors.append(
+            "Extraction/searchattvis.lsp: атрибуты сравниваются не по тегу (нет assoc)")
+
+    run = _defun_body(text, "ae-sv-same-run")
+    if run is None:
+        errors.append("Extraction/searchattvis.lsp: не найдена форма (defun ae-sv-same-run ...)")
+    elif "eq ename en" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: исходный блок не исключён из фильтра слоёв - "
+            "на замороженном слое он пропадёт из результата")
+
+    # Окно существующих команд не переписано новыми командами.
+    for keep in ("(defun ae-sv-open", "(defun c:ПОИСКАТР", "(defun c:ПОИСКВИД"):
+        if keep not in text:
+            errors.append(f"Extraction/searchattvis.lsp: пропала существующая часть {keep}")
+
+    return errors
+
+
 def check_summary_marks() -> list[str]:
     """Колонка «Марка» в перечне изделий не меняет геометрию отчётов.
 
@@ -2438,6 +2552,7 @@ def main() -> int:
     errors += check_chkparens_plugins_guard()
     errors += check_reload_chkall_on_error()
     errors += check_chkparens_helpers()
+    errors += check_search_same()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2499,7 +2614,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / reload-chkall-on-error / chkparens-helpers"
-        f" / call-arity / xls-marks"
+        f" / search-same / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"

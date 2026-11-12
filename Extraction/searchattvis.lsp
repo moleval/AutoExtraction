@@ -1780,14 +1780,228 @@
   (princ)
 )
 
-;; Таблица команд: при ручной загрузке печатается сразу; при RELOAD
+;;; ============================================================
+;; ИДЕНТИЧНЫЕ ВСТАВКИ (без окна)
+;;
+;; ПОИСКИДВИД / SEARCHSAMEVIS — тот же блок и то же состояние видимости;
+;; ПОИСКИДАТР  / SEARCHSAMEATTR — тот же блок и те же атрибуты.
+;;
+;; Команды не открывают диалог и не меняют чертёж: берут текущее
+;; выделение (или просят один блок), сравнивают записи ae-sv-collect
+;; и выделяют совпадения через sssetfirst. Возвращают selection set —
+;; можно звать из LISP: (c:ПОИСКИДВИД).
+;;
+;; Глобальные переменные модуля (*ae-sv-inserts*, *ae-sv-rows* и т.п.)
+;; не трогаются: всё в локальных переменных, окно ПОИСКАТР/ПОИСКВИД
+;; остаётся как было.
+;; ============================================================
+
+;; Строка для сравнения: trim + без учёта регистра
+(defun ae-sv-same-norm (x)
+  (strcase (ae-sv-trim x))
+)
+
+;; Ровно один образец из текущего выделения.
+;; Порядок: ssget "_I" -> gripped/implied (ssgetfirst) -> запрос блока.
+;; Возвращает ename или nil (причина уже напечатана).
+(defun ae-sv-same-source ( / ss grips en ed)
+  (setq ss (ssget "_I"))
+  (if (null ss)
+    (progn
+      (setq grips (ssgetfirst))
+      (setq ss (car grips))
+      (if (null ss) (setq ss (cadr grips)))))
+  (if (null ss)
+    (setq ss (ssget "\nВыберите блок: " '((0 . "INSERT")))))
+  (cond
+    ((null ss)
+     (princ "\nБлок не выбран. Поиск не запущен.")
+     nil)
+    ((/= (sslength ss) 1)
+     (princ (strcat "\nВыбрано объектов: " (itoa (sslength ss))
+                    ". Нужен ровно один блок. Поиск не запущен."))
+     nil)
+    (T
+     (setq en (ssname ss 0))
+     (setq ed (entget en))
+     (cond
+       ((/= (cdr (assoc 0 ed)) "INSERT")
+        (princ "\nВыбранный объект — не блок. Поиск не запущен.")
+        nil)
+       ((= 1 (cdr (assoc 67 ed)))
+        (princ "\nБлок расположен на листе. Поиск идёт только по пространству модели.")
+        nil)
+       (T en))))
+)
+
+;; Эффективное имя вставки без чтения атрибутов и динамических свойств:
+;; быстрый отбор кандидатов на большом чертеже.
+(defun ae-sv-same-quick-name (en / vla)
+  (setq vla (vl-catch-all-apply 'vlax-ename->vla-object (list en)))
+  (if (or (null vla) (vl-catch-all-error-p vla))
+    (ae-sv-str (cdr (assoc 2 (entget en))))
+    (ae-sv-effname vla))
+)
+
+;; Одно определение блока (эффективное имя, регистр не важен)
+(defun ae-sv-same-name-p (a b)
+  (= (ae-sv-same-norm (nth 1 a)) (ae-sv-same-norm (nth 1 b)))
+)
+
+;; Значения всех параметров видимости: длины равны, порядок значим
+(defun ae-sv-same-vis-p (a b / va vb ok)
+  (setq va (nth 4 a) vb (nth 4 b))
+  (cond
+    ((and (null va) (null vb)) T)
+    ((or (null va) (null vb)) nil)
+    ((/= (length va) (length vb)) nil)
+    (T
+     (setq ok T)
+     (while (and ok va)
+       (if (/= (ae-sv-same-norm (car va)) (ae-sv-same-norm (car vb)))
+         (setq ok nil))
+       (setq va (cdr va) vb (cdr vb)))
+     ok))
+)
+
+;; Атрибуты как (норм-тег . норм-значение)
+(defun ae-sv-same-attr-norm (attrs / out a)
+  (setq out '())
+  (foreach a attrs
+    (setq out (cons (cons (ae-sv-same-norm (car a))
+                          (ae-sv-same-norm (cdr a)))
+                    out)))
+  (reverse out)
+)
+
+;; Набор атрибутов: те же теги и значения, порядок не важен,
+;; лишний или недостающий тег — не совпадение
+(defun ae-sv-same-attr-p (a b / na nb ok hit)
+  (setq na (ae-sv-same-attr-norm (nth 3 a)))
+  (setq nb (ae-sv-same-attr-norm (nth 3 b)))
+  (cond
+    ((and (null na) (null nb)) T)
+    ((or (null na) (null nb)) nil)
+    ((/= (length na) (length nb)) nil)
+    (T
+     (setq ok T)
+     (foreach x na
+       (setq hit (assoc (car x) nb))
+       (if (or (null hit) (/= (cdr x) (cdr hit)))
+         (setq ok nil)))
+     ok))
+)
+
+;; Записи вставок того же определения, подходящих по признаку kind.
+;; Признак: "vis" — значения видимости, "attr" — атрибуты.
+;; Отбор в два прохода: сначала быстрый по имени, тяжёлое чтение —
+;; только по совпавшим, поэтому большой чертёж не тормозит.
+(defun ae-sv-same-ens (ref kind / refName all names en rec out)
+  (setq refName (ae-sv-same-norm (nth 1 ref)))
+  (setq all (ae-sv-all-model-inserts))
+  (setq names '())
+  (foreach en all
+    (if (= (ae-sv-same-norm (ae-sv-same-quick-name en)) refName)
+      (setq names (cons en names))))
+  ;; имена не разрешились — читаем всё (редкий случай, не теряем совпадения)
+  (if (null names) (setq names all))
+  (setq out '())
+  (foreach rec (ae-sv-collect (reverse names))
+    (if (and (ae-sv-same-name-p rec ref)
+             (if (= kind "vis")
+               (ae-sv-same-vis-p rec ref)
+               (ae-sv-same-attr-p rec ref)))
+      (setq out (cons rec out))))
+  (reverse out)
+)
+
+;; Общий движок команд. Возвращает selection set или nil.
+(defun ae-sv-same-run (kind / en ref recs ss sel-n skipped ename)
+  (setq en (ae-sv-same-source))
+  (if (null en)
+    nil
+    (progn
+      (setq ref (car (ae-sv-collect (list en))))
+      (cond
+        ((null ref)
+         (princ "\nНе удалось прочитать данные блока. Поиск не запущен.")
+         nil)
+
+        ((and (= kind "vis") (null (nth 4 ref)))
+         (princ "\nУ блока нет параметра видимости. Поиск не запущен.")
+         nil)
+
+        ((and (= kind "attr") (null (nth 3 ref)))
+         (princ "\nУ блока нет атрибутов. Поиск не запущен.")
+         nil)
+
+        (T
+         (setq recs (ae-sv-same-ens ref kind))
+         ;; Образец обязан быть в списке даже там, где обход модели его
+         ;; не вернул (вставка внутри определения, слой и т.п.).
+         (if (not (vl-some '(lambda (r) (eq (car r) en)) recs))
+           (setq recs (cons ref recs)))
+         (setq ss (ssadd) sel-n 0 skipped 0)
+
+         ;; Слой проверяется при выдаче — как в ae-sv-finish-pick.
+         ;; Образец попадает в результат всегда, даже со своего слоя.
+         (foreach r recs
+           (setq ename (car r))
+           (if (or (eq ename en) (not (ae-sv-layer-skip-p ename)))
+             (progn
+               (ssadd ename ss)
+               (setq sel-n (1+ sel-n)))
+             (setq skipped (1+ skipped))))
+
+         (cond
+           ((= sel-n 0)
+            (princ "\nСовпадений нет.")
+            nil)
+
+           ;; Совпал только сам образец: выделяем его, набор возвращаем
+           ((and (= sel-n 1) (eq (ssname ss 0) en))
+            (sssetfirst nil ss)
+            (princ (strcat "\n[SEARCHATTVIS] Похожих блоков нет — найден только исходный"
+                           (if (> skipped 0)
+                             (strcat " (пропущено на слоях: " (itoa skipped) ")")
+                             "")))
+            ss)
+
+           (T
+            (sssetfirst nil ss)
+            (princ (strcat "\n[SEARCHATTVIS] Найдено " (itoa sel-n)
+                           " идентичных по "
+                           (if (= kind "vis") "видимости" "атрибутам")
+                           (if (> skipped 0)
+                             (strcat " (пропущено на слоях: " (itoa skipped) ")")
+                             "")))
+            ss))))))
+)
+
+;; Идентичные по видимости: тот же блок и то же состояние видимости
+(defun c:ПОИСКИДВИД ()
+  (ae-sv-same-run "vis")
+)
+
+(defun c:SEARCHSAMEVIS () (c:ПОИСКИДВИД))
+
+;; Идентичные по атрибутам: тот же блок, те же теги и значения
+(defun c:ПОИСКИДАТР ()
+  (ae-sv-same-run "attr")
+)
+
+(defun c:SEARCHSAMEATTR () (c:ПОИСКИДАТР))
+
+; Таблица команд: при ручной загрузке печатается сразу; при RELOAD
 ;; (тихая загрузка) строки регистрируются, а таблицу печатает RELOAD.
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
         ("SEARCHBLOCK / ПОИСКБЛОК" "поиск блоков: все блоки или выборка (Блок, Значение)" "3")
         ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)" "3")
-        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)" "3")))
+        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)" "3")
+        ("SEARCHSAMEVIS / ПОИСКИДВИД" "выделить блоки с той же видимостью" "4")
+        ("SEARCHSAMEATTR / ПОИСКИДАТР" "выделить блоки с теми же атрибутами" "4")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
@@ -1795,4 +2009,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP — ред. 3: поиск блоков, атрибутов и видимостей, выбор подобного. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК.
+;; SEARCHATTVIS.LSP — ред. 4: добавлены ПОИСКИДВИД (SEARCHSAMEVIS) и ПОИСКИДАТР (SEARCHSAMEATTR) — выделение идентичных вставок без окна. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК, ПОИСКИДВИД, ПОИСКИДАТР.
