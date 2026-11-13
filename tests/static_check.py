@@ -1185,6 +1185,91 @@ def check_crlf_tolerance() -> list[str]:
     return errors
 
 
+def check_search_mline() -> list[str]:
+    """Идентичные мультилинии: ПОИСКИДМЛИН / SEARCHSAMEMLINE.
+
+    Инварианты:
+    1. команда и алиас определены, движок отделён;
+    2. образец берётся из текущего выделения, а не из окна;
+    3. кандидаты — мультилинии пространства модели, не листы;
+    4. сравнение по имени стиля без учёта регистра, образец в результате всегда;
+    5. команда заканчивается (princ), набор кладётся в *ae-sv-ml-result*.
+    """
+    sv = ROOT / "Extraction/searchattvis.lsp"
+    if not sv.exists():
+        return ["Extraction/searchattvis.lsp: нет модуля поиска блоков"]
+    text = read_text(sv)
+    errors: list[str] = []
+
+    for name, what in (
+        ("c:ПОИСКИДМЛИН", "нет команды ПОИСКИДМЛИН"),
+        ("c:SEARCHSAMEMLINE", "нет алиаса SEARCHSAMEMLINE"),
+        ("ae-sv-ml-run", "нет движка ae-sv-ml-run"),
+        ("ae-sv-ml-source", "нет получения образца мультилинии"),
+        ("ae-sv-ml-style", "нет чтения имени стиля"),
+        ("ae-sv-all-model-mlines", "нет обхода мультилиний модели"),
+    ):
+        if _defun_body(text, name) is None:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+
+    source = _defun_body(text, "ae-sv-ml-source") or ""
+    if '(ssget "_I")' not in source:
+        errors.append(
+            "Extraction/searchattvis.lsp: образец мультилинии не берётся из текущего выделения")
+    if "ssgetfirst" not in source.lower():
+        errors.append(
+            "Extraction/searchattvis.lsp: не читается gripped-набор (ssgetfirst)")
+    if '"MLINE"' not in source:
+        errors.append(
+            "Extraction/searchattvis.lsp: образец не проверяется на тип MLINE")
+
+    walker = _defun_body(text, "ae-sv-all-model-mlines") or ""
+    if "*Model_Space" not in walker:
+        errors.append(
+            "Extraction/searchattvis.lsp: нет обхода пространства модели для мультилиний")
+    if "ae-sv-ml-model-p" not in walker:
+        errors.append(
+            "Extraction/searchattvis.lsp: обход не отсеивает листы")
+
+    run = _defun_body(text, "ae-sv-ml-run") or ""
+    if "ae-sv-same-norm" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: имя стиля сравнивается с учётом регистра")
+    if "ae-sv-layer-skip-p" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: слои не фильтруются общим правилом")
+    if "ssmemb" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: образец не добавляется в набор принудительно")
+    if "*ae-sv-ml-result*" not in run:
+        errors.append(
+            "Extraction/searchattvis.lsp: набор не кладётся в *ae-sv-ml-result*")
+
+    for name in ("c:ПОИСКИДМЛИН", "c:SEARCHSAMEMLINE"):
+        body = (_defun_body(text, name) or "").rstrip()
+        inner = body[:-1].rstrip() if body.endswith(")") else body
+        if not inner.endswith("(princ)"):
+            errors.append(
+                f"Extraction/searchattvis.lsp: {name} не заканчивается (princ) - "
+                "AutoCAD напечатает <Selection set: ...> в командной строке")
+
+    for need, what in (
+        ('"SEARCHSAMEMLINE / ПОИСКИДМЛИН"', "нет строки баннера ПОИСКИДМЛИН"),
+        ("Выберите мультилинию", "нет запроса мультилинии"),
+        ("мультилиний с этим стилем", "нет итоговой строки о числе найденных"),
+    ):
+        if need not in text:
+            errors.append(f"Extraction/searchattvis.lsp: {what}")
+
+    low = text.lower()
+    for bad in ("zp-", "zaporno"):
+        if bad in low:
+            errors.append(
+                f"Extraction/searchattvis.lsp: остался префикс чужого проекта «{bad}»")
+
+    return errors
+
+
 def check_lisp_lexical(files=None) -> list[str]:
     """Причины «синтаксической ошибки» при целом балансе скобок.
 
@@ -2570,6 +2655,7 @@ def main() -> int:
     errors += check_reload_chkall_on_error()
     errors += check_chkparens_helpers()
     errors += check_search_same()
+    errors += check_search_mline()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2631,7 +2717,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / reload-chkall-on-error / chkparens-helpers"
-        f" / search-same / call-arity / xls-marks"
+        f" / search-same / search-mline / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"

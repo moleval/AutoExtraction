@@ -3,6 +3,7 @@
 ;;; Команды: ПОИСКАТР (режим «Атрибуты»), ПОИСКВИД (режим «Видимость блока»),
 ;;; ПОИСКСПИСОК (без окна: перечень в командной строке),
 ;;; ПОИСКИДВИД / ПОИСКИДАТР (без окна: выделить идентичные вставки)
+;;; ПОИСКИДМЛИН (без окна: выделить мультилинии с тем же стилем)
 ;;; Окно: Extraction/searchattvis.dcl — одно на обе команды.
 ;;;
 ;;; Область: предварительное выделение (если есть) или весь чертёж.
@@ -22,6 +23,7 @@
 (setq *ae-sv-rows1* nil)       ; список блоков: (блок . вставки)
 (setq *ae-sv-rows2* nil)       ; список атрибутов/видимостей: (лейбл . вставки)
 (setq *ae-sv-same-result* nil)  ; набор последнего ПОИСКИДВИД / ПОИСКИДАТР
+(setq *ae-sv-ml-result* nil)    ; набор последнего ПОИСКИДМЛИН
 
 ;; ============================================================
 ;; Строки
@@ -2047,6 +2049,209 @@
   (princ)
 )
 
+;; ============================================================
+;; ИДЕНТИЧНЫЕ МУЛЬТИЛИНИИ (без окна)
+;;
+;; ПОИСКИДМЛИН / SEARCHSAMEMLINE — выделить мультилинии с тем же
+;; стилем, что у выбранной. Сравнивается имя стиля (DXF 2);
+;; регистр и лишние пробелы не важны. Поиск идёт по мультилиниям
+;; пространства модели, поэтому стиль, которым не нарисовано ни
+;; одной линии, в результат не попадает.
+;;
+;; Образец — одна мультилиния из текущего выделения. Слой —
+;; общее правило модуля; образец попадает в результат всегда.
+;; Команда заканчивается (princ), набор — в *ae-sv-ml-result*.
+;; ============================================================
+
+;; Имя стиля мультилинии. Основной чтец — su-mline-style-name из
+;; common/select-utils.lsp (грузится раньше этого модуля); если его
+;; нет, читаем DXF 2 сами. Пустое имя — nil.
+(defun ae-sv-ml-style (en / d v)
+  (if (member (ae-reload-sym-type (quote su-mline-style-name)) (quote (SUBR USUBR)))
+    (su-mline-style-name en)
+    (progn
+      (setq d (entget en))
+      (setq v (if d (cdr (assoc 2 d)) nil))
+      (if (= (ae-sv-trim v) "") nil (ae-sv-trim v))))
+)
+
+;; Число элементов в определении стиля: столько групп 49 в записи
+;; словаря ACAD_MLINESTYLE. Стиля нет в словаре — nil.
+(defun ae-sv-ml-elements (style / dic rec n)
+  (setq n nil)
+  (if (= (type style) (quote STR))
+    (if (setq dic (dictsearch (namedobjdict) "ACAD_MLINESTYLE"))
+      (if (setq rec (dictsearch (cdr (assoc -1 dic)) style))
+        (progn
+          (foreach g rec
+            (if (= (car g) 49) (setq n (1+ (if n n 0)))))))))
+  n
+)
+
+;; Мультилиния пространства модели (не лист)
+(defun ae-sv-ml-model-p (en / ed)
+  (setq ed (entget en))
+  (and ed
+       (= (cdr (assoc 0 ed)) "MLINE")
+       (not (= 1 (cdr (assoc 67 ed)))))
+)
+
+;; Все мультилинии пространства модели: обход блока *Model_Space,
+;; как у вставок; запасной путь — обычный фильтр, если блока нет.
+(defun ae-sv-all-model-mlines ( / blk e out ss i)
+  (setq blk (tblobjname "BLOCK" "*Model_Space"))
+  (if (null blk)
+    (progn
+      (setq out (quote ()))
+      (if (setq ss (ssget "_X" (quote ((0 . "MLINE") (410 . "Model")))))
+        (progn
+          (setq i 0)
+          (repeat (sslength ss)
+            (if (ae-sv-ml-model-p (ssname ss i))
+              (setq out (cons (ssname ss i) out)))
+            (setq i (1+ i)))))
+      (reverse out))
+    (progn
+      (setq out (quote ()))
+      (setq e (entnext blk))
+      (while e
+        (if (ae-sv-ml-model-p e) (setq out (cons e out)))
+        (setq e (entnext e)))
+      (reverse out)))
+)
+
+;; Одно число в строку без хвостовых нулей: 1.0 -> "1", 1.5 -> "1.5"
+(defun ae-sv-rtos1 (x / s)
+  (if (= (type x) (quote REAL))
+    (progn
+      (setq s (rtos x 2 4))
+      (while (and (> (strlen s) 1) (= (substr s (strlen s) 1) "0"))
+        (setq s (substr s 1 (1- (strlen s)))))
+      (if (= (substr s (strlen s) 1) ".") (setq s (substr s 1 (1- (strlen s)))))
+      s)
+    "1")
+)
+
+;; Строка о мультилинии-образце: стиль, число элементов, масштаб,
+;; выравнивание. Печатается перед итогом.
+(defun ae-sv-ml-sample (en style / ed sc ju name n)
+  (setq ed (entget en))
+  (setq sc (cdr (assoc 40 ed)))
+  (setq ju (cdr (assoc 70 ed)))
+  (setq name
+    (cond ((= ju 0) "верх")
+          ((= ju 1) "ноль")
+          ((= ju 2) "низ")
+          (T (itoa (if ju ju 0)))))
+  (setq n (ae-sv-ml-elements style))
+  (strcat "\n[SEARCHATTVIS] ПОИСКИДМЛИН: стиль \"" (ae-sv-nz style) "\""
+          (if n (strcat ", элементов " (itoa n)) "")
+          ", масштаб " (ae-sv-rtos1 sc)
+          ", выравнивание " name ".")
+)
+
+;; Одна мультилиния из текущего выделения.
+;; Порядок: ssget "_I" -> gripped/implied (ssgetfirst) -> запрос.
+(defun ae-sv-ml-source ( / ss grips en ed)
+  (setq ss (ssget "_I"))
+  (if (null ss)
+    (progn
+      (setq grips (ssgetfirst))
+      (setq ss (car grips))
+      (if (null ss) (setq ss (cadr grips)))))
+  (if (null ss)
+    (setq ss (ssget "\nВыберите мультилинию: " (quote ((0 . "MLINE"))))))
+  (cond
+    ((null ss)
+     (princ "\nМультилиния не выбрана. Поиск не запущен.")
+     nil)
+    ((/= (sslength ss) 1)
+     (princ (strcat "\nВыбрано объектов: " (itoa (sslength ss))
+                    ". Нужна ровно одна мультилиния. Поиск не запущен."))
+     nil)
+    (T
+     (setq en (ssname ss 0))
+     (setq ed (entget en))
+     (cond
+       ((/= (cdr (assoc 0 ed)) "MLINE")
+        (princ "\nВыбранный объект — не мультилиния. Поиск не запущен.")
+        nil)
+       ((= 1 (cdr (assoc 67 ed)))
+        (princ "\nМультилиния расположена на листе. Поиск идёт только по пространству модели.")
+        nil)
+       (T en))))
+)
+
+;; Движок ПОИСКИДМЛИН. Возвращает selection set или nil.
+(defun ae-sv-ml-run ( / en style ss all sel-n skipped e st)
+  (setq *ae-sv-ml-result* nil)
+  (setq en (ae-sv-ml-source))
+  (if (null en)
+    nil
+    (progn
+      (setq style (ae-sv-ml-style en))
+      (cond
+        ((null style)
+         (princ "\nУ мультилинии не задан стиль. Поиск не запущен.")
+         nil)
+
+        (T
+         (setq all (ae-sv-all-model-mlines))
+         (setq ss (ssadd) sel-n 0 skipped 0)
+         (foreach e all
+           (setq st (ae-sv-ml-style e))
+           (if (and st (= (ae-sv-same-norm st) (ae-sv-same-norm style)))
+             (if (or (eq e en) (not (ae-sv-layer-skip-p e)))
+               (progn
+                 (ssadd e ss)
+                 (setq sel-n (1+ sel-n)))
+               (setq skipped (1+ skipped)))))
+
+         ;; Образец обязан быть в наборе, даже если обход модели его
+         ;; не вернул (мультилиния внутри блока, чужое пространство).
+         (if (not (ssmemb en ss))
+           (progn
+             (ssadd en ss)
+             (setq sel-n (1+ sel-n))))
+
+         (cond
+           ((= sel-n 1)
+            (sssetfirst nil ss)
+            (princ (ae-sv-ml-sample en style))
+            (princ (strcat "\n[SEARCHATTVIS] Похожих мультилиний нет — выделена только исходная"
+                           (if (> skipped 0)
+                             (strcat " (пропущено на слоях: " (itoa skipped) ")")
+                             "")
+                           "."\n))
+            (setq *ae-sv-ml-result* ss)
+            ss)
+
+           (T
+            (sssetfirst nil ss)
+            (princ (ae-sv-ml-sample en style))
+            (princ (strcat "\n[SEARCHATTVIS] Найдено " (itoa (+ sel-n skipped))
+                           " мультилиний с этим стилем: выделено " (itoa sel-n)
+                           (if (> skipped 0)
+                             (strcat ", пропущено на слоях " (itoa skipped))
+                             "")
+                           "."\n))
+            (setq *ae-sv-ml-result* ss)
+            ss))))))
+)
+
+;; Идентичные по стилю мультилинии: команда и английский алиас.
+;; Последняя форма — (princ): иначе AutoCAD печатает набор как
+;; <Selection set: 9d>. Набор — в *ae-sv-ml-result*.
+(defun c:ПОИСКИДМЛИН ()
+  (ae-sv-ml-run)
+  (princ)
+)
+
+(defun c:SEARCHSAMEMLINE ()
+  (c:ПОИСКИДМЛИН)
+  (princ)
+)
+
 ; Таблица команд: при ручной загрузке печатается сразу; при RELOAD
 ;; (тихая загрузка) строки регистрируются, а таблицу печатает RELOAD.
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
@@ -2056,7 +2261,8 @@
         ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)" "3")
         ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)" "3")
         ("SEARCHSAMEVIS / ПОИСКИДВИД" "выделить блоки с той же видимостью" "5")
-        ("SEARCHSAMEATTR / ПОИСКИДАТР" "выделить блоки с теми же атрибутами" "5")))
+        ("SEARCHSAMEATTR / ПОИСКИДАТР" "выделить блоки с теми же атрибутами" "5")
+        ("SEARCHSAMEMLINE / ПОИСКИДМЛИН" "выделить мультилинии с тем же стилем" "6")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))
@@ -2064,4 +2270,4 @@
         (ae-banner-print)))))
 (princ)
 
-;; SEARCHATTVIS.LSP — ред. 5: ПОИСКИДВИД (SEARCHSAMEVIS) и ПОИСКИДАТР (SEARCHSAMEATTR) печатают образец и итог человеческим текстом и выходят через (princ), без <Selection set: …> в командной строке. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК, ПОИСКИДВИД, ПОИСКИДАТР.
+;; SEARCHATTVIS.LSP — ред. 6: ПОИСКИДВИД (SEARCHSAMEVIS) и ПОИСКИДАТР (SEARCHSAMEATTR) печатают образец и итог человеческим текстом и выходят через (princ), без <Selection set: …> в командной строке. Команды: ПОИСКБЛОК, ПОИСКАТР, ПОИСКВИД, ПОИСКСПИСОК, ПОИСКИДВИД, ПОИСКИДАТР, ПОИСКИДМЛИН.

@@ -87,10 +87,12 @@
 ;; AutoCAD не печатал <Selection set: ...> в командной строке, и потому сами
 ;; набор не возвращают. ¬озврат функции оставлен запасным путЄм дл€ старой загрузки.
 (defun sst-run (cmd en / res out)
-  (setq *ae-sv-same-result* nil)
+  (setq *ae-sv-same-result* nil *ae-sv-ml-result* nil)
   (sssetfirst nil (ssadd en))
   (setq res (vl-catch-all-apply cmd '()))
-  (setq out (if (= (type res) 'PICKSET) res *ae-sv-same-result*))
+  (setq out (cond ((= (type res) 'PICKSET) res)
+                  (*ae-sv-same-result* *ae-sv-same-result*)
+                  (T *ae-sv-ml-result*)))
   (sssetfirst nil nil)
   (if (vl-catch-all-error-p res) nil out)
 )
@@ -127,7 +129,7 @@
 
 (defun c:ѕќ»— “≈—“ ( / *error* suf layer frz blkA blkB blkP
                        enA enB enC enD enP enF made blks ok ss n pass fail skip
-                       dynEn ref rec good en)
+                       dynEn ref rec good en ml style mlStyle mlOK i)
 
   (defun *error* (msg)
     ;; ¬ обработчике ошибки только безопасное: удаление сущностей.
@@ -269,6 +271,30 @@
                               " (найдено " (itoa n)
                               ", все с тем же состо€нием: "
                               (if good "да" "нет") ")"))))
+
+             ;; --- 6. ћультилинии: только тот же стиль
+             (setq ml (ae-sv-all-model-mlines))
+             (if (null ml)
+               (progn
+                 (setq skip (1+ skip))
+                 (princ "\n[ѕќ»— “≈—“] 6) стиль мультилинии Ч SKIP: в чертеже нет мультилиний"))
+               (progn
+                 (setq en (car ml))
+                 (setq style (ae-sv-ml-style en))
+                 (setq ss (sst-run (quote c:ѕќ»— »ƒћЋ»Ќ) en))
+                 (setq n (sst-count ss))
+                 (setq mlOK (and (> n 0) (sst-has ss en)))
+                 (setq mlStyle (ae-sv-same-norm style))
+                 (setq i 0)
+                 (repeat (sst-count ss)
+                   (if (/= (ae-sv-same-norm (ae-sv-ml-style (ssname ss i))) mlStyle)
+                     (setq mlOK nil))
+                   (setq i (1+ i)))
+                 (if mlOK (setq pass (1+ pass)) (setq fail (1+ fail)))
+                 (princ (strcat "\n[ѕќ»— “≈—“] 6) стиль мультилинии"
+                                (if mlOK " Ч OK" " Ч FAIL")
+                                " (стиль \"" (if style style "?") "\", найдено " (itoa n)
+                                ", все с тем же стилем: " (if mlOK "да" "нет") ")"))))
            )
          )
        )
