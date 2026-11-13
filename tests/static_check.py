@@ -1266,17 +1266,29 @@ def check_stray_newline_escape() -> list[str]:
     return errors
 
 
+# Особые команды: у модуля своя строка и, дополнительно, строка команды,
+# которая живёт по своим правилам (своё окно, свой отчёт).
+BANNER_EXTRA_ROWS = {
+    "CLADDING": {"CLBLOCKS"},
+    "BLOCKRENAME": {"BLOCKCOPY / КОПИЯБЛОКА"},
+}
+
+
 def check_banner_modules() -> list[str]:
-    """Таблица RELOAD: одна укрупнённая строка на модуль.
+    """Таблица RELOAD: модуль описывается одной строкой, плюс особые команды.
 
     Таблица описывает модули («что делает модуль»), а не перечень его команд:
     у SEARCHATTVIS шесть команд, и шесть строк раздували таблицу и повторяли
-    то, что уже написано в шапке модуля и в требованиях. Правило общее:
-    каждый модуль регистрирует ровно одну строку, первая колонка начинается
-    с имени модуля, третья — редакция модуля.
+    то, что уже написано в шапке модуля и в требованиях. Правило: модуль
+    регистрирует одну строку (первая колонка начинается с имени модуля,
+    третья — редакция).
 
-    Исключение — сам `RELOAD`: его строки (`RELOAD`, `CHKALL`, `CHKALLFULL`,
-    `CHKFILE`, `CHKLOAD`) это сервисные команды, отдельных модулей у них нет.
+    Исключения:
+    - сам `RELOAD`: строки `RELOAD`, `CHKALL`, `CHKALLFULL`, `CHKFILE`,
+      `CHKLOAD` — сервисные команды, отдельных модулей у них нет;
+    - особые команды из `BANNER_EXTRA_ROWS` (`CLBLOCKS`, `BLOCKCOPY`): у них
+      своё окно и свой отчёт, поэтому они держат отдельную строку рядом с
+      строкой модуля.
     """
     errors: list[str] = []
     paths = list(lisp_files()) + [ROOT / "reload.lsp"]
@@ -1288,19 +1300,32 @@ def check_banner_modules() -> list[str]:
             if module.upper() == "RELOAD":
                 continue
             rows = _banner_rows(text, module)
-            if len(rows) != 1:
+            extra = BANNER_EXTRA_ROWS.get(module.upper(), set())
+            if len(rows) != 1 + len(extra):
                 errors.append(
                     f"{_rel(path)}: модуль {module} регистрирует {len(rows)} строк(и) - "
-                    "в таблице нужна одна укрупнённая строка на модуль")
+                    f"жду {1 + len(extra)}: строку модуля"
+                    + (f" и особые команды {sorted(extra)}" if extra else ""))
                 continue
-            row = rows[0]
-            if not row[0].upper().startswith(module.upper()):
+            own = [r for r in rows if r[0].upper().startswith(module.upper())]
+            if len(own) != 1:
                 errors.append(
-                    f"{_rel(path)}: строка модуля {module} начинается с «{row[0]}» - "
-                    "в первой колонке должно быть имя модуля")
-            if len(row) < 3 or not row[2].strip():
+                    f"{_rel(path)}: в таблице нет ровно одной строки модуля {module} "
+                    f"(первая колонка с его имени): {[r[0] for r in rows]}")
+            for r in rows:
+                if len(r) < 3 or not r[2].strip():
+                    errors.append(
+                        f"{_rel(path)}: у строки «{r[0]}» не заполнена редакция")
+            if extra:
+                names = {r[0] for r in rows if r not in own}
+                if names != extra:
+                    errors.append(
+                        f"{_rel(path)}: особые команды модуля {module} - "
+                        f"{sorted(names)}, ждали {sorted(extra)}")
+            elif len(rows) > 1:
                 errors.append(
-                    f"{_rel(path)}: у модуля {module} не заполнена редакция")
+                    f"{_rel(path)}: у модуля {module} лишние строки: "
+                    f"{[r[0] for r in rows if r not in own]}")
     return errors
 
 

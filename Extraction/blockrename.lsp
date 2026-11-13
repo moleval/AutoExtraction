@@ -1244,5 +1244,6 @@
 ;; BLOCKRENAME.LSP загружен (ред. 4: копия определения через ObjectDBX, без WBLOCK). Команды: BLOCKRENAME, ПЕРЕИМЕНОВАТЬ
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (ae-banner-add "BLOCKRENAME" '(
-      ("BLOCKRENAME / ПЕРЕИМЕНОВАТЬ" "копия и переименование блока" "4"))))
+      ("BLOCKCOPY / КОПИЯБЛОКА" "копия блока (панель «Блоки»)" "4")
+       ("BLOCKRENAME / ПЕРЕИМЕНОВАТЬ" "переименование блока" "2"))))
 (princ)
