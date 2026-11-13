@@ -38,7 +38,10 @@
 )
 
 (defun ae-sv-nz (s)
-  (if (= s "") "?" s)
+  ;; nil тоже печатается как "?": иначе (= s "") падает с stringp nil
+  (cond ((null s) "?")
+        ((= s "") "?")
+        (T s))
 )
 
 (defun ae-sv-has-mask-p (s)
@@ -2222,7 +2225,7 @@
                            (if (> skipped 0)
                              (strcat " (пропущено на слоях: " (itoa skipped) ")")
                              "")
-                           "."\n))
+                           ".\n"))
             (setq *ae-sv-ml-result* ss)
             ss)
 
@@ -2234,7 +2237,7 @@
                            (if (> skipped 0)
                              (strcat ", пропущено на слоях " (itoa skipped))
                              "")
-                           "."\n))
+                           ".\n"))
             (setq *ae-sv-ml-result* ss)
             ss))))))
 )
@@ -2257,12 +2260,12 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
-        ("SEARCHBLOCK / ПОИСКБЛОК" "поиск блоков: все блоки или выборка (Блок, Значение)" "3")
-        ("SEARCHATTR / ПОИСКАТР" "поиск блоков по атрибутам (окно)" "3")
-        ("SEARCHVIS / ПОИСКВИД" "поиск блоков по видимостям (окно)" "3")
-        ("SEARCHSAMEVIS / ПОИСКИДВИД" "выделить блоки с той же видимостью" "5")
-        ("SEARCHSAMEATTR / ПОИСКИДАТР" "выделить блоки с теми же атрибутами" "5")
-        ("SEARCHSAMEMLINE / ПОИСКИДМЛИН" "выделить мультилинии с тем же стилем" "6")))
+        ("SEARCHBLOCK / ПОИСКБЛОК" "поиск блоков (окно)" "3")
+        ("SEARCHATTR / ПОИСКАТР" "поиск по атрибутам (окно)" "3")
+        ("SEARCHVIS / ПОИСКВИД" "поиск по видимостям (окно)" "3")
+        ("SEARCHSAMEVIS / ПОИСКИДВИД" "идентичные по видимости" "5")
+        ("SEARCHSAMEATTR / ПОИСКИДАТР" "идентичные по атрибутам" "5")
+        ("SEARCHSAMEMLINE / ПОИСКИДМЛИН" "мультилинии по стилю" "6")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))

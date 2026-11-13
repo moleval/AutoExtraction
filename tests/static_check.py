@@ -1185,6 +1185,52 @@ def check_crlf_tolerance() -> list[str]:
     return errors
 
 
+def check_stray_newline_escape() -> list[str]:
+    """Никаких escape-последовательностей вне строковых литералов.
+
+    Реальный дефект (ПОИСКИДМЛИН, ред. 6): строка кончалась закрывающей
+    кавычкой, а перевод строки оставался в коде символом. AutoLISP читал его
+    как символ-атом, strcat получал nil, и команда падала с «неверный тип
+    аргумента: stringp nil» уже после выделения результата: пользователь
+    видел строку об образце и ошибку вместо итога.
+
+    Правило: обратный слэш допустим только ВНУТРИ строки, где он и означает
+    escape. Вне строк в AutoLISP он встречается лишь в экзотических именах
+    символов, и в проекте таких нет - проверено сканированием всех .lsp.
+    """
+    errors: list[str] = []
+    bs = chr(92)
+    nl = chr(10)
+    for path in lisp_files():
+        text = read_text(path)
+        i, line, instr = 0, 1, False
+        while i < len(text):
+            ch = text[i]
+            if ch == nl:
+                line += 1
+            if instr:
+                if ch == bs:
+                    i += 2
+                    continue
+                if ch == '"':
+                    instr = False
+            else:
+                if ch == ";":
+                    j = text.find(nl, i)
+                    if j < 0:
+                        break
+                    i = j
+                    continue
+                if ch == '"':
+                    instr = True
+                elif ch == bs:
+                    errors.append(
+                        _rel(path) + ":" + str(line) + ": обратный слэш вне строки - "
+                        "AutoLISP прочитает как символ, strcat получит nil")
+            i += 1
+    return errors
+
+
 def check_search_mline() -> list[str]:
     """Идентичные мультилинии: ПОИСКИДМЛИН / SEARCHSAMEMLINE.
 
@@ -2656,6 +2702,7 @@ def main() -> int:
     errors += check_chkparens_helpers()
     errors += check_search_same()
     errors += check_search_mline()
+    errors += check_stray_newline_escape()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2717,7 +2764,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / reload-chkall-on-error / chkparens-helpers"
-        f" / search-same / search-mline / call-arity / xls-marks"
+        f" / search-same / search-mline / string-escape / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"
