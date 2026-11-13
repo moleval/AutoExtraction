@@ -34,7 +34,9 @@
 - Заполнение: `ZAPOLNENIE`
 - Раскрой хлыста: `CUTLINE`; раскрой листа: `CUTSHEET`
 - Панель «Блоки»: `BLOCKCOPY` (копия), `BLOCKRENAME` (переименование)
-- Поиск: `SEARCHBLOCK` / `ПОИСКБЛОК` (все блоки), `SEARCHATTR` / `ПОИСКАТР` (по атрибутам), `SEARCHVIS` / `ПОИСКВИД` (по видимостям)
+- Поиск (окно): `SEARCHBLOCK` / `ПОИСКБЛОК`, `SEARCHATTR` / `ПОИСКАТР`, `SEARCHVIS` / `ПОИСКВИД`
+- Идентичные выделенному (без окна): `SEARCHSAMEVIS` / `ПОИСКИДВИД`, `SEARCHSAMEATTR` / `ПОИСКИДАТР`,
+  `SEARCHSAMEMLINE` / `ПОИСКИДМЛИН`
 
 ## Плагины
 

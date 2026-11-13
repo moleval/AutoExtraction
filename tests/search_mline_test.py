@@ -205,8 +205,10 @@ def main():
         inner = body[:-1].rstrip() if body.endswith(")") else body
         check(f"{cmd} заканчивается (princ)", inner.endswith("(princ)"))
 
-    check("команда есть в таблице команд",
-          '"SEARCHSAMEMLINE / ПОИСКИДМЛИН"' in text)
+    check("в таблице команд одна строка модуля SEARCHATTVIS",
+          '"SEARCHATTVIS" "поиск и выбор блоков, атрибутов, видимостей, млиний"' in text)
+    check("строка-команда в таблицу не добавлена",
+          '"SEARCHSAMEMLINE / ПОИСКИДМЛИН"' not in text)
     check("ревизия модуля 6", "ред. 6" in text)
     check("нет префиксов чужого проекта",
           "zp-" not in text.lower() and "zaporno" not in text.lower())

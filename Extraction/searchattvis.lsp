@@ -2260,12 +2260,7 @@
 (if (member (ae-reload-sym-type 'ae-banner-add) '(SUBR USUBR))
   (progn
     (ae-banner-add "SEARCHATTVIS" '(
-        ("SEARCHBLOCK / ПОИСКБЛОК" "поиск блоков (окно)" "3")
-        ("SEARCHATTR / ПОИСКАТР" "поиск по атрибутам (окно)" "3")
-        ("SEARCHVIS / ПОИСКВИД" "поиск по видимостям (окно)" "3")
-        ("SEARCHSAMEVIS / ПОИСКИДВИД" "идентичные по видимости" "5")
-        ("SEARCHSAMEATTR / ПОИСКИДАТР" "идентичные по атрибутам" "5")
-        ("SEARCHSAMEMLINE / ПОИСКИДМЛИН" "мультилинии по стилю" "6")))
+        ("SEARCHATTVIS" "поиск и выбор блоков, атрибутов, видимостей, млиний" "6")))
     (if (not (and (boundp '*ae-reload-quiet*) *ae-reload-quiet*))
       (progn
         (setq *ae-banner-items* (list (assoc "SEARCHATTVIS" *ae-banner-items*)))

@@ -1185,6 +1185,41 @@ def check_crlf_tolerance() -> list[str]:
     return errors
 
 
+def _banner_rows(text: str, module: str) -> list[list[str]]:
+    """Строки (ae-banner-add "<module>" '(...)) как списки строк.
+
+    Таблица RELOAD описывает МОДУЛИ, а не их команды: у модуля должна быть
+    одна укрупнённая строка (имя модуля, краткое описание, редакция). Разбор
+    идёт по форме, поэтому лишняя строка-команда в том же вызове видна.
+    """
+    start = text.find(f'(ae-banner-add "{module}"')
+    if start < 0:
+        return []
+    i = text.find("(", start + len("(ae-banner-add"))
+    depth, j = 0, i
+    while j < len(text):
+        ch = text[j]
+        if ch == '"':
+            j += 1
+            while j < len(text) and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                j += 1
+                break
+        j += 1
+    block = text[i:j]
+    rows: list[list[str]] = []
+    for line in block.split("\n"):
+        vals = re.findall(r'"([^"]*)"', line)
+        if len(vals) >= 2 and line.strip().startswith("("):
+            rows.append(vals)
+    return rows
+
+
 def check_stray_newline_escape() -> list[str]:
     """Никаких escape-последовательностей вне строковых литералов.
 
@@ -1228,6 +1263,44 @@ def check_stray_newline_escape() -> list[str]:
                         _rel(path) + ":" + str(line) + ": обратный слэш вне строки - "
                         "AutoLISP прочитает как символ, strcat получит nil")
             i += 1
+    return errors
+
+
+def check_banner_modules() -> list[str]:
+    """Таблица RELOAD: одна укрупнённая строка на модуль.
+
+    Таблица описывает модули («что делает модуль»), а не перечень его команд:
+    у SEARCHATTVIS шесть команд, и шесть строк раздували таблицу и повторяли
+    то, что уже написано в шапке модуля и в требованиях. Правило общее:
+    каждый модуль регистрирует ровно одну строку, первая колонка начинается
+    с имени модуля, третья — редакция модуля.
+
+    Исключение — сам `RELOAD`: его строки (`RELOAD`, `CHKALL`, `CHKALLFULL`,
+    `CHKFILE`, `CHKLOAD`) это сервисные команды, отдельных модулей у них нет.
+    """
+    errors: list[str] = []
+    paths = list(lisp_files()) + [ROOT / "reload.lsp"]
+    for path in paths:
+        if not path.exists():
+            continue
+        text = read_text(path)
+        for module in re.findall(r'\(ae-banner-add "([^"]+)"', text):
+            if module.upper() == "RELOAD":
+                continue
+            rows = _banner_rows(text, module)
+            if len(rows) != 1:
+                errors.append(
+                    f"{_rel(path)}: модуль {module} регистрирует {len(rows)} строк(и) - "
+                    "в таблице нужна одна укрупнённая строка на модуль")
+                continue
+            row = rows[0]
+            if not row[0].upper().startswith(module.upper()):
+                errors.append(
+                    f"{_rel(path)}: строка модуля {module} начинается с «{row[0]}» - "
+                    "в первой колонке должно быть имя модуля")
+            if len(row) < 3 or not row[2].strip():
+                errors.append(
+                    f"{_rel(path)}: у модуля {module} не заполнена редакция")
     return errors
 
 
@@ -1300,7 +1373,7 @@ def check_search_mline() -> list[str]:
                 "AutoCAD напечатает <Selection set: ...> в командной строке")
 
     for need, what in (
-        ('"SEARCHSAMEMLINE / ПОИСКИДМЛИН"', "нет строки баннера ПОИСКИДМЛИН"),
+        ('"SEARCHATTVIS"', "нет строки баннера модуля SEARCHATTVIS"),
         ("Выберите мультилинию", "нет запроса мультилинии"),
         ("мультилиний с этим стилем", "нет итоговой строки о числе найденных"),
     ):
@@ -2402,8 +2475,7 @@ def check_search_same() -> list[str]:
             "Extraction/searchattvis.lsp: нет выделения результата (sssetfirst)")
 
     for need, what in (
-        ('"SEARCHSAMEVIS / ПОИСКИДВИД"', "нет строки баннера ПОИСКИДВИД"),
-        ('"SEARCHSAMEATTR / ПОИСКИДАТР"', "нет строки баннера ПОИСКИДАТР"),
+        ('"SEARCHATTVIS"', "нет строки баннера модуля SEARCHATTVIS"),
         ("У блока нет параметра видимости", "нет сообщения об отсутствии видимости"),
         ("У блока нет атрибутов", "нет сообщения об отсутствии атрибутов"),
         ("Похожих блоков нет", "нет сообщения «найден только исходный»"),
@@ -2468,6 +2540,29 @@ def check_search_same() -> list[str]:
         errors.append(
             "Extraction/searchattvis.lsp: набор не кладётся в *ae-sv-same-result* - "
             "после (princ) команда не сможет отдать результат")
+
+    # Таблица RELOAD описывает модуль одной укрупнённой строкой.
+    # Шесть строк на шесть команд раздували таблицу и дублировали сведения:
+    # команды уже перечислены в шапке модуля и в docs/requirements.md §15.
+    rows = _banner_rows(text, "SEARCHATTVIS")
+    if len(rows) != 1:
+        errors.append(
+            f"Extraction/searchattvis.lsp: в таблице команд {len(rows)} строк(и) "
+            "на модуль SEARCHATTVIS - нужна одна укрупнённая строка")
+    else:
+        row = rows[0]
+        if row[0] != "SEARCHATTVIS":
+            errors.append(
+                "Extraction/searchattvis.lsp: в первой колонке таблицы должно быть имя "
+                f"модуля, а стоит «{row[0]}»")
+        if len(row) < 3 or not row[2].strip():
+            errors.append(
+                "Extraction/searchattvis.lsp: у строки модуля не заполнена редакция")
+        for word in ("блоков", "атрибутов", "видимостей"):
+            if word not in row[1]:
+                errors.append(
+                    f"Extraction/searchattvis.lsp: в описании модуля нет слова «{word}» - "
+                    "строка перестала быть укрупнённой")
 
     return errors
 
@@ -2703,6 +2798,7 @@ def main() -> int:
     errors += check_search_same()
     errors += check_search_mline()
     errors += check_stray_newline_escape()
+    errors += check_banner_modules()
     errors += check_lisp_lexical()
 
     # tests/*.lsp: баланс и лексика (chkparens.lsp загружает RELOAD)
@@ -2764,7 +2860,7 @@ def main() -> int:
         f" / reload-version-line / defun-dup-in-file / dialog-layers / dcl-gaps"
         f" / plugins-balance / plugins-lexical / reload-plugins-guard"
         f" / chkparens-plugins-guard / reload-chkall-on-error / chkparens-helpers"
-        f" / search-same / search-mline / string-escape / call-arity / xls-marks"
+        f" / search-same / search-mline / string-escape / banner-modules / call-arity / xls-marks"
         f" / mark-labels / fill-allowance / block-length / ps-encoding"
         f" / crlf-tolerance / console-encoding / settings-save"
         f" / subsystem-numbering / subsystem-separator / element-name-shared"
